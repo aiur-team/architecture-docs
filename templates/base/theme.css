@@ -1,0 +1,52 @@
+/* ============================================================
+   Architecture doc — design tokens
+   Three theme states: bare :root is light, prefers-color-scheme
+   is guarded so an explicit light choice beats a dark OS, and
+   [data-theme="dark"] lets the toggle win in both directions.
+   Never declare a colour only inside a media or [data-theme]
+   block: it will not apply in the un-stamped default state.
+   ============================================================ */
+:root{
+  --bg:#F5F6F8; --surface:#FFFFFF; --surface-2:#EEF1F4; --surface-3:#E4E9EE;
+  --ink:#15181E; --ink-2:#49525F; --ink-3:#7A8492;
+  --border:#E2E6EB; --border-strong:#CBD2DA;
+
+  /* accent: the brand. One place to rebrand a whole document. */
+  --accent:#FF0420; --accent-soft:#FFE7EA;
+
+  /* semantic trio. The instance decides what these MEAN and says
+     so in a legend. Compliance uses them as hard / best-effort / bypass. */
+  --ok:#0E7C5A;   --ok-soft:#E4F2EC;
+  --warn:#A85B00; --warn-soft:#FBF0DF;
+  --risk:#C0122A; --risk-soft:#FCE8EC;
+
+  --shadow:0 1px 2px rgba(20,24,30,.04), 0 8px 24px rgba(20,24,30,.06);
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --measure:68ch; --wrap:1120px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0C0F13; --surface:#14181E; --surface-2:#1B212A; --surface-3:#232B36;
+    --ink:#E7EAEE; --ink-2:#A6AEBA; --ink-3:#727B88;
+    --border:#262D36; --border-strong:#39424E;
+    --accent:#FF5468; --accent-soft:#35141A;
+    --ok:#3DD68C;   --ok-soft:#0E2B21;
+    --warn:#E4A73C; --warn-soft:#2E2210;
+    --risk:#FF7A6B; --risk-soft:#33150F;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0C0F13; --surface:#14181E; --surface-2:#1B212A; --surface-3:#232B36;
+  --ink:#E7EAEE; --ink-2:#A6AEBA; --ink-3:#727B88;
+  --border:#262D36; --border-strong:#39424E;
+  --accent:#FF5468; --accent-soft:#35141A;
+  --ok:#3DD68C;   --ok-soft:#0E2B21;
+  --warn:#E4A73C; --warn-soft:#2E2210;
+  --risk:#FF7A6B; --risk-soft:#33150F;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+  color-scheme:dark;
+}

@@ -1,0 +1,73 @@
+<!--
+id: architecture
+label: Architecture
+summary: A read is unauthenticated and cheap. A write is authenticated and rare. That asymmetry is the design.
+nav: Architecture
+-->
+<!-- peek -->
+<div class="seq">
+  <div><span class="sq">1</span></div><div class="sa">Build</div><div class="sm"><b>asks for a key</b><br>GET /cas/{digest}</div><div class="sa">Cache</div>
+  <div><span class="sq">2</span></div><div class="sa">Cache</div><div class="sm"><b>302 to a signed URL</b><br>expires in 60s</div><div class="sa">Build</div>
+  <div><span class="sq">3</span></div><div class="sa">Build</div><div class="sm"><b>on miss, compiles and offers the result</b><br>POST /cas with an identity token</div><div class="sa">Cache</div>
+</div>
+<!-- body -->
+
+<h2>Reads are open, writes are proved</h2>
+
+<p>The two paths have almost nothing in common, and merging them is the design error to avoid. A read is
+the hot path: it happens thousands of times a build, it must be fast, and the worst case of serving it to
+the wrong person is disclosure of a build artifact. A write is rare, and the worst case is a poisoned
+entry that every future build trusts.</p>
+
+<div class="grid2">
+  <div class="card">
+    <p class="kicker">Read path</p>
+    <h4>Redirect, never proxy</h4>
+    <p>The service answers with a short-lived signed URL and gets out of the way. Bytes never traverse the
+    application, so throughput is the object store's problem rather than ours.</p>
+  </div>
+  <div class="card">
+    <p class="kicker">Write path</p>
+    <h4>Only from a verified builder</h4>
+    <p>A write carries a workload identity token that names the repository and the commit. A developer
+    laptop may read everything and write nothing.</p>
+  </div>
+</div>
+
+<h2>Entries age out by value, not by date</h2>
+
+<p>A fixed time-to-live throws away the entries worth keeping. The base image layer that every build reads
+is old and hot; a branch build's output is new and will never be read again. Eviction is scored on last
+access, not on age.</p>
+
+<div class="bands">
+  <div class="band ok"><span class="rng">&lt; 7d</span><span class="act">Keep<em>read at least twice</em></span><span class="pill ok">retain</span></div>
+  <div class="band warn"><span class="rng">7&ndash;30d</span><span class="act">Keep if read since upload</span><span class="pill warn">score</span></div>
+  <div class="band risk"><span class="rng">&gt; 30d</span><span class="act">Evict<em>never read after upload</em></span><span class="pill risk">evict</span></div>
+</div>
+
+<p>The middle band is the one that matters. An entry uploaded and never read is the signature of a key
+that is too specific — it means some volatile input crept into the digest. <b>A rising count in that band
+is a bug report about the key function</b>, not a capacity problem, and the dashboard should say so.</p>
+
+<details class="dx">
+  <summary><span class="dxn">A</span>Why not just use the build tool's own remote cache?</summary>
+  <div class="dxb">
+    <p>Two reasons, and the first is not the interesting one. The build tools in use here disagree about
+    key derivation, so a shared store behind them would hold two incompatible namespaces.</p>
+    <p>The real reason is that their write paths trust the client. Any developer who can read the cache can
+    write to it, which is acceptable inside one team and not acceptable once CI trusts the result. The
+    write-side identity check is the part we cannot delegate.</p>
+  </div>
+</details>
+
+<details class="dx">
+  <summary><span class="dxn">B</span>What happens when the cache is down?</summary>
+  <div class="dxb">
+    <p>Builds get slower and nothing fails. The client treats every cache error — unreachable, slow,
+    malformed — as a miss, and a miss is just a normal build.</p>
+    <p>This must be load-tested rather than assumed. The failure that actually happens is not an outage
+    but a cache that answers in 30 seconds, and a client without a short timeout turns a degraded cache
+    into a broken build.</p>
+  </div>
+</details>

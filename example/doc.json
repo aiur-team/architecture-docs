@@ -1,0 +1,13 @@
+{
+  "title": "Remote Build Cache",
+  "eyebrow": "Example document · Architecture docs",
+  "status": "Worked example",
+  "heading": "A remote build cache, and why the hard part is trust",
+  "lede": "A complete architecture document, written to be read as one. It is the reference for what this template produces and for how an argument is supposed to be structured — the subject is invented, the shape is not.",
+  "meta": {
+    "Owner": "you",
+    "Status": "Illustrative",
+    "Read next": "templates/README.md"
+  },
+  "footer": "Example document · built by templates/build · the subject is fictional"
+}

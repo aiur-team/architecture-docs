@@ -1,0 +1,18 @@
+<!--
+id: structure
+label: Structure
+summary: A document is a masthead, a sticky nav, and a stack of collapsible sections. One section per file, ordered by filename.
+-->
+<!-- body -->
+      <h2>How a document is assembled</h2>
+      <p>Each section file carries a metadata comment, an optional <code>&lt;!-- peek --&gt;</code> block shown while the section is closed, and a <code>&lt;!-- body --&gt;</code> block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.</p>
+      <pre>&lt;!--
+id: architecture
+label: Architecture
+summary: One or two sentences, shown while the section is closed.
+--&gt;
+&lt;!-- peek --&gt;
+  ...the one diagram that makes this section worth opening...
+&lt;!-- body --&gt;
+  ...the open markup...</pre>
+      <p><strong>Use the peek well.</strong> It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line.</p>

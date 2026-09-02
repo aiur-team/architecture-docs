@@ -1,0 +1,390 @@
+/**
+ * Compose an architecture doc into one self-contained HTML file.
+ *
+ * A published artifact runs under a strict CSP that blocks every external host
+ * except the font CDN, so relative CSS and JS fail silently. This inlines
+ * everything into one file.
+ *
+ * Zero runtime dependencies, on purpose. `tsc` is the only devDependency, so a
+ * writer never installs a package to build a document.
+ */
+
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const CHEVRON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+export const USAGE = `docbuild — compose an architecture doc into one self-contained HTML file
+
+    docbuild <instance>
+
+An instance directory holds:
+    doc.json          document metadata
+    sections/*.html   one file per section, ordered by filename
+    extra.css         optional, per-document CSS appended last
+    dist/             build output
+
+A section file starts with a metadata comment, then an optional peek block,
+then the body:
+
+    <!--
+    id: architecture
+    label: Architecture
+    summary: One or two sentences, shown while the section is closed.
+    -->
+    <!-- peek -->
+      ...closed-state markup...
+    <!-- body -->
+      ...open markup...
+`;
+
+/** Raised for every expected failure, so the CLI never prints a stack trace. */
+export class BuildError extends Error {}
+
+const fail = (message: string): never => {
+  throw new BuildError(message);
+};
+
+// ------------------------------------------------------------------- doc.json
+
+/**
+ * `doc.json` is a flat map of strings plus one nested `meta` object.
+ *
+ * The Rust builder this replaces hand-rolled a scanner because Rust has no
+ * std JSON. `JSON.parse` is exact here, and it removes the three gaps that
+ * scanner had: no array support, non-string values reading as absent, and
+ * manual UTF-8 length handling.
+ */
+export interface Doc {
+  get(key: string): string | undefined;
+  getOr(key: string, fallback: string): string;
+  meta(): Array<[string, string]>;
+}
+
+export function parseDoc(src: string, label: string): Doc {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(src);
+  } catch (e) {
+    return fail(`${label}: ${(e as Error).message}`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return fail(`${label}: expected a JSON object`);
+  }
+  const fields = raw as Record<string, unknown>;
+
+  // Only string values are addressable, matching the previous builder: a
+  // non-string is treated as present-but-empty rather than crashing a build.
+  const get = (key: string): string | undefined => {
+    const v = fields[key];
+    if (typeof v === "string") return v;
+    if (v !== undefined && !(typeof v === "object" && v !== null)) return "";
+    return undefined;
+  };
+
+  return {
+    get,
+    getOr: (key, fallback) => get(key) ?? fallback,
+    meta: () => {
+      const m = fields.meta;
+      if (m === null || typeof m !== "object" || Array.isArray(m)) return [];
+      return Object.entries(m as Record<string, unknown>)
+        .filter((pair): pair is [string, string] => typeof pair[1] === "string");
+    },
+  };
+}
+
+// ------------------------------------------------------------------- sections
+
+export interface Section {
+  id: string;
+  label: string;
+  summary: string;
+  nav: string;
+  peek: string;
+  body: string;
+  /** Source filename. The manifest row for inline editing needs it. */
+  file: string;
+}
+
+const BODY_MARKER = "<!-- body -->";
+
+export function parseSection(path: string): Section {
+  const name = path.split(sep).pop() ?? path;
+  const raw = read(path, name);
+
+  const open = raw.indexOf("<!--");
+  if (open === -1) fail(`${name}: missing the metadata comment at the top`);
+  if (raw.slice(0, open).trim() !== "") fail(`${name}: content before the metadata comment`);
+
+  const closeAt = raw.indexOf("-->", open);
+  if (closeAt === -1) fail(`${name}: metadata comment is never closed`);
+
+  let id: string | undefined;
+  let label: string | undefined;
+  let summary: string | undefined;
+  let nav: string | undefined;
+  for (const line of raw.slice(open + 4, closeAt).split("\n")) {
+    const trimmed = line.trim();
+    const at = trimmed.indexOf(":");
+    if (at === -1) continue;
+    const key = trimmed.slice(0, at).trim();
+    const value = trimmed.slice(at + 1).trim();
+    if (key === "id") id = value;
+    else if (key === "label") label = value;
+    else if (key === "summary") summary = value;
+    else if (key === "nav") nav = value;
+  }
+  if (id === undefined) fail(`${name}: metadata is missing 'id'`);
+  if (label === undefined) fail(`${name}: metadata is missing 'label'`);
+  if (summary === undefined) fail(`${name}: metadata is missing 'summary'`);
+
+  const rest = raw.slice(closeAt + 3);
+  let peek = "";
+  let body: string;
+  const at = rest.indexOf(BODY_MARKER);
+  if (at !== -1) {
+    peek = rest.slice(0, at).split("<!-- peek -->").join("").trim();
+    body = rest.slice(at + BODY_MARKER.length).trim();
+  } else {
+    body = rest.trim();
+  }
+  if (body === "") fail(`${name}: the body is empty`);
+
+  return { id: id!, label: label!, summary: summary!, nav: nav ?? label!, peek, body, file: name };
+}
+
+export function renderSection(s: Section): string {
+  const peek = s.peek === "" ? "" : `\n        <div class="sec-peek">${s.peek}</div>`;
+  return `<section id="${s.id}">
+  <details class="sec">
+    <summary>
+      <div class="wrap">
+        <div class="sec-top">
+          <p class="sec-label">${s.label}</p>
+          <span class="sec-toggle"><span>Expand</span>${CHEVRON}</span>
+        </div>
+        <p class="sec-sum">${s.summary}</p>${peek}
+      </div>
+    </summary>
+    <div class="sec-body"><div class="wrap">
+${s.body}
+    </div></div>
+  </details>
+</section>`;
+}
+
+// ---------------------------------------------------------------------- build
+
+function read(path: string, label = path): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (e) {
+    return fail(`${label}: ${(e as NodeJS.ErrnoException).message}`);
+  }
+}
+
+const isDir = (p: string): boolean => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Find the base assets. Two layouts are supported on purpose: a repository
+ * that vendors `templates/base/`, and an installed package that carries
+ * `base/` beside its own code. The package must keep working after it is
+ * split out of the repository it grew up in.
+ */
+export function resolveBase(root: string): string {
+  const vendored = join(root, "templates", "base");
+  if (existsSync(join(vendored, "layout.html"))) return vendored;
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [join(here, "..", "base"), join(here, "..", "..", "base")]) {
+    if (existsSync(join(candidate, "layout.html"))) return resolve(candidate);
+  }
+  return fail("cannot find base assets: no templates/base/layout.html and none beside the package");
+}
+
+/** Walk up for the marker directory, so the CLI works from any subdirectory. */
+export function repoRoot(from: string = process.cwd()): string {
+  let p = resolve(from);
+  for (;;) {
+    if (existsSync(join(p, "templates", "base", "layout.html"))) return p;
+    const up = dirname(p);
+    if (up === p) return resolve(from);
+    p = up;
+  }
+}
+
+export function build(root: string, instance: string): string {
+  const inst = join(root, instance);
+  if (!isDir(inst)) fail(`no such instance directory: ${instance}`);
+  const base = resolveBase(root);
+
+  const doc = parseDoc(read(join(inst, "doc.json")), `${instance}/doc.json`);
+  const title = doc.get("title");
+  if (title === undefined) fail(`${instance}/doc.json: missing 'title'`);
+
+  const dir = join(inst, "sections");
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    return fail(`${instance}/sections: ${(e as NodeJS.ErrnoException).message}`);
+  }
+  const files = names
+    .filter((n) => n.endsWith(".html"))
+    .map((n) => join(dir, n))
+    .sort();
+  if (files.length === 0) fail(`${instance}: no section files under sections/`);
+
+  const sections = files.map(parseSection);
+
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const s of sections) {
+    if (seen.has(s.id)) dupes.add(s.id);
+    seen.add(s.id);
+  }
+  if (dupes.size > 0) fail(`duplicate section ids: ${[...dupes].sort().join(", ")}`);
+
+  const nav = sections.map((s) => `<a href="#${s.id}">${s.nav}</a>`).join("\n    ");
+  const meta = doc
+    .meta()
+    .map(([k, v]) => `<span><b>${k}</b> &nbsp;${v}</span>`)
+    .join("\n      ");
+  const bodies = sections.map(renderSection).join("\n\n");
+
+  const optional = (p: string): string => (existsSync(p) ? read(p) : "");
+
+  let html = read(join(base, "layout.html"));
+  const subs: Array<[string, string]> = [
+    ["{{TITLE}}", title!],
+    ["{{THEME_CSS}}", read(join(base, "theme.css"))],
+    ["{{COMPONENTS_CSS}}", read(join(base, "components.css"))],
+    ["{{EXTRA_CSS}}", optional(join(inst, "extra.css"))],
+    ["{{EYEBROW}}", doc.getOr("eyebrow", "")],
+    ["{{STATUS}}", doc.getOr("status", "")],
+    ["{{HEADING}}", doc.getOr("heading", title!)],
+    ["{{LEDE}}", doc.getOr("lede", "")],
+    ["{{META}}", meta],
+    ["{{NAV}}", nav],
+    ["{{SECTIONS}}", bodies],
+    ["{{FOOTER}}", doc.getOr("footer", "")],
+    ["{{APP_JS}}", read(join(base, "app.js"))],
+    ["{{EXTRA_JS}}", optional(join(inst, "extra.js"))],
+  ];
+  for (const [token, value] of subs) {
+    // split/join, never replaceAll: a string replacement in replaceAll treats
+    // `$&`, `$'` and `` $` `` as capture references, and real section bodies
+    // here contain `$`. This must stay a literal substitution.
+    html = html.split(token).join(value);
+  }
+
+  const left = findPlaceholders(html);
+  if (left.length > 0) fail(`unfilled placeholders: ${left.join(", ")}`);
+
+  const outDir = join(inst, "dist");
+  try {
+    mkdirSync(outDir, { recursive: true });
+  } catch (e) {
+    fail(`${outDir}: ${(e as NodeJS.ErrnoException).message}`);
+  }
+  const name = inst.split(sep).filter(Boolean).pop();
+  if (name === undefined) fail("instance path has no final component");
+  const out = join(outDir, `${name}.html`);
+  try {
+    writeFileSync(out, html);
+  } catch (e) {
+    fail(`${out}: ${(e as NodeJS.ErrnoException).message}`);
+  }
+  return out;
+}
+
+/** Any surviving `{{NAME}}` token. */
+export function findPlaceholders(html: string): string[] {
+  const out = new Set<string>();
+  for (let i = 0; i + 1 < html.length; i++) {
+    if (html[i] !== "{" || html[i + 1] !== "{") continue;
+    let j = i + 2;
+    let name = "";
+    while (j < html.length && /[A-Z_]/.test(html[j]!)) {
+      name += html[j];
+      j++;
+    }
+    if (name !== "" && html[j] === "}" && html[j + 1] === "}") {
+      out.add(`{{${name}}}`);
+      i = j + 1;
+    }
+  }
+  return [...out].sort();
+}
+
+// ---------------------------------------------------------------------- check
+
+const PAIRED = [
+  "div", "details", "section", "summary", "p", "span", "table", "tr", "td", "th", "ul", "li",
+  "pre", "h2", "h3", "h4", "header", "footer", "main", "nav", "button", "style",
+];
+
+export interface CheckResult {
+  lines: string[];
+  ok: boolean;
+}
+
+/**
+ * Cheap guards against the two bugs that actually bite: an unbalanced tag, and
+ * a colour that only exists inside a theme block.
+ */
+export function check(path: string): CheckResult {
+  const t = read(path);
+  const bad = PAIRED.filter((tag) => countOpen(t, tag) !== countClose(t, tag));
+
+  const media = countOccurrences(t, "prefers-color-scheme");
+  const stamped = countOccurrences(t, '[data-theme="dark"]');
+
+  return {
+    ok: bad.length === 0,
+    lines: [
+      `  tag balance      ${bad.length === 0 ? "OK" : `MISMATCH ${bad.join(", ")}`}`,
+      `  theme states     ${media > 0 && stamped > 0 ? "OK" : "REVIEW"} (bare :root + ${media} media + ${stamped} stamped)`,
+      // Byte length, not UTF-16 length: a multi-byte character must count as
+      // the bytes a reader downloads.
+      `  size             ${(Buffer.byteLength(t, "utf8") / 1024).toFixed(1)} KB`,
+    ],
+  };
+}
+
+function countOccurrences(t: string, needle: string): number {
+  let n = 0;
+  let i = t.indexOf(needle);
+  while (i !== -1) {
+    n++;
+    i = t.indexOf(needle, i + needle.length);
+  }
+  return n;
+}
+
+function countOpen(t: string, tag: string): number {
+  const needle = `<${tag}`;
+  let n = 0;
+  let i = t.indexOf(needle);
+  while (i !== -1) {
+    const next = t[i + needle.length];
+    // `<p` must not match `<pre`: only `>` or whitespace ends a tag name.
+    if (next === ">" || (next !== undefined && /[ \t\n\r\f\v]/.test(next))) n++;
+    i = t.indexOf(needle, i + needle.length);
+  }
+  return n;
+}
+
+function countClose(t: string, tag: string): number {
+  return countOccurrences(t, `</${tag}>`);
+}

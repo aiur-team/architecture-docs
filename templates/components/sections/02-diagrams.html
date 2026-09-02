@@ -1,0 +1,57 @@
+<!--
+id: diagrams
+label: Diagrams
+summary: Hand-built flow diagrams, sequence tables and banded ranges. Theme-aware, no library, and they render everywhere.
+-->
+<!-- peek -->
+        <div class="panel" style="margin:0">
+          <div class="flow">
+            <div class="node actor"><span class="nt">Actor</span><span class="ns">.node.actor</span></div>
+            <div class="arrow"><span class="al">&rarr;</span><span class="at">.arrow</span></div>
+            <div class="node ok"><span class="nt">Good</span><span class="ns">.node.ok</span></div>
+            <div class="arrow"><span class="al">&rarr;</span></div>
+            <div class="node warn"><span class="nt">Partial</span><span class="ns">.node.warn</span></div>
+            <div class="arrow"><span class="al">&rarr;</span></div>
+            <div class="node risk"><span class="nt">Gap</span><span class="ns">.node.risk</span></div>
+          </div>
+          <div class="cap"><span class="key"><i class="sw ok"></i>ok</span><span class="key"><i class="sw warn"></i>warn</span><span class="key"><i class="sw risk"></i>risk</span></div>
+        </div>
+
+<!-- body -->
+      <h2>Flow diagram</h2>
+      <p>Use <code>.panel</code> &rarr; <code>.flow</code> &rarr; <code>.node</code>. Stack nodes vertically with <code>.col</code>. Label an edge with <code>.arrow .at</code>. Add a legend with <code>.cap</code>.</p>
+      <div class="panel">
+        <div class="flow">
+          <div class="node actor"><span class="nt">Actor</span><span class="ns">dashed, an external party</span></div>
+          <div class="arrow"><span class="al">&rarr;</span><span class="at">labelled edge</span></div>
+          <div class="col">
+            <div class="node ok"><span class="nt">Stacked</span><span class="ns">.col holds a column</span></div>
+            <div class="node warn"><span class="nt">Stacked</span><span class="ns">two nodes, one lane</span></div>
+          </div>
+          <div class="arrow"><span class="al">&harr;</span><span class="at">two way</span></div>
+          <div class="node risk"><span class="nt">Gap</span><span class="ns">dashed border</span></div>
+        </div>
+        <div class="cap"><span class="key"><i class="sw ok"></i>guaranteed</span><span class="key"><i class="sw warn"></i>best effort</span><span class="key"><i class="sw risk"></i>not covered</span><span>Say what the colours mean. A legend is not optional.</span></div>
+      </div>
+      <pre>&lt;div class="panel"&gt;
+  &lt;div class="flow"&gt;
+    &lt;div class="node actor"&gt;&lt;span class="nt"&gt;Actor&lt;/span&gt;&lt;span class="ns"&gt;sub&lt;/span&gt;&lt;/div&gt;
+    &lt;div class="arrow"&gt;&lt;span class="al"&gt;&amp;rarr;&lt;/span&gt;&lt;span class="at"&gt;label&lt;/span&gt;&lt;/div&gt;
+    &lt;div class="node ok"&gt;&lt;span class="nt"&gt;Title&lt;/span&gt;&lt;span class="ns"&gt;sub&lt;/span&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+      <h2>Sequence table</h2>
+      <p>For an ordered exchange between parties. Four cells per row: step, from, message, to.</p>
+      <div class="seq">
+        <div><span class="sq">1</span></div><div class="sa">Client</div><div class="sm"><b>asks for a report</b><br>GET /reports/{id}</div><div class="sa">API</div>
+        <div><span class="sq">2</span></div><div class="sa">API</div><div class="sm"><b>returns the record</b><br>with its coverage claim</div><div class="sa">Client</div>
+      </div>
+
+      <h2>Banded ranges</h2>
+      <p>For score bands, tiers and thresholds. The left rail carries the tone.</p>
+      <div class="bands">
+        <div class="band risk"><span class="rng">91&ndash;99</span><span class="act">Block<em>sub-label</em></span><span class="pill risk">refuse</span></div>
+        <div class="band warn"><span class="rng">51&ndash;90</span><span class="act">Hold for review</span><span class="pill warn">hold</span></div>
+        <div class="band ok"><span class="rng">6&ndash;30</span><span class="act">Pass</span><span class="pill ok">allow</span></div>
+      </div>

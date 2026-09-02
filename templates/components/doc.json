@@ -1,0 +1,13 @@
+{
+  "title": "Artifact Component Reference",
+  "eyebrow": "Architecture docs · Template",
+  "status": "Living reference",
+  "heading": "Component reference",
+  "lede": "Every component the architecture-doc template provides, rendered live with its markup. This page is itself built by the template, so it cannot drift from the CSS.",
+  "meta": {
+    "Build": "templates/build templates/components",
+    "CSS": "templates/base/components.css",
+    "New doc": "cp -r templates/skeleton my-doc"
+  },
+  "footer": "Component reference · built by templates/build"
+}

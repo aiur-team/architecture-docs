@@ -1,0 +1,60 @@
+<!--
+id: solution
+label: The solution
+summary: One content-addressed store, written by CI and read by everyone. The cache key is the whole design.
+nav: Solution
+-->
+<!-- peek -->
+<div class="panel" style="margin:0">
+  <div class="flow">
+    <div class="node actor"><span class="nt">Build</span><span class="ns">any runner, any laptop</span></div>
+    <div class="arrow"><span class="al">&rarr;</span><span class="at">key = hash(inputs)</span></div>
+    <div class="node ok"><span class="nt">Cache</span><span class="ns">read, then write on miss</span></div>
+    <div class="arrow"><span class="al">&rarr;</span><span class="at">immutable</span></div>
+    <div class="node ok"><span class="nt">Object store</span><span class="ns">content addressed</span></div>
+  </div>
+  <div class="cap">
+    <span class="key"><i class="sw ok"></i>trusted path</span>
+    <span class="key"><i class="sw warn"></i>writes need proof</span>
+    <span>A hit is only safe if the key covers every input.</span>
+  </div>
+</div>
+<!-- body -->
+
+<div class="thesis">
+  <h3>The cache is easy. Deciding what a cache key covers is the whole problem.</h3>
+  <p>A remote cache is a hash map in front of an object store, and that part is a week of work. The
+  question that decides whether it can be trusted is narrower and harder: <b>what counts as an input?</b>
+  Miss one, and the cache returns a stale artifact that compiles, passes, and is wrong.</p>
+  <div class="verdicts">
+    <div class="vc"><span class="tag ok">Sound</span><h4>Declared inputs</h4><p>Source files, the toolchain version, the flags. Hashable and complete.</p></div>
+    <div class="vc"><span class="tag warn">Partial</span><h4>Ambient inputs</h4><p>Environment variables and locale. Enumerable, but only if you look.</p></div>
+    <div class="vc"><span class="tag risk">Unsound</span><h4>Undeclared reads</h4><p>A build that reads the clock or the network cannot be cached at all.</p></div>
+  </div>
+</div>
+
+<h2>The key is a hash of everything the build is allowed to read</h2>
+
+<p>A cache entry is keyed by a digest over the ordered set of declared inputs: the content of every source
+file, the resolved toolchain version, the compiler flags, and the target platform. <b>The key is not the
+command line.</b> Two invocations that differ only in argument order must produce the same key, or the
+hit rate collapses without anybody noticing.</p>
+
+<p>Entries are immutable. A second write to an existing key is compared and dropped, never overwritten —
+so a poisoned entry cannot replace a good one, and a mismatch is a loud signal that some input is not in
+the key.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Input class</th><th>In the key</th><th class="n">Cost to add</th><th>Consequence of omitting it</th></tr></thead>
+  <tbody>
+    <tr><td>Source content</td><td><span class="pill ok">Yes</span></td><td class="n">0</td><td>Cache would be useless</td></tr>
+    <tr><td>Toolchain version</td><td><span class="pill ok">Yes</span></td><td class="n">0</td><td>Artifacts from two compilers collide silently</td></tr>
+    <tr><td>Compiler flags</td><td><span class="pill ok">Yes</span></td><td class="n">1</td><td>A debug build serves a release request</td></tr>
+    <tr><td>Environment variables</td><td><span class="pill warn">Allow-listed</span></td><td class="n">3</td><td>Hit rate drops to near zero if all are included</td></tr>
+    <tr><td>Wall-clock time</td><td><span class="pill n">Unsupported</span></td><td class="n">&mdash;</td><td>Such a build is not cacheable. Mark it, do not cache it</td></tr>
+  </tbody>
+</table></div>
+
+<p class="note">Including every environment variable is the mistake that looks safest. It is technically
+correct and makes the cache useless, because <code>CI_JOB_ID</code> changes on every run and so does the
+key. An allow-list is the only workable answer, and it must be reviewed rather than guessed.</p>

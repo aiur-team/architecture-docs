@@ -1,0 +1,37 @@
+{
+  "name": "@aiur-team/docbuild",
+  "version": "0.1.0",
+  "description": "Compose an architecture doc into one self-contained HTML file.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "bin": {
+    "docbuild": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "base",
+    "skeleton",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.7.0"
+  }
+}

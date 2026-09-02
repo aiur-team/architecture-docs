@@ -1,0 +1,44 @@
+<!--
+id: build-order
+label: Build order
+summary: Four phases. The key function lands first and alone, because everything else encodes assumptions about it.
+nav: Build order
+-->
+<!-- peek -->
+<div class="phases">
+  <div class="ph done"><b>Phase 1</b><span class="cnt">1</span><span class="pt">The key function. Everything waits on it</span></div>
+  <div class="ph"><b>Phase 2</b><span class="cnt">3</span><span class="pt">Read path, store, client. No shared files</span></div>
+  <div class="ph"><b>Phase 3</b><span class="cnt">2</span><span class="pt">Write path and identity</span></div>
+  <div class="ph"><b>Phase 4</b><span class="cnt">2</span><span class="pt">Eviction and the key-quality dashboard</span></div>
+</div>
+<!-- body -->
+
+<h2>The key function is the keystone, so it ships by itself</h2>
+
+<p>Phase one is one task. Not because it is large, but because every later task hard-codes an assumption
+about what a key covers, and a key function written twice is the most expensive rework available here. It
+also has to be the piece with tests before anything depends on it.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Task</th><th>Phase</th><th>Work</th><th>Depends on</th></tr></thead>
+  <tbody>
+    <tr><td>BC-1</td><td><span class="pill ok">1</span></td><td>The digest: input classes, ordering, the environment allow-list, and a fixture proving two orderings agree</td><td>&mdash;</td></tr>
+    <tr><td>BC-2</td><td><span class="pill warn">2</span></td><td><code>GET /cas/{digest}</code> and the signed-URL redirect</td><td>BC-1</td></tr>
+    <tr><td>BC-3</td><td><span class="pill warn">2</span></td><td>Object-store layout, immutability, and the compare-on-rewrite check</td><td>BC-1</td></tr>
+    <tr><td>BC-4</td><td><span class="pill warn">2</span></td><td>Client: lookup, a hard timeout, and treat every error as a miss</td><td>BC-1</td></tr>
+    <tr><td>BC-5</td><td><span class="pill warn">3</span></td><td><code>POST /cas</code>, workload identity, and rejecting laptop writes</td><td>BC-2, BC-3</td></tr>
+    <tr><td>BC-6</td><td><span class="pill warn">3</span></td><td>Upload from CI on a miss, and the poisoned-entry alarm</td><td>BC-5</td></tr>
+    <tr><td>BC-7</td><td><span class="pill risk">4</span></td><td>Eviction scoring on last access</td><td>BC-3</td></tr>
+    <tr><td>BC-8</td><td><span class="pill risk">4</span></td><td>The uploaded-never-read metric, surfaced as a key-quality signal</td><td>BC-6, BC-7</td></tr>
+  </tbody>
+</table></div>
+
+<p class="note">Phase two is three tasks wide only because BC-1 defined the shape they all build against.
+Attempting the read path and the client in parallel <em>before</em> the key exists is how two components
+end up disagreeing about what they are keyed on.</p>
+
+<h2>What would make this a failure</h2>
+
+<p>Stated up front so the answer is not negotiated later. <b>A hit rate below 40% on merge builds means
+the key function is wrong</b> and the project has not delivered, even if every task is closed. A single
+verified poisoned entry is a stop-work condition, not a bug to triage.</p>

@@ -1,0 +1,13 @@
+{
+  "title": "Short Specific Name",
+  "eyebrow": "Team · Area",
+  "status": "Draft for review",
+  "heading": "The thing this document is about",
+  "lede": "One or two sentences. What the document covers, and who should read it.",
+  "meta": {
+    "DRI": "Name",
+    "Status": "Where the work actually is",
+    "Related": "Links or repo paths"
+  },
+  "footer": "Document name · Draft · Internal"
+}

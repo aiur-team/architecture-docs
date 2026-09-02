@@ -1,0 +1,61 @@
+<!--
+id: content
+label: Content blocks
+summary: Thesis box, tables with status pills, card grids, phases, nested disclosures and numbered questions.
+-->
+<!-- peek -->
+        <div class="verdicts">
+          <div class="vc"><span class="tag ok">.tag.ok</span><h4>Verdict card</h4><p>Three across, one line each. Good for a closed-state peek.</p></div>
+          <div class="vc"><span class="tag warn">.tag.warn</span><h4>Second</h4><p>Collapses to one column below 860px.</p></div>
+          <div class="vc"><span class="tag risk">.tag.risk</span><h4>Third</h4><p>Keep the copy to two lines.</p></div>
+        </div>
+
+<!-- body -->
+      <h2>Thesis box</h2>
+      <p>One per document, at the top. It carries the single claim the document is making.</p>
+      <div class="thesis">
+        <h3>The claim this document makes</h3>
+        <p>Lead with the argument, not the summary. If a reader takes one sentence away, this is it.</p>
+        <div class="verdicts">
+          <div class="vc"><span class="tag ok">Guaranteed</span><h4>What holds</h4><p>The thing you can defend.</p></div>
+          <div class="vc"><span class="tag warn">Best effort</span><h4>What is partial</h4><p>The thing with caveats.</p></div>
+          <div class="vc"><span class="tag risk">Not covered</span><h4>What is missing</h4><p>State it before someone finds it.</p></div>
+        </div>
+      </div>
+
+      <h2>Tables</h2>
+      <p>Wrap in <code>.tw</code> so wide tables scroll inside their own container rather than the page. Use <code>td.n</code> for numeric columns.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Thing</th><th>State</th><th class="n">Count</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Shipped</td><td><span class="pill ok">Done</span></td><td class="n">12</td><td>Tabular numerals keep columns aligned</td></tr>
+          <tr><td>Partial</td><td><span class="pill warn">In progress</span></td><td class="n">3</td><td>Pills carry the same three tones as everything else</td></tr>
+          <tr><td>Blocked</td><td><span class="pill risk">Blocked</span></td><td class="n">1</td><td>Use <code>.pill.n</code> for a neutral, dashed pill</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>Card grid</h2>
+      <p><code>.grid2</code> or <code>.grid3</code>. Good for a two-way comparison.</p>
+      <div class="grid2">
+        <div class="card"><p class="kicker">Option A</p><h4>Fail closed</h4><p>Trades throughput for defensibility.</p></div>
+        <div class="card"><p class="kicker">Option B</p><h4>Fail open</h4><p>Keeps moving, and the record must say so.</p></div>
+      </div>
+
+      <h2>Phases</h2>
+      <div class="phases">
+        <div class="ph done"><b>Phase 1</b><span class="cnt">1</span><span class="pt">Scaffold. Everything waits on it</span></div>
+        <div class="ph"><b>Phase 2</b><span class="cnt">8</span><span class="pt">Leaves, no shared files</span></div>
+      </div>
+
+      <h2>Nested disclosure</h2>
+      <p>Use <code>details.dx</code> for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.</p>
+      <details class="dx">
+        <summary><span class="dxn">A</span>A nested disclosure</summary>
+        <div class="dxb"><p>Body content. Lettered rather than numbered, so it does not compete with the section order.</p></div>
+      </details>
+
+      <h2>Numbered questions</h2>
+      <div class="qs">
+        <div class="q"><span class="num">1</span><div><h4>State the question as a question</h4><p>Then say what changes depending on the answer.</p></div></div>
+      </div>
+      <p class="note">A <code>.note</code> is a quiet aside with a left rule. Use it for a caveat, not for emphasis.</p>

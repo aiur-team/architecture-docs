@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.example
+node_modules/
+templates/docbuild/dist/
+.DS_Store

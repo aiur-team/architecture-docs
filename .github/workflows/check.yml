@@ -1,0 +1,27 @@
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This repository is public and was extracted from a private one.
+      # The scrub gate runs first and independently: if private context is
+      # present, nothing else about the build matters.
+      - name: scrub gate
+        run: scripts/scrub-check.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: typecheck
+        run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
+
+      - name: every document rebuilds byte-identically
+        run: templates/check-dist

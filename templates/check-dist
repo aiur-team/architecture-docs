@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Rebuild every document and assert the committed dist/ is unchanged.
+#
+#   templates/check-dist
+#
+# This is the acceptance test that let the builder be rewritten twice without
+# changing a single byte of output. Committed dist/ is the reference: if a
+# builder change alters any document, this fails and names it.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+cd "$root"
+
+# Every directory holding a doc.json is an instance, except the skeleton, which
+# is a starting point rather than a document.
+#
+# Read with a plain loop, not mapfile: macOS ships bash 3.2 as /bin/bash and
+# mapfile is bash 4+. This must run on a machine with no homebrew bash.
+instances=""
+count=0
+while IFS= read -r inst; do
+  instances="$instances$inst
+"
+  count=$((count + 1))
+done < <(
+  git ls-files '*/doc.json' \
+    | sed 's|/doc.json$||' \
+    | grep -v '^templates/skeleton$' \
+    | sort
+)
+
+if [ "$count" -eq 0 ]; then
+  echo "error: found no instances (no committed */doc.json)" >&2
+  exit 1
+fi
+
+echo "rebuilding $count documents..."
+printf '%s' "$instances" | while IFS= read -r inst; do
+  [ -n "$inst" ] || continue
+  "$here/build" "$inst" >/dev/null
+done
+
+if git diff --quiet -- '*/dist/*.html'; then
+  echo "PASS  every committed document is byte-identical after a rebuild"
+  exit 0
+fi
+
+echo "FAIL  a rebuild changed committed output:" >&2
+git diff --stat -- '*/dist/*.html' >&2
+echo >&2
+echo "If the change is intended, commit the new dist/ with the source." >&2
+exit 1

@@ -1,0 +1,40 @@
+<title>{{TITLE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+{{THEME_CSS}}
+{{COMPONENTS_CSS}}
+{{EXTRA_CSS}}
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="head-top">
+      <p class="eyebrow">{{EYEBROW}}</p>
+      <span class="status-chip">{{STATUS}}</span>
+      <button class="tt" id="tt" type="button" aria-label="Toggle colour theme"><span id="ttl">Dark</span></button>
+    </div>
+    <h1>{{HEADING}}</h1>
+    <p class="lede">{{LEDE}}</p>
+    <div class="metarow">{{META}}</div>
+  </div>
+</header>
+
+<nav class="jump" aria-label="Section navigation">
+  <div class="wrap">{{NAV}}</div>
+</nav>
+
+<main>
+{{SECTIONS}}
+</main>
+
+<footer><div class="wrap">{{FOOTER}}</div></footer>
+
+<script>
+{{APP_JS}}
+</script>
+
+<script>
+{{EXTRA_JS}}
+</script>

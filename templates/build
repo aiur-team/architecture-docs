@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Build one architecture doc. Compiles the builder first if it is missing or stale.
+#
+#   templates/build my-doc
+#
+# Needs Node 18 or later and nothing else. The builder has no runtime
+# dependencies; TypeScript is the only devDependency and it is fetched once.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+pkg="$here/docbuild"
+entry="$pkg/dist/cli.js"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "error: node is not installed. Node 18 or later is required." >&2
+  exit 1
+fi
+
+newest_src="$(find "$pkg/src" -name '*.ts' -newer "$entry" -print -quit 2>/dev/null || true)"
+if [[ ! -f "$entry" || -n "$newest_src" ]]; then
+  echo "compiling the builder..." >&2
+  [[ -d "$pkg/node_modules" ]] || npm install --prefix "$pkg" --silent
+  npm run --prefix "$pkg" --silent build
+fi
+
+exec node "$entry" "$@"

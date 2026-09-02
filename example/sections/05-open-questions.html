@@ -1,0 +1,76 @@
+<!--
+id: open-questions
+label: Open questions
+summary: Four unresolved decisions, each with what changes depending on the answer. None of them blocks phase one.
+nav: Open questions
+-->
+<!-- peek -->
+<div class="verdicts">
+  <div class="vc"><span class="tag warn">Needs a decision</span><h4>Who may write</h4><p>CI only, or trusted developers too.</p></div>
+  <div class="vc"><span class="tag warn">Needs a number</span><h4>Retention budget</h4><p>Eviction cannot be designed without a ceiling.</p></div>
+  <div class="vc"><span class="tag risk">Unknown</span><h4>Cross-platform keys</h4><p>Whether one key can span architectures.</p></div>
+</div>
+<!-- body -->
+
+<h2>Open questions</h2>
+
+<p>These are decisions, not research gaps. Each one has a cost that is not the author's to accept, and each
+is written so that a reader can answer it without reading the rest of the document.</p>
+
+<div class="qs">
+  <div class="q">
+    <span class="num">1</span>
+    <div>
+      <h4>May a developer machine write to the cache?</h4>
+      <p>Allowing it roughly doubles the hit rate on the first build after a branch switch, because
+      developers compile things CI has not reached yet. It also means the trusted store accepts bytes from
+      an environment nobody attests to. <b>Assumed answer: CI only</b>, because a poisoned entry is
+      unrecoverable in a way a slow build is not. Reversing this is a one-line policy change; reversing a
+      poisoning incident is not.</p>
+    </div>
+  </div>
+  <div class="q">
+    <span class="num">2</span>
+    <div>
+      <h4>What is the storage budget?</h4>
+      <p>Eviction scoring is meaningless without a ceiling. At the measured artifact size and merge rate,
+      an unbounded store grows by roughly 40&nbsp;GB a week. The band design in Architecture assumes a
+      fixed budget with pressure-driven eviction; a policy of "keep everything for 90 days" is a different
+      design and a larger one.</p>
+    </div>
+  </div>
+  <div class="q">
+    <span class="num">3</span>
+    <div>
+      <h4>Can one key span platforms?</h4>
+      <p>If the target platform is in the digest, an arm64 laptop never reuses an x86 CI artifact, and the
+      developer-facing benefit largely disappears. If it is not in the digest, the cache will eventually
+      serve the wrong binary. <b>Unresolved.</b> The safe reading is to include the platform and accept the
+      lower hit rate, but this has not been measured against real builds and the measurement is cheap.</p>
+    </div>
+  </div>
+  <div class="q">
+    <span class="num">4</span>
+    <div>
+      <h4>Is a cache miss observable enough to debug?</h4>
+      <p>A miss and a hit are indistinguishable in the build log today, which means a key regression looks
+      exactly like a slow week. Nothing in the plan surfaces <em>why</em> a key missed. This is not a
+      blocker, but it is the first thing anybody will ask for once phase two is live.</p>
+    </div>
+  </div>
+</div>
+
+<h2>What is deliberately not being built</h2>
+
+<ul>
+  <li><b>Distributed execution.</b> A cache and a scheduler are different products. Reusing outputs does
+  not require moving the work.</li>
+  <li><b>Cache warming.</b> Predicting the next build's inputs is a research problem for a saving that
+  eviction scoring mostly already delivers.</li>
+  <li><b>A UI.</b> The hit rate and the uploaded-never-read count belong on an existing dashboard. A new
+  web application is not warranted by two metrics.</li>
+</ul>
+
+<p class="note">An open-questions section earns its place only if the questions are real. If everything in
+it has an obvious answer, delete the section rather than padding it &mdash; and if the document has no
+genuine unknowns, say that in one line instead.</p>

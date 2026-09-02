@@ -1,0 +1,40 @@
+<!--
+id: problem
+label: The problem
+summary: CI rebuilds work it has already done. The cost is not the CPU, it is the fourteen minutes a reviewer waits.
+nav: Problem
+-->
+<!-- peek -->
+<div class="thesis">
+  <p>Every pull request rebuilds the whole tree. Most of that output is byte-identical to a build that
+  finished an hour ago on another machine.</p>
+</div>
+<!-- body -->
+
+<h2>CI spends most of its time rebuilding things that have not changed</h2>
+
+<p>A full build of the monorepo takes <b>14 minutes</b>. A one-line change to a leaf package takes the
+same 14 minutes, because each CI runner starts from an empty working directory and no runner can see what
+any other runner has already produced.</p>
+
+<p>Measured across one week of merges, <b>83% of compiled artifacts were byte-identical to an artifact
+produced by an earlier build</b>. The work is not merely similar. It is the same bytes, computed again.</p>
+
+<div class="grid2">
+  <div class="card">
+    <p class="kicker">What it costs</p>
+    <h4>Reviewer latency, not compute</h4>
+    <p>Compute is cheap and getting cheaper. A reviewer who has context-switched away is expensive and
+    does not come back for twenty minutes. The 14 minutes is the real number.</p>
+  </div>
+  <div class="card">
+    <p class="kicker">Why it persists</p>
+    <h4>Local caches work, and do not travel</h4>
+    <p>Every build tool already caches locally. That is why the problem is invisible to the person who
+    introduced it: on their machine the second build takes nine seconds.</p>
+  </div>
+</div>
+
+<p class="note"><b>This is a worked example.</b> The subject is invented. It exists so that the template
+has one document showing every component in a real argument rather than in a swatch, and so an agent
+asked to write a document has something honest to imitate.</p>
