@@ -1,0 +1,119 @@
+:root {
+  /* Changelog client presentation: one change bar prepended to main, plus a
+     bullet on each changed section label and its jump-nav link.  Three theme
+     states mirror theme.css: bare :root is light, prefers-color-scheme is
+     guarded so an explicit light choice beats a dark OS, and data-theme="dark"
+     lets the toggle win.  Everything here is transient orientation; print
+     suppresses the bar and both dots and leaves the document untouched. */
+  --history-change: #8a4b00;
+  --history-change-bg: #fbf0df;
+  --history-change-border: #e8c893;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --history-change: #e4a73c;
+    --history-change-bg: #2e2210;
+    --history-change-border: #5c4419;
+  }
+}
+:root[data-theme="dark"] {
+  --history-change: #e4a73c;
+  --history-change-bg: #2e2210;
+  --history-change-border: #5c4419;
+}
+
+.history-changebar {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  width: calc(100% - 48px);
+  max-width: calc(var(--wrap, 100%) - 48px);
+  margin: 16px auto;
+  padding: 12px 16px;
+  border: 1px solid var(--history-change-border);
+  border-radius: 10px;
+  background: var(--history-change-bg);
+  color: var(--history-change);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.history-changebar p {
+  margin: 0;
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.history-changebar strong {
+  font-weight: 700;
+}
+.history-changebar a {
+  color: var(--history-change);
+  text-decoration: underline;
+  text-decoration-color: var(--history-change-border);
+  text-underline-offset: 2px;
+}
+.history-changebar a:hover {
+  text-decoration-line: none;
+  background-color: var(--history-change-border);
+}
+.history-changebar button {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--history-change);
+  border-radius: 999px;
+  background-color: transparent;
+  color: var(--history-change);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.history-changebar button:hover {
+  background-color: var(--history-change);
+  color: var(--history-change-bg);
+}
+.history-changebar a:focus-visible,
+.history-changebar button:focus-visible {
+  outline: 2px solid var(--history-change);
+  outline-offset: 2px;
+}
+
+section.history-changed > details.sec > summary .sec-label::before {
+  content: "•";
+  color: var(--history-change);
+  flex: none;
+  line-height: 1;
+}
+nav.jump a.history-changed::after {
+  content: "•";
+  margin-left: 5px;
+  color: var(--history-change);
+}
+
+@media (max-width: 640px) {
+  .history-changebar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .history-changebar p {
+    flex-basis: auto;
+  }
+  .history-changebar button {
+    width: 100%;
+  }
+}
+
+@media print {
+  .history-changebar {
+    display: none;
+  }
+  section.history-changed > details.sec > summary .sec-label::before {
+    display: none;
+  }
+  nav.jump a.history-changed::after {
+    display: none;
+  }
+}
