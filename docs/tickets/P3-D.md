@@ -136,7 +136,7 @@ Repeated button activation after success is impossible because the button is rem
 
 - `templates/base/history.js` — **new**; P1-B already owns and emits its optional module slot.
 - `templates/base/history.css` — **new**; P1-B already owns and emits its optional stylesheet slot.
-- `docs/tickets/P3-D.md` — this specification, not an implementation path.
+- `docs/tickets/P3-D.md` — **new canonical specification**; not an implementation path.
 
 No other implementation path is owned. In particular, do not amend `templates/base/layout.html`, `templates/base/app.js`, `templates/base/components.css`, `templates/docbuild/src/index.ts`, `templates/docbuild/src/history.ts`, any `history.json`, or generated output. If an implementation cannot satisfy this contract through the existing slots, stop and report the predecessor gap.
 

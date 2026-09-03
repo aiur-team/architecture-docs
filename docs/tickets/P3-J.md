@@ -141,7 +141,7 @@ Latency is measured outside the response contract, not exposed in a response hea
 ## Files owned
 
 - `netlify/edge-functions/gate.ts` — **amended**, created by P2-A; P3-J is the sole owner of this revision.
-- `docs/tickets/P3-J.md` — this specification, not an implementation path.
+- `docs/tickets/P3-J.md` — **new canonical specification**; not an implementation path.
 
 No other implementation path is owned. Do not edit P2-A's ticket or its login/logout/page files, P2-G's access library, P2-H's identity library, P3-H's Functions, P1-E's configuration, P1-B's builder/layout, a package file, generated output, research, or another ticket. Stop and report a predecessor mismatch rather than widening this surface.
 

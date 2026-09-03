@@ -179,7 +179,7 @@ The panel is appended to `body` and uses `position: absolute`. On open, successf
 
 - `templates/base/share.js` — **new**; side-effect-only read client. P4-L later amends this same file with owner write controls.
 - `templates/base/share.css` — **new**; read-panel, responsive, focus, forced-colors, and print styles.
-- `docs/tickets/P3-I.md` — this specification, not an implementation path.
+- `docs/tickets/P3-I.md` — **new canonical specification**; not an implementation path.
 
 No other implementation path is owned. Do not amend `templates/base/layout.html`, `templates/base/app.js`, `templates/base/components.css`, `templates/base/session.js`, `templates/base/comments.js`, the builder, any server file, or generated output. The P3-C owner records its sibling-safe insertion behavior in P3-C; P3-I does not take ownership of that file.
 

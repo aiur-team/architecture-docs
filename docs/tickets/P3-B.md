@@ -250,7 +250,7 @@ The module never calls `console.*`, never records request/response bodies, and n
 
 ## Files owned
 
-- `netlify/functions/events.mjs` — **created**; the only implementation file and the only source file this ticket may add or change.
+- `netlify/functions/events.mjs` — **new**; the only implementation file and the only source file this ticket may add or change.
 
 Do not change `netlify/lib/store.mjs`, `netlify/lib/identity.mjs`, `netlify/lib/access.mjs`, another Function, a browser/template asset, `package.json`, a lockfile, `netlify.toml`, generated output, a test file, a workflow, a research document, or a prompt. `docs/tickets/P3-B.md` is this specification, not implementation source.
 
@@ -279,18 +279,18 @@ P3-B changes one shared module, so its own maximum safe implementation paralleli
 
 ## Acceptance criteria
 
-1. The only implementation change is `netlify/functions/events.mjs`, with exactly the six documented exports and exact `/api/events` config.
-2. `POST` performs origin, query, identity, authorization, bounded-body, schema, time/randomness, store, and append work in the documented order; the body reader is canceled/released exactly as documented, and early failures prove later dependencies were not called.
-3. The stored actor is a fresh projection of the one P2-H identity result and accepts P2-G's complete 0-through-200-code-unit name domain without a narrower event-only byte/control rule. Body-supplied identity/generated/capability fields are rejected.
-4. A deterministic timestamp and three deterministic random bytes produce the exact ID, timestamp, month prefix, P2-B key, event field order, and 201 body.
-5. `setJSON` receives exactly `{ onlyIfNew: true }` once. `modified: false` returns 409 without read/retry/regeneration; malformed or rejected results fail closed.
-6. The fixture accepts each of the 16 enumerated kinds with its documented canonical target and rejects its paired capability-denial case; it also executes the named finite invalid-body equivalence matrix below. The acceptance oracle makes no claim to enumerate the infinite set of possible invalid strings: the source contract remains the closed predicates above, while the executable matrix proves one boundary representative for every declared type, presence, extra-key, grammar, length, relation, and reserved-transient class.
-7. GET requires `canSeeMembers`, manually paginates exactly one month-prefix listing, enforces the ten-page/10,000-key/eleven-pull operational boundary, validates provider keys/records, ignores provider order, and returns ascending exclusive pages of at most 100 events with the exact `nextAfter` behavior.
-8. GET skips a listed key that becomes `null`, but rejects duplicate/malformed keys and corrupt or mismatched stored records. No event from another document/month can enter a response.
-9. Every status, error body, header, and error precedence matches the table. Origin rejection is unchanged; all other failures are generic and private/no-store.
-10. POST returns the created object without listing. The exact AST oracle proves the documented import/export boundary, no dynamic import, no environment or logging access, no direct provider/network/server/worker/timer API, and one syntactically create-only `setJSON` call with exactly three arguments and `{ onlyIfNew: true }`. Runtime assertions prove that call receives no fourth metadata argument, collision performs no read/list/retry/regeneration, and the tested POST paths perform no event-derived state mutation. No broader semantic absence is inferred from a text search.
-11. The source-bound deterministic fixture covers all 16 event kinds and paired capability denials, all six accepted `{email}`/`{sub}` access-target forms, every row of the named finite target/identifier/document-version/summary matrix, and the remaining request/store/pagination branches named under **Test plan**; it exits with exactly `PASS  P3-B events API` on stdout and no stderr.
-12. Repository build/type gates pass without changing generated or configuration files, and issue #15 passes the executable pointer-integrity gate: exact title and two-paragraph short body, a full commit SHA and exact document path parsed from the permalink, and commit-addressed bytes identical to this canonical document.
+- [ ] The only implementation change is `netlify/functions/events.mjs`, with exactly the six documented exports and exact `/api/events` config.
+- [ ] `POST` performs origin, query, identity, authorization, bounded-body, schema, time/randomness, store, and append work in the documented order; the body reader is canceled/released exactly as documented, and early failures prove later dependencies were not called.
+- [ ] The stored actor is a fresh projection of the one P2-H identity result and accepts P2-G's complete 0-through-200-code-unit name domain without a narrower event-only byte/control rule. Body-supplied identity/generated/capability fields are rejected.
+- [ ] A deterministic timestamp and three deterministic random bytes produce the exact ID, timestamp, month prefix, P2-B key, event field order, and 201 body.
+- [ ] `setJSON` receives exactly `{ onlyIfNew: true }` once. `modified: false` returns 409 without read/retry/regeneration; malformed or rejected results fail closed.
+- [ ] The fixture accepts each of the 16 enumerated kinds with its documented canonical target and rejects its paired capability-denial case; it also executes the named finite invalid-body equivalence matrix below. The acceptance oracle makes no claim to enumerate the infinite set of possible invalid strings: the source contract remains the closed predicates above, while the executable matrix proves one boundary representative for every declared type, presence, extra-key, grammar, length, relation, and reserved-transient class.
+- [ ] GET requires `canSeeMembers`, manually paginates exactly one month-prefix listing, enforces the ten-page/10,000-key/eleven-pull operational boundary, validates provider keys/records, ignores provider order, and returns ascending exclusive pages of at most 100 events with the exact `nextAfter` behavior.
+- [ ] GET skips a listed key that becomes `null`, but rejects duplicate/malformed keys and corrupt or mismatched stored records. No event from another document/month can enter a response.
+- [ ] Every status, error body, header, and error precedence matches the table. Origin rejection is unchanged; all other failures are generic and private/no-store.
+- [ ] POST returns the created object without listing. The exact AST oracle proves the documented import/export boundary, no dynamic import, no environment or logging access, no direct provider/network/server/worker/timer API, and one syntactically create-only `setJSON` call with exactly three arguments and `{ onlyIfNew: true }`. Runtime assertions prove that call receives no fourth metadata argument, collision performs no read/list/retry/regeneration, and the tested POST paths perform no event-derived state mutation. No broader semantic absence is inferred from a text search.
+- [ ] The source-bound deterministic fixture covers all 16 event kinds and paired capability denials, all six accepted `{email}`/`{sub}` access-target forms, every row of the named finite target/identifier/document-version/summary matrix, and the remaining request/store/pagination branches named under **Test plan**; it exits with exactly `PASS  P3-B events API` on stdout and no stderr.
+- [ ] Repository build/type gates pass without changing generated or configuration files, and issue #15 passes the executable pointer-integrity gate: exact title and two-paragraph short body, a full commit SHA and exact document path parsed from the permalink, and commit-addressed bytes identical to this canonical document.
 
 ## Test plan
 

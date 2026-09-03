@@ -186,7 +186,7 @@ The short-circuit order is observable. A rejected method performs no identity ca
 
 - `netlify/functions/access.mjs` — **new**; read-only roster endpoint.
 - `netlify/functions/session.mjs` — **amended**, created by P1-C; replace the Phase 1 projection with the final document-aware projection.
-- `docs/tickets/P3-H.md` — this specification, not an implementation path.
+- `docs/tickets/P3-H.md` — **new canonical specification**; not an implementation path.
 
 No other implementation path is owned. In particular, do not amend `netlify/lib/identity.mjs`, `netlify/lib/access.mjs`, `netlify/lib/store.mjs`, `templates/base/session.js`, `templates/base/share.js`, `netlify/edge-functions/gate.ts`, configuration, dependencies, or generated output. Stop and report a predecessor gap instead of widening ownership.
 
