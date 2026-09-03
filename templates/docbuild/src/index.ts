@@ -203,7 +203,7 @@ const slot = (base: string, name: string): string =>
  * An empty slot emits nothing at all — not an empty wrapper, not a blank line.
  */
 const moduleScript = (src: string): string =>
-  src === "" ? "" : `\n<script type="module">\n${src}\n</script>`;
+  src.trim() === "" ? "" : `\n<script type="module">\n${src}\n</script>`;
 
 /**
  * Layout code owned here, not by the core: the compiled module is deliberately
@@ -364,6 +364,13 @@ export function build(root: string, instance: string): string {
     ["{{SHARE_JS}}", moduleScript(slot(base, "share.js"))],
     ["{{SESSION_JS}}", moduleScript(slot(base, "session.js"))],
   ];
+  // A slot silently dropped from layout.html would never fail a build: the
+  // unfilled-placeholder scan only sees tokens that survive, never ones that
+  // went missing. Every feature that lands later depends on its slot existing,
+  // so assert that before substituting anything away.
+  const missing = subs.map(([token]) => token).filter((token) => !html.includes(token));
+  if (missing.length > 0) fail(`layout.html is missing placeholders: ${missing.sort().join(", ")}`);
+
   for (const [token, value] of subs) {
     // split/join, never replaceAll: a string replacement in replaceAll treats
     // `$&`, `$'` and `` $` `` as capture references, and real section bodies
@@ -430,7 +437,8 @@ export interface CheckResult {
  */
 export function check(path: string): CheckResult {
   const t = read(path);
-  const bad = PAIRED.filter((tag) => countOpen(t, tag) !== countClose(t, tag));
+  const countable = withoutJsonData(t);
+  const bad = PAIRED.filter((tag) => countOpen(countable, tag) !== countClose(countable, tag));
 
   const media = countOccurrences(t, "prefers-color-scheme");
   const stamped = countOccurrences(t, '[data-theme="dark"]');
@@ -445,6 +453,25 @@ export function check(path: string): CheckResult {
       `  size             ${(Buffer.byteLength(t, "utf8") / 1024).toFixed(1)} KB`,
     ],
   };
+}
+
+/**
+ * Drop `application/json` data blocks before counting tags. Their payload is
+ * escaped text, not markup: serialized history holds `<\/p>`, which the close
+ * counter would miss while the open counter still saw `<p>`.
+ */
+function withoutJsonData(t: string): string {
+  const OPEN = '<script type="application/json"';
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const start = t.indexOf(OPEN, at);
+    if (start === -1) return out + t.slice(at);
+    const end = t.indexOf("</script>", start);
+    if (end === -1) return out + t.slice(at);
+    out += t.slice(at, start);
+    at = end + "</script>".length;
+  }
 }
 
 function countOccurrences(t: string, needle: string): number {
