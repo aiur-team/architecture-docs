@@ -72,7 +72,8 @@ function hostedExecutable() {
   return configured;
 }
 
-async function runHostedChild(executable, args, cwd, { siteId = null, timeout = 60_000 } = {}) {
+async function runHostedChild(executable, args, cwd, { siteId = null, timeout = 60_000, abortSignal = null } = {}) {
+  if (abortSignal?.aborted) throw abortSignal.reason instanceof Error ? abortSignal.reason : new Error("hosted lifecycle timeout");
   const child = spawn(executable, args, {
     cwd,
     env: hostedChildEnvironment(siteId),
@@ -95,6 +96,8 @@ async function runHostedChild(executable, args, cwd, { siteId = null, timeout = 
       try { child.kill("SIGTERM"); } catch {}
       killTimer ??= setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2_000);
     };
+    const abort = () => terminate(abortSignal.reason instanceof Error ? abortSignal.reason : new Error("hosted lifecycle timeout"));
+    abortSignal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => terminate(new Error("hosted child timeout")), timeout);
     for (const streamName of ["stdout", "stderr"]) {
       child[streamName].on("data", (chunk) => {
@@ -114,6 +117,7 @@ async function runHostedChild(executable, args, cwd, { siteId = null, timeout = 
       closed = true;
       clearTimeout(timer);
       if (killTimer !== null) clearTimeout(killTimer);
+      abortSignal?.removeEventListener("abort", abort);
       if (failure !== null) rejectPromise(failure);
       else resolvePromise({
         code,
@@ -190,9 +194,8 @@ function assertLinkState(path, before) {
 }
 
 async function runHosted(connectModule) {
-  let hostedTimedOut = false;
-  const deadline = setTimeout(() => { hostedTimedOut = true; }, HOSTED_TIMEOUT);
-  deadline.unref?.();
+  const lifecycle = new AbortController();
+  const deadline = setTimeout(() => lifecycle.abort(new Error("hosted lifecycle timeout")), HOSTED_TIMEOUT);
   const repositoryRoot = resolve(dirname(fileURLToPath(new URL("./connect.mjs", import.meta.url))), "..");
   const tempRoot = realpathSync(tmpdir());
   const evidenceRoot = printableStrictChild(tempRoot, mkdtempSync(join(tempRoot, "p4s-hosted-"), { encoding: "utf8", mode: 0o700 }));
@@ -217,8 +220,11 @@ async function runHosted(connectModule) {
   let remoteCleanupComplete = false;
   let cleanupFailure = false;
 
-  const search = async () => {
-    const result = await runHostedChild(executable, ["sites:search", siteName, "--json"], evidenceRoot);
+  const active = () => {
+    if (lifecycle.signal.aborted) throw lifecycle.signal.reason instanceof Error ? lifecycle.signal.reason : new Error("hosted lifecycle timeout");
+  };
+  const search = async (abortSignal = lifecycle.signal) => {
+    const result = await runHostedChild(executable, ["sites:search", siteName, "--json"], evidenceRoot, { abortSignal });
     assert.equal(result.code, 0);
     assert.equal(result.signal, null);
     const rows = JSON.parse(exactUtf8(result.stdout));
@@ -244,7 +250,8 @@ async function runHosted(connectModule) {
   };
 
   try {
-    const version = await runHostedChild(executable, ["--version"], evidenceRoot);
+    active();
+    const version = await runHostedChild(executable, ["--version"], evidenceRoot, { abortSignal: lifecycle.signal });
     assert.equal(version.code, 0);
     assert.equal(version.signal, null);
     assert.equal(version.stderr.length, 0);
@@ -264,7 +271,7 @@ async function runHosted(connectModule) {
       [["sites:delete", "--help"], "$ netlify sites:delete [options] <id>", ["--force"]],
     ];
     for (const [args, usage, options] of helpCases) {
-      const result = await runHostedChild(executable, args, evidenceRoot);
+      const result = await runHostedChild(executable, args, evidenceRoot, { abortSignal: lifecycle.signal });
       assert.equal(result.code, 0);
       assert.equal(result.signal, null);
       assert.equal(result.stderr.length, 0);
@@ -297,6 +304,17 @@ async function runHosted(connectModule) {
       hostedCalls.push([...args]);
       const child = spawn(command, args, options);
       if (args[0] === "blobs:set") blobWriteMayHaveOccurred = true;
+      let killTimer = null;
+      const interrupt = () => {
+        try { child.kill("SIGTERM"); } catch {}
+        killTimer ??= setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2_000);
+      };
+      lifecycle.signal.addEventListener("abort", interrupt, { once: true });
+      child.once("close", () => {
+        lifecycle.signal.removeEventListener("abort", interrupt);
+        if (killTimer !== null) clearTimeout(killTimer);
+      });
+      if (lifecycle.signal.aborted) interrupt();
       return child;
     };
     const capturedEnv = {};
@@ -311,6 +329,7 @@ async function runHosted(connectModule) {
       spawnFn: wrappedSpawn,
     });
     const baseArgs = ["--file", "page.html", "--manifest", "edit.json", "--history", "history.json"];
+    active();
     const first = await runner(connectModule.parseConnectArgs([...baseArgs, "--owner", "hosted@example.com", "--name", siteName]));
     cleanupTarget = first.siteId;
     replaceRecovery(cleanupTarget);
@@ -325,14 +344,26 @@ async function runHosted(connectModule) {
       (error) => error.tag === "conflict",
     );
     assert.deepEqual(hostedCalls.slice(conflictStart).map((args) => args[0]), ["env:get"]);
-    const response = await fetch(first.url, { redirect: "manual", signal: AbortSignal.timeout(10_000) });
+    active();
+    const fetchController = new AbortController();
+    const abortFetch = () => fetchController.abort(lifecycle.signal.reason);
+    lifecycle.signal.addEventListener("abort", abortFetch, { once: true });
+    const fetchTimer = setTimeout(() => fetchController.abort(new Error("hosted fetch timeout")), 10_000);
+    let response;
+    try {
+      response = await fetch(first.url, { redirect: "manual", signal: fetchController.signal });
+    } finally {
+      clearTimeout(fetchTimer);
+      lifecycle.signal.removeEventListener("abort", abortFetch);
+    }
     assert.equal(response.status, 302);
     assert.equal(response.headers.get("location"), "/login/?next=%2F");
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     assert.equal((await response.arrayBuffer()).byteLength, 0);
   } finally {
+    clearTimeout(deadline);
     try {
-      const matches = await search();
+      const matches = await search(null);
       if (cleanupTarget === null && matches.length === 1) {
         cleanupTarget = matches[0].id;
         replaceRecovery(cleanupTarget);
@@ -350,7 +381,7 @@ async function runHosted(connectModule) {
         assert.equal(deleted.signal, null);
       }
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        if ((await search()).length === 0) {
+        if ((await search(null)).length === 0) {
           remoteCleanupComplete = true;
           break;
         }
@@ -362,10 +393,8 @@ async function runHosted(connectModule) {
     } catch {
       cleanupFailure = true;
       process.stderr.write(`P4-S hosted cleanup failed; inspect ${remediationPath}\n`);
-    } finally {
-      clearTimeout(deadline);
     }
-    if (cleanupFailure || hostedTimedOut) throw new Error("hosted lifecycle failed");
+    if (cleanupFailure) throw new Error("hosted lifecycle failed");
   }
 }
 
@@ -400,6 +429,15 @@ assert.deepEqual(Object.keys(connect).sort(), [
   "normalizeConnectOwner",
   "parseConnectArgs",
 ]);
+
+const hostedAbortController = new AbortController();
+const hostedAbortReason = new Error("invented hosted deadline");
+const hostedAbortRun = runHostedChild(process.execPath, ["-e", "setInterval(() => {}, 1000)"], tmpdir(), {
+  abortSignal: hostedAbortController.signal,
+  timeout: 10_000,
+});
+hostedAbortController.abort(hostedAbortReason);
+await assert.rejects(hostedAbortRun, (error) => error === hostedAbortReason);
 
 assert.deepEqual(parseConnectArgs(["--help"]), { help: true });
 const parsed = parseConnectArgs([
@@ -698,6 +736,175 @@ try {
   ])), (error) => error.tag === "setup");
   assert.deepEqual(errorSignals, ["SIGTERM", "SIGKILL"]);
   assert.ok(errorTimers.every((timer) => timer.cleared));
+
+  const siteArguments = (owner = "owner@example.com") => parseConnectArgs([
+    "--file", "page.html",
+    "--manifest", "edit.json",
+    "--history", "history.json",
+    "--owner", owner,
+    "--site", result.siteId,
+  ]);
+  const nameArguments = parseConnectArgs([
+    "--file", "page.html",
+    "--manifest", "edit.json",
+    "--history", "history.json",
+    "--owner", "owner@example.com",
+    "--name", "failure-fixture",
+  ]);
+  const makeProtocolSpawn = (override = () => null, signalLog = []) => {
+    let storedManifest = null;
+    let index = 0;
+    return (_executable, args) => {
+      const callIndex = index;
+      index += 1;
+      const command = args[0];
+      let response = command === "sites:create"
+        ? { stdout: `{"site_id":"${result.siteId}"}` }
+        : command === "env:get"
+          ? { stdout: `${docId}:owner@example.com\n` }
+          : command === "deploy"
+            ? { stdout: '{"url":"https://fixture-site.netlify.app/"}' }
+            : {};
+      response = override({ args, callIndex, command, response }) ?? response;
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      let closed = false;
+      const close = (
+        code = response.code === undefined ? 0 : response.code,
+        childSignal = response.signal === undefined ? null : response.signal,
+      ) => {
+        if (closed) return;
+        closed = true;
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", code, childSignal);
+      };
+      child.kill = (childSignal) => {
+        signalLog.push(childSignal);
+        process.nextTick(() => close(null, childSignal));
+        return true;
+      };
+      process.nextTick(() => {
+        if (command === "blobs:set" && response.code === undefined) storedManifest = args.at(-1);
+        if (command === "blobs:get" && response.code === undefined && storedManifest !== null) copyFileSync(storedManifest, args.at(-1));
+        if (response.stdout !== undefined) child.stdout.write(response.stdout);
+        if (response.stderr !== undefined) child.stderr.write(response.stderr);
+        if (response.close !== false) close();
+      });
+      return child;
+    };
+  };
+  const runProtocolFailure = async ({ arguments: parsedArguments = siteArguments(), override, rmFn }) => {
+    const signals = [];
+    const failureRunner = createConnectRunner({
+      workingDirectory: inputRoot,
+      repositoryRoot,
+      env: { PATH: process.env.PATH },
+      spawnFn: makeProtocolSpawn(override, signals),
+      ...(rmFn === undefined ? {} : { rmFn }),
+    });
+    let failure;
+    try {
+      await failureRunner(parsedArguments);
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure);
+    return { failure, signals };
+  };
+
+  const providerFailures = [
+    ["malformed create JSON", nameArguments, ({ command }) => command === "sites:create" ? { stdout: "{" } : null, "new-site"],
+    ["malformed created site id", nameArguments, ({ command }) => command === "sites:create" ? { stdout: '{"site_id":"invalid"}' } : null, "new-site"],
+    ["contradictory created site ids", nameArguments, ({ command }) => command === "sites:create" ? { stdout: `{"site_id":"${result.siteId}","id":"223e4567-e89b-12d3-a456-426614174000"}` } : null, "new-site"],
+    ["missing auth", siteArguments(), ({ callIndex }) => callIndex === 0 ? { code: 2, stderr: "Not logged in\n" } : null, "setup"],
+    ["post-create unexpected nonzero", nameArguments, ({ callIndex }) => callIndex === 1 ? { code: 2, stderr: "provider failure\n" } : null, "new-site"],
+    ["signal close", siteArguments(), ({ callIndex }) => callIndex === 0 ? { code: null, signal: "SIGTERM" } : null, "setup"],
+    ["malformed deploy JSON", siteArguments(), ({ command }) => command === "deploy" ? { stdout: "{" } : null, "setup"],
+    ["malformed deploy URL", siteArguments(), ({ command }) => command === "deploy" ? { stdout: '{"url":"http://fixture-site.netlify.app/"}' } : null, "setup"],
+    ["malformed secondary deploy URL", siteArguments(), ({ command }) => command === "deploy" ? { stdout: '{"url":"https://fixture-site.netlify.app/","deploy_url":"https://fixture-site.netlify.app/?"}' } : null, "setup"],
+  ];
+  for (const [label, parsedArguments, override, expectedTag] of providerFailures) {
+    const { failure } = await runProtocolFailure({ arguments: parsedArguments, override });
+    assert.equal(failure.tag, expectedTag, label);
+  }
+  for (const deployUrl of [
+    "https://fixture-site.netlify.app/?",
+    "https://fixture-site.netlify.app/#",
+    "https://fixture-site.netlify.app/?query",
+    "https://fixture-site.netlify.app/#fragment",
+  ]) {
+    const { failure } = await runProtocolFailure({
+      override: ({ command }) => command === "deploy" ? { stdout: JSON.stringify({ url: deployUrl }) } : null,
+    });
+    assert.equal(failure.tag, "setup", deployUrl);
+  }
+  for (const streamName of ["stdout", "stderr"]) {
+    const { failure, signals } = await runProtocolFailure({
+      override: ({ callIndex }) => callIndex === 0 ? { [streamName]: Buffer.alloc(CHILD_OUTPUT_LIMIT + 1) } : null,
+    });
+    assert.equal(failure.tag, "setup", `${streamName} overflow`);
+    assert.deepEqual(signals, ["SIGTERM"], `${streamName} overflow termination`);
+  }
+  const synchronousCreateRunner = createConnectRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    spawnFn() { throw new Error("invented synchronous create failure"); },
+  });
+  await assert.rejects(synchronousCreateRunner(nameArguments), (error) => error.tag === "setup");
+
+  const cleanupRm = async (path, options) => {
+    rmSync(path, options);
+    throw new Error("invented cleanup failure");
+  };
+  for (const [label, owner] of [["success cleanup", "owner@example.com"], ["conflict cleanup precedence", "different@example.com"]]) {
+    const { failure } = await runProtocolFailure({ arguments: siteArguments(owner), rmFn: cleanupRm });
+    assert.equal(failure.tag, "cleanup", label);
+  }
+
+  const timeoutSignals = [];
+  const timeoutTimers = [];
+  const timeoutRunner = createConnectRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    setTimeoutFn(callback, milliseconds) {
+      const timer = { callback, milliseconds, cleared: false };
+      timeoutTimers.push(timer);
+      return timer;
+    },
+    clearTimeoutFn(timer) { timer.cleared = true; },
+    spawnFn() {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = (childSignal) => {
+        timeoutSignals.push(childSignal);
+        if (childSignal === "SIGKILL") process.nextTick(() => {
+          child.stdout.end();
+          child.stderr.end();
+          child.emit("close", null, "SIGKILL");
+        });
+        return true;
+      };
+      return child;
+    },
+  });
+  const timedRun = timeoutRunner(siteArguments());
+  for (let attempt = 0; attempt < 100 && !timeoutTimers.some((timer) => timer.milliseconds === 60_000); attempt += 1) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1));
+  }
+  const operationTimer = timeoutTimers.find((timer) => timer.milliseconds === 60_000);
+  assert.ok(operationTimer, "operation timeout was initiated");
+  operationTimer.callback();
+  const escalationTimer = timeoutTimers.find((timer) => timer.milliseconds === 2_000);
+  assert.ok(escalationTimer, "kill escalation was initiated");
+  escalationTimer.callback();
+  await assert.rejects(timedRun, (error) => error.tag === "setup");
+  assert.deepEqual(timeoutSignals, ["SIGTERM", "SIGKILL"]);
+  assert.ok(timeoutTimers.every((timer) => timer.cleared));
 
   const fakeBin = join(testRoot, "bin");
   const fakeCli = join(fakeBin, "netlify");

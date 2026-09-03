@@ -740,7 +740,7 @@ function canonicalSiteId(value) {
 }
 
 function canonicalDeployUrl(value) {
-  if (typeof value !== "string") failInput();
+  if (typeof value !== "string" || value.includes("?") || value.includes("#")) failInput();
   let url;
   try {
     url = new URL(value);
