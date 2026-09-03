@@ -312,7 +312,7 @@ function assertSub(value) {
   return assertIdentitySub(value);
 }
 
-/** A non-empty, already-normalized email of at most 320 UTF-8 bytes. */
+/** A non-empty, already-normalized email in P2-G's accepted domain. */
 function assertNormalizedEmail(value) {
   assertCleanString(value, "invalid email");
   if (value.length === 0 || utf8Length(value) > 320) {
@@ -327,8 +327,8 @@ function assertNormalizedEmail(value) {
 function assertActor(value) {
   assertExactKeys(value, ACTOR_FIELDS, "invalid actor");
   const sub = assertSub(value.sub);
-  const name = assertCleanString(value.name, "invalid actor name");
-  if (utf8Length(name) > 200) {
+  const name = value.name;
+  if (typeof name !== "string" || name.length > 200) {
     throw invalid("invalid actor name");
   }
   const email = value.email === "" ? "" : assertNormalizedEmail(value.email);
@@ -920,12 +920,12 @@ async function collectListedKeys(store, prefix) {
   if (listing === null || typeof listing !== "object") {
     throw unavailable(undefined);
   }
-  const factory = listing[Symbol.asyncIterator];
-  if (typeof factory !== "function") {
-    throw unavailable(undefined);
-  }
   const keys = [];
   try {
+    const factory = listing[Symbol.asyncIterator];
+    if (typeof factory !== "function") {
+      throw invalid("invalid list iterator");
+    }
     const iterator = factory.call(listing);
     if (iterator === null || typeof iterator !== "object" || typeof iterator.next !== "function") {
       throw invalid("invalid list iterator");
