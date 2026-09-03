@@ -9,10 +9,7 @@ const PROVIDER_CLOCK_SKEW_MS = 60_000;
 const DOC_ID_RE = /^[0-9a-f]{6}$/;
 const IDENTITY_SUB_RE = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const THREAD_ID_RE = /^t_[0-9a-z]+_[0-9a-f]{8}$/;
-// Canonical anchors are `a` plus eight hex characters. The repository's
-// executable fixtures also contain the settled seven-hex sample, so match the
-// durable store boundary exactly and do not widen beyond that range.
-const AID_RE = /^a[0-9a-f]{7,8}$/;
+const AID_RE = /^a[0-9a-f]{8}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 
 function configuredKey() {
