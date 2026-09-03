@@ -34,7 +34,8 @@ function installComments() {
   if (typeof fetch !== "function"
     || typeof AbortController !== "function"
     || typeof CustomEvent !== "function"
-    || typeof NodeFilter !== "object" || NodeFilter === null
+    || typeof NodeFilter === "undefined" || NodeFilter === null
+    || typeof NodeFilter.SHOW_TEXT !== "number"
     || typeof Range !== "function"
     || typeof requestAnimationFrame !== "function"
     || typeof performance !== "object" || performance === null
@@ -106,14 +107,12 @@ function installComments() {
   let title = null;
   let status = null;
   let truncationNote = null;
-  let filters = null;
   let list = null;
   let opener = null;
   let placementFrame = 0;
-  let placementListeners = false;
   const markers = new Map();
   const cards = new Map();
-  let decoratedBlocks = [];
+  const decoratedBlocks = new Set();
 
   /* --------------------------------------------------------- validation */
 
@@ -382,6 +381,11 @@ function installComments() {
 
   function teardown() {
     activated = false;
+    again = false;
+    window.removeEventListener("resize", schedulePlacement);
+    window.removeEventListener("hashchange", schedulePlacement);
+    document.removeEventListener("toggle", schedulePlacement, true);
+    document.removeEventListener("visibilitychange", visibilityRefresh);
     clearDecoration();
     if (toggle !== null && toggle.parentNode !== null) toggle.parentNode.removeChild(toggle);
     if (rail !== null && rail.parentNode !== null) rail.parentNode.removeChild(rail);
@@ -392,7 +396,6 @@ function installComments() {
     title = null;
     status = null;
     truncationNote = null;
-    filters = null;
     list = null;
     opener = null;
     markers.clear();
@@ -496,7 +499,7 @@ function installComments() {
 
   async function runBatch() {
     let committed = await pass();
-    if (again) {
+    if (again && activated) {
       again = false;
       if (await pass()) committed = true;
     }
@@ -596,13 +599,7 @@ function installComments() {
       if (panel.hidden) openPanel(toggle, null);
       else closePanel();
     });
-    let share = null;
-    for (const child of head.children) {
-      if (child.classList.contains("share-btn")) {
-        share = child;
-        break;
-      }
-    }
+    const share = head.querySelector(":scope > .share-btn");
     if (share !== null) head.insertBefore(toggle, share);
     else head.appendChild(toggle);
 
@@ -620,9 +617,9 @@ function installComments() {
     status = el("div", { id: "doc-comments-status", role: "status", "aria-live": "polite" });
     truncationNote = el("p", { id: "doc-comments-truncation" });
     truncationNote.hidden = true;
-    filters = el("div", { id: "doc-comments-filters" });
-    filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], () => statusFilter, (value) => { statusFilter = value; }));
-    filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], () => kindFilter, (value) => { kindFilter = value; }));
+    const filters = el("div", { id: "doc-comments-filters" });
+    filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], statusFilter, (value) => { statusFilter = value; }));
+    filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], kindFilter, (value) => { kindFilter = value; }));
     list = el("div", { id: "doc-comments-list" });
     panel.appendChild(header);
     panel.appendChild(status);
@@ -637,29 +634,26 @@ function installComments() {
     });
     document.body.appendChild(panel);
 
-    if (!placementListeners) {
-      placementListeners = true;
-      window.addEventListener("resize", schedulePlacement);
-      window.addEventListener("hashchange", schedulePlacement);
-      document.addEventListener("toggle", schedulePlacement, true);
-      const fonts = document.fonts;
-      if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
-        && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
-        fonts.ready.then(schedulePlacement, () => {});
-      }
+    window.addEventListener("resize", schedulePlacement);
+    window.addEventListener("hashchange", schedulePlacement);
+    document.addEventListener("toggle", schedulePlacement, true);
+    const fonts = document.fonts;
+    if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
+      && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
+      fonts.ready.then(schedulePlacement, () => {});
     }
     return true;
   }
 
-  function filterGroup(label, options, get, set) {
+  function filterGroup(label, options, selected, onSelect) {
     const group = el("div", { role: "group", "aria-label": label });
     const buttons = [];
     for (const [value, text] of options) {
-      const button = el("button", { type: "button", "aria-pressed": get() === value ? "true" : "false" }, text);
+      const button = el("button", { type: "button", "aria-pressed": selected === value ? "true" : "false" }, text);
       button.addEventListener("click", () => {
-        set(value);
+        onSelect(value);
         for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
-        renderList();
+        applyFilters();
       });
       buttons.push([value, button]);
       group.appendChild(button);
@@ -778,7 +772,6 @@ function installComments() {
     const orphans = [];
     const discussions = [];
     for (const entry of model) {
-      if (!passesFilters(entry)) continue;
       if (entry.location === null) discussions.push(entry);
       else if (entry.location.state === "orphaned") orphans.push(entry);
       else live.push(entry);
@@ -788,13 +781,12 @@ function installComments() {
     discussions.sort(byCreated);
 
     const fragment = document.createDocumentFragment();
-    if (live.length > 0) fragment.appendChild(group("Comments in the document", live, true));
-    if (orphans.length > 0) fragment.appendChild(group(STATE_LABEL.orphaned, orphans, false));
-    if (discussions.length > 0) fragment.appendChild(group("Discussions", discussions, false));
-    if (live.length + orphans.length + discussions.length === 0) {
-      fragment.appendChild(el("p", { class: "doc-comments-empty" }, "No comments match the current filters."));
-    }
+    if (live.length > 0) fragment.appendChild(group("Comments in the document", live));
+    if (orphans.length > 0) fragment.appendChild(group(STATE_LABEL.orphaned, orphans));
+    if (discussions.length > 0) fragment.appendChild(group("Discussions", discussions));
+    fragment.appendChild(el("p", { class: "doc-comments-empty" }, "No comments match the current filters."));
     list.replaceChildren(fragment);
+    applyFilters();
 
     if (focusedInList) {
       const card = focusedThread === null ? undefined : cards.get(focusedThread);
@@ -803,16 +795,37 @@ function installComments() {
     }
   }
 
-  function group(heading, entries, live) {
+  /* Filters hide cards in place; every retained thread keeps its card and no
+     stored thread changes. */
+  function applyFilters() {
+    if (list === null) return;
+    let shown = 0;
+    for (const section of list.querySelectorAll(".doc-comments-group")) {
+      let visible = 0;
+      for (const item of section.querySelectorAll(":scope > ul > li")) {
+        const article = item.firstElementChild;
+        const entry = article === null ? undefined : cards.get(article.getAttribute("data-thread-id"));
+        const pass = entry !== undefined && passesFilters(entry.entry);
+        item.hidden = !pass;
+        if (pass) visible += 1;
+      }
+      section.hidden = visible === 0;
+      shown += visible;
+    }
+    const empty = list.querySelector(".doc-comments-empty");
+    if (empty !== null) empty.hidden = shown > 0;
+  }
+
+  function group(heading, entries) {
     const section = el("section", { class: "doc-comments-group" });
     section.appendChild(el("h3", undefined, heading));
     const items = el("ul");
-    for (const entry of entries) items.appendChild(card(entry, live));
+    for (const entry of entries) items.appendChild(card(entry));
     section.appendChild(items);
     return section;
   }
 
-  function card(entry, live) {
+  function card(entry) {
     const thread = entry.thread;
     const item = el("li");
     const article = el("article", { class: "doc-comments-card" });
@@ -857,13 +870,13 @@ function installComments() {
     }
     article.appendChild(messages);
 
-    if (live) {
+    if (isLive(entry)) {
       const show = el("button", { type: "button", class: "doc-comments-show" }, "Show in document");
       show.addEventListener("click", () => showInDocument(entry));
       article.appendChild(show);
     }
     item.appendChild(article);
-    cards.set(thread.id, { heading, article });
+    cards.set(thread.id, { heading, entry });
     return item;
   }
 
@@ -897,7 +910,7 @@ function installComments() {
       registry.delete(ACTIVE_HIGHLIGHT);
     }
     for (const block of decoratedBlocks) block.classList.remove(BLOCK_CLASS, BLOCK_ACTIVE_CLASS);
-    decoratedBlocks = [];
+    decoratedBlocks.clear();
   }
 
   function paintDecoration() {
@@ -919,7 +932,7 @@ function installComments() {
       const block = entry.location.element;
       block.classList.add(BLOCK_CLASS);
       if (entry.thread.id === activeId) block.classList.add(BLOCK_ACTIVE_CLASS);
-      decoratedBlocks.push(block);
+      decoratedBlocks.add(block);
     }
   }
 
@@ -945,6 +958,7 @@ function installComments() {
   function placeMarkers() {
     if (rail === null || !rail.isConnected) return;
     const railRect = rail.getBoundingClientRect();
+    for (const { marker } of markers.values()) marker.hidden = true;
     const scrollWidth = document.documentElement.scrollWidth;
     const visible = [];
     for (const { marker, entry } of markers.values()) {
@@ -984,13 +998,15 @@ function installComments() {
     refresh();
   }, { once: true });
 
-  document.addEventListener("visibilitychange", () => {
+  function visibilityRefresh() {
     if (document.visibilityState !== "visible") return;
     const now = performance.now();
     if (lastVisibilityRefresh !== null && now - lastVisibilityRefresh < VISIBILITY_WINDOW_MS) return;
     lastVisibilityRefresh = now;
     refresh();
-  });
+  }
+
+  document.addEventListener("visibilitychange", visibilityRefresh);
 
   doc.comments = Object.freeze({ refresh });
 }

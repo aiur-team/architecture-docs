@@ -14,7 +14,7 @@
 #doc-comments-toggle:hover{border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
 
 /* ---- margin rail: absolutely positioned, takes no layout space ---- */
-#doc-comments-rail{position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:15}
+#doc-comments-rail{position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:40}
 .doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
 .doc-comment-marker[hidden]{display:none}
 .doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
