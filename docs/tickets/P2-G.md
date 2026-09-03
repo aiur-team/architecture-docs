@@ -283,10 +283,10 @@ With no explicit `options.docOwners`, `resolveRole()` reads the value for each i
 
 ### Email and subject normalization
 
-`normalizeEmail(value)` returns the ASCII-trimmed, lower-case address. It rejects with `invalid-email` unless all are true:
+`normalizeEmail(value)` removes only leading/trailing U+0009, U+000A, U+000C, U+000D, and U+0020, requires every remaining code unit to be ASCII before case folding, then applies `toLowerCase()` once. Requiring ASCII first prevents Unicode case folds such as U+212A from becoming an accepted ASCII address. It returns that normalized address and rejects with `invalid-email` unless all are true:
 
 - the input is a string and the normalized result is at most 254 characters;
-- the local part is 1 through 64 ASCII characters from `A-Z`, `a-z`, digits, and ``.!#$%&'*+/=?^_`{|}~-``;
+- the local part is 1 through 64 ASCII characters from `A-Z`, `a-z`, digits, and ``.!#$%&'*+=?^_`{|}~-``;
 - there is exactly one `@`;
 - the domain contains at least two DNS labels; each label starts and ends with an alphanumeric character, contains only alphanumerics or `-`, and is at most 63 characters;
 - the value contains no comma, colon, slash, backslash, control, whitespace, quoted local part, or Unicode domain spelling.
@@ -1417,6 +1417,10 @@ const maxLocalEmail = `${"a".repeat(64)}@sample.invalid`;
 const maxTotalEmail = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}`;
 assert.equal(access.normalizeEmail(maxLocalEmail), maxLocalEmail);
 assert.equal(access.normalizeEmail(maxTotalEmail), maxTotalEmail);
+for (const invalidEmail of ["name/part@sample.invalid", "\u212A@sample.invalid"]) {
+  expectAccessError(() => access.normalizeEmail(invalidEmail),
+    "invalid-email", 400, "Invalid email address");
+}
 expectAccessError(() => access.normalizeEmail(`${"a".repeat(65)}@sample.invalid`),
   "invalid-email", 400, "Invalid email address");
 expectAccessError(() => access.normalizeEmail(

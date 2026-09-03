@@ -526,7 +526,7 @@ if (!/^[0-9a-f]{6}$/.test(docId) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{1
 if (![ownerSub, orgSub, externalSub].every((value) => /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/.test(value))) throw new Error("invalid fixture input");
 const emailParts = externalEmail.split("@");
 const emailLabels = emailParts.length === 2 ? emailParts[1].split(".") : [];
-if (externalEmail.length > 254 || emailParts[0]?.length < 1 || emailParts[0]?.length > 64 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(emailParts[0] ?? "")) throw new Error("invalid fixture input");
+if (externalEmail.length > 254 || emailParts[0]?.length < 1 || emailParts[0]?.length > 64 || !/^[a-z0-9.!#$%&'*+=?^_`{|}~-]+$/.test(emailParts[0] ?? "")) throw new Error("invalid fixture input");
 if (emailLabels.length < 2 || emailLabels.at(-1) !== "invalid" || emailLabels.some((label) => label.length < 1 || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) throw new Error("invalid fixture input");
 
 let requestedStatus = 0, timedOut = false, cleanupProved = false;
