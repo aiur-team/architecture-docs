@@ -8,19 +8,19 @@ The work is already planned. Nothing here asks you to design the platform — th
 
 ## Current coordination status
 
-The Phase 1 specifications in `docs/tickets/P1-A.md` through `docs/tickets/P1-E.md` are complete,
-reviewed as implementable without the integration plan, and pushed to the handoff branch. The repository
-documents are the canonical specifications; GitHub issue bodies are short permanent links to them, not
-copies. Phase 2 is also complete, reviewed, and pushed. A separate specification lane is finishing Phase
-3 and then researching Phase 4. It will push `docs/tickets/P3-*.md` and `P4-*.md`, then replace only the
-matching issue bodies with commit-permalink pointers after each phase passes a document-only review.
+All 42 canonical specifications in `docs/tickets/` are complete, researched through Phase 4, reviewed by
+fresh document-only reviewers as implementable without the integration plan, and pushed to this handoff
+branch. GitHub issues #1 through #42 contain only short permanent links to the corresponding repository
+documents; each full-commit link has been checked against the canonical file byte-for-byte. The separate
+specification lane is complete and no longer owns pending ticket-document or issue-body work.
 
-**That specification work does not block Aiur from beginning Phase 1 now.** The Aiur Executor may dispatch
-Phase 1 from the canonical documents linked by issues #1 through #5 while the specification lane works on
-issues #6 through #42. Do not dispatch a later phase until its canonical documents have been pushed and
-reviewed and its issue pointers resolve to those exact bytes. The two lanes must
-not edit the same issue or ticket document: the specification lane owns only the remaining ticket docs and
-issue bodies, while Aiur owns Phase 1 implementation branches and pull requests.
+**The specification lane did not block Aiur from beginning Phase 1; Phase 1 remained unblocked throughout
+the later-ticket research.** All four phases are now specification-ready. Dispatch and integration must
+still follow each canonical document's dependencies and shared-file order. The operator reports that a
+separate-machine Aiur implementation run has already progressed through Phase 2; verify the live Aiur,
+issue, branch, and pull-request state before redispatching work rather than treating this document as an
+implementation ledger. Implementation agents own their isolated source branches and pull requests; they
+must not rewrite canonical ticket documents or their permanent issue pointers as part of implementation.
 
 Phase 1 maximizes parallel source work without pretending integration is parallel. P1-A, P1-B, P1-C, and
 P1-E may be authored concurrently in isolated worktrees; integrate P1-A before P1-B, start P1-D from the
@@ -108,10 +108,11 @@ Invoke the `aiur-run` skill and act as Executor. That skill owns the detail: lau
 monitor, the capacity audit, the hourly retrospective, review fan-out, and the merge policy. This file
 only records what is specific to *this* repository.
 
-Phase 1 may start as soon as the operator has completed step 2; it does not wait for the separate ticket
-specification lane to finish phases 2 through 4. Before advancing Aiur to a later phase, confirm that the
-matching `docs/tickets/` files exist on the handoff branch, each issue's commit permalink resolves to the
-exact canonical file bytes, and the phase's document-only reviewer passed them.
+Phase 1 was specification-ready before the later-ticket lane finished and remained unblocked. That lane is
+now complete: every phase's `docs/tickets/` files exist on the handoff branch, each issue's commit permalink
+resolves to the exact canonical bytes, and every phase passed its document-only review. Resume from the
+live Aiur state, do not recreate or redispatch already completed work, and advance only when the canonical
+dependency and shared-file integration gates permit it.
 
 ---
 
