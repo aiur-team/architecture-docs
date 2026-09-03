@@ -132,7 +132,8 @@ const MAX_NAME_LENGTH = 200;
 const INVITATION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 const ASCII_WHITESPACE = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
-const EMAIL_LOCAL_PATTERN = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}$/;
+const EMAIL_EDGE_WHITESPACE = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
+const EMAIL_LOCAL_PATTERN = /^[a-z0-9.!#$%&'*+=?^_`{|}~-]{1,64}$/;
 const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const IDENTITY_SUB_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const INVITATION_HASH_PATTERN = /^[0-9a-f]{32}$/;
@@ -287,7 +288,11 @@ export function normalizeEmail(value) {
   if (typeof value !== "string") {
     throw accessError("invalid-email");
   }
-  const normalized = value.replace(ASCII_WHITESPACE, "").toLowerCase();
+  const trimmed = value.replace(EMAIL_EDGE_WHITESPACE, "");
+  if (/[^\x00-\x7f]/.test(trimmed)) {
+    throw accessError("invalid-email");
+  }
+  const normalized = trimmed.toLowerCase();
   if (normalized.length === 0 || normalized.length > MAX_EMAIL_LENGTH) {
     throw accessError("invalid-email");
   }
