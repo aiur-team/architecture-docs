@@ -1442,11 +1442,10 @@ function mountSharePanel(event) {
     const upperTop = window.scrollY + window.innerHeight - panel.offsetHeight - 8;
     const below = window.scrollY + rect.bottom + 8;
     const above = window.scrollY + rect.top - panel.offsetHeight - 8;
-    const top = upperTop < lowerTop
-      ? lowerTop
-      : below <= upperTop
-        ? below
-        : Math.min(upperTop, Math.max(lowerTop, above));
+    let top;
+    if (upperTop < lowerTop) top = lowerTop;
+    else if (below <= upperTop) top = below;
+    else top = Math.min(upperTop, Math.max(lowerTop, above));
 
     const lowerLeft = window.scrollX + 8;
     const upperLeft = window.scrollX + document.documentElement.clientWidth
@@ -1660,7 +1659,11 @@ function mountSharePanel(event) {
     if (defaultPolicy !== null) defaultPolicy.textContent = "";
     button.remove();
     if (panel !== null) panel.remove();
-    controller = null;
+    if (controller !== null) {
+      const removingController = controller;
+      controller = null;
+      removingController.abort();
+    }
     docId = "";
     sessionRole = "";
     mayShare = false;
