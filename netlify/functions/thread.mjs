@@ -655,7 +655,7 @@ function replyTransformation(docId, threadId, comment) {
       createdAt: comment.createdAt,
       editedAt: null,
     });
-    return current;
+    return validateThread(current, docId, threadId);
   };
 }
 
@@ -685,6 +685,14 @@ function statusTransformation(docId, threadId, status, operationTime, actor) {
 // Operations.
 // ---------------------------------------------------------------------------
 
+function openStore() {
+  try {
+    return docState();
+  } catch {
+    throw fail("unavailable");
+  }
+}
+
 async function mutateThread(req, context, method) {
   requireOrigin(req);
   const identity = await identify(req);
@@ -710,7 +718,7 @@ async function mutateThread(req, context, method) {
   }
 
   const key = threadKey(docId, threadId);
-  const store = docState();
+  const store = openStore();
   const committed = await mutate(store, key, null, apply);
   if (committed === null || typeof committed !== "object" || !hasOwn(committed, "value")) {
     throw fail("invalid-state");

@@ -846,12 +846,16 @@ function parseListedThreadId(key, docId, prefix) {
 }
 
 async function closeIterator(iterator) {
-  if (iterator !== null && typeof iterator === "object" && typeof iterator.return === "function") {
-    try {
-      await iterator.return();
-    } catch {
-      // Only the rejection is ignored; the early failure is still reported.
+  if (iterator === null || typeof iterator !== "object") {
+    return;
+  }
+  try {
+    const close = iterator.return;
+    if (typeof close === "function") {
+      await close.call(iterator);
     }
+  } catch {
+    // Cleanup failures never replace the original provider failure.
   }
 }
 
@@ -914,13 +918,21 @@ async function listThreadIds(store, docId) {
 // Operations.
 // ---------------------------------------------------------------------------
 
+function openStore() {
+  try {
+    return docState();
+  } catch {
+    throw fail("unavailable");
+  }
+}
+
 async function listThreads(req) {
   const identity = await identify(req);
   requireActor(identity);
   const { docId, limit, cursor } = parseListQuery(req);
   await requireReadAccess(docId, identity);
 
-  const store = docState();
+  const store = openStore();
   const ids = await listThreadIds(store, docId);
   const candidates = [...ids].sort().filter((id) => cursor === null || id > cursor);
 
@@ -987,7 +999,7 @@ async function createThread(req) {
   validateThread(thread, docId, threadId);
   const key = threadKey(docId, threadId);
 
-  const store = docState();
+  const store = openStore();
   let result;
   try {
     result = await store.setJSON(key, thread, { onlyIfNew: true });
