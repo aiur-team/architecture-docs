@@ -1,0 +1,14 @@
+[
+  { "md": "Plain lanterns.", "html": "Plain lanterns." },
+  { "md": "Tea & <toast>.", "html": "Tea &amp; &lt;toast&gt;." },
+  { "md": "Use **bold** type.", "html": "Use <strong>bold</strong> type." },
+  { "md": "Keep *quiet* detail.", "html": "Keep <em>quiet</em> detail." },
+  { "md": "Run `npm test`.", "html": "Run <code>npm test</code>." },
+  { "md": "*Outer **bold** detail*", "html": "<em>Outer <strong>bold</strong> detail</em>" },
+  { "md": "**A & B**", "html": "<strong>A &amp; B</strong>" },
+  { "md": "Use `*quiet*` in code.", "html": "Use <code><em>quiet</em></code> in code." },
+  { "md": "Unicode café — 東京.", "html": "Unicode café — 東京." },
+  { "md": "Unmatched *asterisk.", "html": "Unmatched *asterisk." },
+  { "md": "Empty **** marks.", "html": "Empty **** marks." },
+  { "md": "Literal &lt; stays text.", "html": "Literal &amp;lt; stays text." }
+]

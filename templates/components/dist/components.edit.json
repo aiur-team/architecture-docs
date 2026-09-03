@@ -1,0 +1,127 @@
+{
+  "docId": "52c164",
+  "instance": "components",
+  "commit": "",
+  "blocks": {
+    "a8cd9c6f4": {
+      "file": "sections/01-structure.html",
+      "section": "structure",
+      "tag": "h2",
+      "hash": "cf12e374b1561d4950831d2398bbedf92c15786f14b008fdf97d430de8ee3b87"
+    },
+    "acfa35438": {
+      "file": "sections/01-structure.html",
+      "section": "structure",
+      "tag": "p",
+      "hash": "773d7bac3df6c195f4e320d8e1012e6621c927abb64a243cd669cffe490c45dd"
+    },
+    "ad5ae2321": {
+      "file": "sections/01-structure.html",
+      "section": "structure",
+      "tag": "p",
+      "hash": "f23500c0b63d38a43dfaceefcdb06763350682fa5867888a8d9d190fc8a6da31"
+    },
+    "ae81a9314": {
+      "file": "sections/02-diagrams.html",
+      "section": "diagrams",
+      "tag": "h2",
+      "hash": "7d1c8f33e4a00baa6462492d6ecf756ea114c510ecc5d2c44c51562c0bfb9fc1"
+    },
+    "a23bbb288": {
+      "file": "sections/02-diagrams.html",
+      "section": "diagrams",
+      "tag": "h2",
+      "hash": "ec77a7110334461734e64b2557086d9d8554f695926f2a406df30ec5266c4b72"
+    },
+    "a46f1d735": {
+      "file": "sections/02-diagrams.html",
+      "section": "diagrams",
+      "tag": "p",
+      "hash": "be631ba74d40e99c0f6b717642b34764a68f2c92b75bddcc95e11a944b1c3f06"
+    },
+    "a8c1a8ea2": {
+      "file": "sections/02-diagrams.html",
+      "section": "diagrams",
+      "tag": "h2",
+      "hash": "68e16a1eacf5344d502b2c803444ca3c616744948641d5f954389c8d5219cd6e"
+    },
+    "a127c6fb4": {
+      "file": "sections/02-diagrams.html",
+      "section": "diagrams",
+      "tag": "p",
+      "hash": "2582d4e64b24d8577ed5f02d9cfd84d5b2a4db10d15664db9ce538e11e43bdaf"
+    },
+    "a4f12749b": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "43414984e011cbc4b8a20bdcd6e854b0dac7b47ec339a8263bb4ae48c445a24f"
+    },
+    "a0f4b2878": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "p",
+      "hash": "0faa4a2df348099fd56cb0049d1b1f4d9ca314c56dcc96f9a40e174f905569d7"
+    },
+    "adebb9715": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h3",
+      "hash": "0de6abae6ffa7c1d3538db6345a2b6a271135b619ab6b1430901c8d4e4e285eb"
+    },
+    "a46075812": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "p",
+      "hash": "0c16b424d494e45760d563a432c7fde3e3a51159cdb8e572d83a634212d38c26"
+    },
+    "a193daf13": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "e3fe2a3fe52c9c35874478d22328281ebf754f1b35747152c13e441a9eed92df"
+    },
+    "a270ca341": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "p",
+      "hash": "15b358fdbad98042f7f70cbedec22cf15c9253130919ecc5455abe518880bef2"
+    },
+    "a7e900370": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "b193e758deec756cc7d8cefa067d15af6dcc4e0e1f5a39c8a1f4b34cc2d9f8bd"
+    },
+    "a8ae221a4": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "p",
+      "hash": "e25adb08f89b74469fc23101e4deb8fe4e5d2f773014967d0dfd4bd58f349f33"
+    },
+    "a1299c5da": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "b4b0b75a774761b3c63ac250507efbb7ca51383efec56f30eb4cde9f7de2d613"
+    },
+    "aac1408d8": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "5f45d5e96e361c8603e2124501c028b552031c245b167bf22ee277dc55ebdffb"
+    },
+    "a3d982fd8": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "p",
+      "hash": "eae689d760e45dd5082a4f90f896d25704a95af5d1206d19be3d241d18485a4b"
+    },
+    "add568375": {
+      "file": "sections/03-content.html",
+      "section": "content",
+      "tag": "h2",
+      "hash": "da0fcc23096f15427ba8c40bf21aadfe70b2afb74fb64709cbf671fbdf352346"
+    }
+  }
+}
