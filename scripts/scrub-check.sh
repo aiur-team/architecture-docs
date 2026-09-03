@@ -55,7 +55,7 @@ hits=0
 
 for term in "${DENY[@]}"; do
   # -I skips binary files. Exclude this script, which necessarily names them.
-  out="$(grep -RIniE -- "$term" "${files[@]}" 2>/dev/null | grep -v '^scripts/scrub-check.sh:' || true)"
+  out="$(grep -RIniE -- "$term" "${files[@]}" 2>/dev/null | grep -v 'scrub-check\.sh:' || true)"
   if [ -n "$out" ]; then
     echo "DENY  /$term/" >&2
     printf '%s\n' "$out" | sed 's/^/      /' | cut -c1-200 >&2
@@ -66,7 +66,7 @@ done
 
 warned=0
 for term in "${WARN[@]}"; do
-  out="$(grep -RIniE -- "$term" "${files[@]}" 2>/dev/null | grep -v '^scripts/scrub-check.sh:' || true)"
+  out="$(grep -RIniE -- "$term" "${files[@]}" 2>/dev/null | grep -v 'scrub-check\.sh:' || true)"
   if [ -n "$out" ]; then
     echo "WARN  /$term/ — confirm this use is generic, not the private original" >&2
     printf '%s\n' "$out" | sed 's/^/      /' | cut -c1-160 >&2
