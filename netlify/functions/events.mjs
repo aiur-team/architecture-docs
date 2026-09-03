@@ -1,6 +1,7 @@
 import { identify, requireOrigin } from "../lib/identity.mjs";
 import {
   resolveRole,
+  capabilitiesFor,
   normalizeEmail,
   assertIdentitySub,
   AccessError,
@@ -332,22 +333,10 @@ function assertActor(value) {
     throw invalid("invalid actor name");
   }
   const email = value.email === "" ? "" : assertNormalizedEmail(value.email);
-  return { sub, name, email };
-}
-
-/**
- * An access-target subject: P2-G's identity-subject grammar plus a minimum
- * of two characters. The P3-B acceptance fixture treats the one-character
- * subject `x` as the grammar boundary representative, which P2-G's own
- * `^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$` alone would accept; the extra floor
- * applies to target identifiers only, never to the proven actor.
- */
-function assertTargetSub(value) {
-  assertSub(value);
-  if (value.length < 2) {
-    throw invalid("invalid subject");
+  if (sub === "system" && (name !== "Build" || email !== "")) {
+    throw invalid("invalid system actor");
   }
-  return value;
+  return { sub, name, email };
 }
 
 function assertAid(value) {
@@ -374,7 +363,7 @@ function assertTargetField(name, value) {
     case "sub":
     case "fromSub":
     case "toSub":
-      return assertTargetSub(value);
+      return assertSub(value);
     case "email":
       return assertNormalizedEmail(value);
     default:
@@ -744,6 +733,12 @@ function assertResolvedAccess(value) {
     }
     access[field] = value[field];
   }
+  const expected = capabilitiesFor(value.role);
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (value[field] !== expectedValue) {
+      throw invalid("invalid access result");
+    }
+  }
   return access;
 }
 
@@ -932,10 +927,14 @@ async function collectListedKeys(store, prefix) {
     }
     for (let pull = 0; pull <= MAX_LIST_PAGES; pull += 1) {
       const result = await iterator.next();
-      if (result === null || typeof result !== "object") {
+      assertExactKeys(result, ["done", "value"], "invalid list result");
+      if (typeof result.done !== "boolean") {
         throw invalid("invalid list result");
       }
       if (result.done === true) {
+        if (result.value !== undefined) {
+          throw invalid("invalid list result");
+        }
         return keys;
       }
       if (pull === MAX_LIST_PAGES) {
