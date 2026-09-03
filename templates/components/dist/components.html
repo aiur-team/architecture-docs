@@ -247,6 +247,17 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sec-toggle svg{transition:none}}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
+/* One silent session reveal.  Capability-scoped controls stay hidden until a
+   valid authenticated response sets data-session on the root element.  These
+   are author-origin presentation hints only; the selectors never override an
+   element's own hidden state, and print suppresses both capability groups. */
+[data-reader-only],[data-editor-only] { display: none; }
+
+:root[data-session="reader"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-editor-only]:not([hidden]) { display: revert; }
+
+@media print {
+  [data-reader-only],[data-editor-only] { display: none!important; }
+}
 
 </style>
 
@@ -284,8 +295,8 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="a8cd9c6f4">How a document is assembled</h2>
-      <p data-aid="acfa35438">Each section file carries a metadata comment, an optional <code>&lt;!-- peek --&gt;</code> block shown while the section is closed, and a <code>&lt;!-- body --&gt;</code> block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.</p>
+<h2 data-aid="a8cd9c6f4" data-editable>How a document is assembled</h2>
+      <p data-aid="acfa35438" data-editable data-md="Each section file carries a metadata comment, an optional `&lt;!-- peek --&gt;` block shown while the section is closed, and a `&lt;!-- body --&gt;` block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.">Each section file carries a metadata comment, an optional <code>&lt;!-- peek --&gt;</code> block shown while the section is closed, and a <code>&lt;!-- body --&gt;</code> block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.</p>
       <pre data-aid="a39ecd47a">&lt;!--
 id: architecture
 label: Architecture
@@ -295,7 +306,7 @@ summary: One or two sentences, shown while the section is closed.
   ...the one diagram that makes this section worth opening...
 &lt;!-- body --&gt;
   ...the open markup...</pre>
-      <p data-aid="ad5ae2321"><strong>Use the peek well.</strong> It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line.</p>
+      <p data-aid="ad5ae2321" data-editable data-md="**Use the peek well.** It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line."><strong>Use the peek well.</strong> It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line.</p>
     </div></div>
   </details>
 </section>
@@ -324,7 +335,7 @@ summary: One or two sentences, shown while the section is closed.
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="ae81a9314">Flow diagram</h2>
+<h2 data-aid="ae81a9314" data-editable>Flow diagram</h2>
       <p data-aid="ae8f14f7e">Use <code>.panel</code> &rarr; <code>.flow</code> &rarr; <code>.node</code>. Stack nodes vertically with <code>.col</code>. Label an edge with <code>.arrow .at</code>. Add a legend with <code>.cap</code>.</p>
       <div class="panel">
         <div class="flow">
@@ -347,15 +358,15 @@ summary: One or two sentences, shown while the section is closed.
   &lt;/div&gt;
 &lt;/div&gt;</pre>
 
-      <h2 data-aid="a23bbb288">Sequence table</h2>
-      <p data-aid="a46f1d735">For an ordered exchange between parties. Four cells per row: step, from, message, to.</p>
+      <h2 data-aid="a23bbb288" data-editable>Sequence table</h2>
+      <p data-aid="a46f1d735" data-editable>For an ordered exchange between parties. Four cells per row: step, from, message, to.</p>
       <div class="seq">
         <div><span class="sq">1</span></div><div class="sa">Client</div><div class="sm"><b>asks for a report</b><br>GET /reports/{id}</div><div class="sa">API</div>
         <div><span class="sq">2</span></div><div class="sa">API</div><div class="sm"><b>returns the record</b><br>with its coverage claim</div><div class="sa">Client</div>
       </div>
 
-      <h2 data-aid="a8c1a8ea2">Banded ranges</h2>
-      <p data-aid="a127c6fb4">For score bands, tiers and thresholds. The left rail carries the tone.</p>
+      <h2 data-aid="a8c1a8ea2" data-editable>Banded ranges</h2>
+      <p data-aid="a127c6fb4" data-editable>For score bands, tiers and thresholds. The left rail carries the tone.</p>
       <div class="bands">
         <div class="band risk"><span class="rng">91&ndash;99</span><span class="act">Block<em>sub-label</em></span><span class="pill risk">refuse</span></div>
         <div class="band warn"><span class="rng">51&ndash;90</span><span class="act">Hold for review</span><span class="pill warn">hold</span></div>
@@ -382,11 +393,11 @@ summary: One or two sentences, shown while the section is closed.
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="a4f12749b">Thesis box</h2>
-      <p data-aid="a0f4b2878">One per document, at the top. It carries the single claim the document is making.</p>
+<h2 data-aid="a4f12749b" data-editable>Thesis box</h2>
+      <p data-aid="a0f4b2878" data-editable>One per document, at the top. It carries the single claim the document is making.</p>
       <div class="thesis">
-        <h3 data-aid="adebb9715">The claim this document makes</h3>
-        <p data-aid="a46075812">Lead with the argument, not the summary. If a reader takes one sentence away, this is it.</p>
+        <h3 data-aid="adebb9715" data-editable>The claim this document makes</h3>
+        <p data-aid="a46075812" data-editable>Lead with the argument, not the summary. If a reader takes one sentence away, this is it.</p>
         <div class="verdicts">
           <div class="vc"><span class="tag ok">Guaranteed</span><h4 data-aid="af3e68f75">What holds</h4><p data-aid="ace1307b9">The thing you can defend.</p></div>
           <div class="vc"><span class="tag warn">Best effort</span><h4 data-aid="a58dcde65">What is partial</h4><p data-aid="a2a88ac70">The thing with caveats.</p></div>
@@ -394,8 +405,8 @@ summary: One or two sentences, shown while the section is closed.
         </div>
       </div>
 
-      <h2 data-aid="a193daf13">Tables</h2>
-      <p data-aid="a270ca341">Wrap in <code>.tw</code> so wide tables scroll inside their own container rather than the page. Use <code>td.n</code> for numeric columns.</p>
+      <h2 data-aid="a193daf13" data-editable>Tables</h2>
+      <p data-aid="a270ca341" data-editable data-md="Wrap in `.tw` so wide tables scroll inside their own container rather than the page. Use `td.n` for numeric columns.">Wrap in <code>.tw</code> so wide tables scroll inside their own container rather than the page. Use <code>td.n</code> for numeric columns.</p>
       <div class="tw"><table>
         <thead><tr><th data-aid="ae0681542">Thing</th><th data-aid="aa7250206">State</th><th class="n" data-aid="a66e12969">Count</th><th data-aid="a21e2caea">Why</th></tr></thead>
         <tbody>
@@ -405,27 +416,27 @@ summary: One or two sentences, shown while the section is closed.
         </tbody>
       </table></div>
 
-      <h2 data-aid="a7e900370">Card grid</h2>
-      <p data-aid="a8ae221a4"><code>.grid2</code> or <code>.grid3</code>. Good for a two-way comparison.</p>
+      <h2 data-aid="a7e900370" data-editable>Card grid</h2>
+      <p data-aid="a8ae221a4" data-editable data-md="`.grid2` or `.grid3`. Good for a two-way comparison."><code>.grid2</code> or <code>.grid3</code>. Good for a two-way comparison.</p>
       <div class="grid2">
         <div class="card"><p class="kicker" data-aid="af65f17e8">Option A</p><h4 data-aid="a9f590049">Fail closed</h4><p data-aid="ae6dee3b8">Trades throughput for defensibility.</p></div>
         <div class="card"><p class="kicker" data-aid="a82434dce">Option B</p><h4 data-aid="a4e1ab371">Fail open</h4><p data-aid="acffe60a6">Keeps moving, and the record must say so.</p></div>
       </div>
 
-      <h2 data-aid="a1299c5da">Phases</h2>
+      <h2 data-aid="a1299c5da" data-editable>Phases</h2>
       <div class="phases">
         <div class="ph done"><b>Phase 1</b><span class="cnt">1</span><span class="pt">Scaffold. Everything waits on it</span></div>
         <div class="ph"><b>Phase 2</b><span class="cnt">8</span><span class="pt">Leaves, no shared files</span></div>
       </div>
 
-      <h2 data-aid="aac1408d8">Nested disclosure</h2>
-      <p data-aid="a3d982fd8">Use <code>details.dx</code> for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.</p>
+      <h2 data-aid="aac1408d8" data-editable>Nested disclosure</h2>
+      <p data-aid="a3d982fd8" data-editable data-md="Use `details.dx` for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.">Use <code>details.dx</code> for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.</p>
       <details class="dx">
         <summary><span class="dxn">A</span>A nested disclosure</summary>
         <div class="dxb"><p data-aid="abe56bb8c">Body content. Lettered rather than numbered, so it does not compete with the section order.</p></div>
       </details>
 
-      <h2 data-aid="add568375">Numbered questions</h2>
+      <h2 data-aid="add568375" data-editable>Numbered questions</h2>
       <div class="qs">
         <div class="q"><span class="num">1</span><div><h4 data-aid="a795d1196">State the question as a question</h4><p data-aid="a53807612">Then say what changes depending on the answer.</p></div></div>
       </div>
@@ -785,4 +796,184 @@ export function scanBlocks(fragment) {
 }
 //# sourceMappingURL=anchor-core.js.map
 window.doc.anchor = { BLOCK, norm, scanBlocks };
+</script>
+<script type="module">
+/* Session probe — the one silent capability reveal.
+   Loading, signed out, malformed, and degraded states are visually identical
+   to the static document: nothing is created, logged, or announced until a
+   valid 200 response passes the exact content-type grammar and the session
+   shape check below.  That one success sets data-session on the root and
+   publishes the same recursively frozen parsed object to every module that
+   attached its listener before this final script ran. */
+document.documentElement.removeAttribute("data-session");
+runSessionProbe();
+
+/* Pure parser for the single accepted content-type grammar:
+   OWS "application" "/" "json" OWS [ ";" OWS "charset" "=" ( "utf-8" |
+   DQUOTE "utf-8" DQUOTE ) OWS ], ASCII-case-insensitive, OWS = SP/HTAB. */
+function isJsonContentType(value) {
+  if (typeof value !== "string") return false;
+  const bytes = value;
+  const length = bytes.length;
+  let at = 0;
+  const ows = () => {
+    while (at < length) {
+      const code = bytes.charCodeAt(at);
+      if (code === 32 || code === 9) at += 1;
+      else return;
+    }
+  };
+  const lower = (code) => (code >= 65 && code <= 90 ? code + 32 : code);
+  const word = (expected) => {
+    if (at + expected.length > length) return false;
+    for (let i = 0; i < expected.length; i += 1) {
+      if (lower(bytes.charCodeAt(at)) !== expected.charCodeAt(i)) return false;
+      at += 1;
+    }
+    return true;
+  };
+  const atEnd = () => at === length;
+
+  ows();
+  if (!word("application")) return false;
+  if (at >= length || bytes.charCodeAt(at) !== 47) return false;
+  at += 1;
+  if (!word("json")) return false;
+  ows();
+  if (atEnd()) return true;
+  if (bytes.charCodeAt(at) !== 59) return false;
+  at += 1;
+  ows();
+  if (!word("charset")) return false;
+  if (at >= length || bytes.charCodeAt(at) !== 61) return false;
+  at += 1;
+  if (at < length && bytes.charCodeAt(at) === 34) {
+    at += 1;
+    if (!word("utf-8")) return false;
+    if (at >= length || bytes.charCodeAt(at) !== 34) return false;
+    at += 1;
+  } else {
+    if (!word("utf-8")) return false;
+  }
+  ows();
+  return atEnd();
+}
+
+const RESERVED_FINAL_FIELDS = [
+  "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+];
+const ROLES = ["owner", "editor", "commenter", "viewer", "none"];
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isContainer(value) {
+  return value !== null && typeof value === "object";
+}
+
+/* Accept exactly one of two shapes.  Presence of any reserved final field
+   commits to the complete P3-H shape and rejects every partial or mixed body;
+   zero reserved fields selects the legacy P1-C shape. */
+function validSession(body, docId) {
+  if (!isRecord(body)) return null;
+  let reservedPresent = 0;
+  for (const field of RESERVED_FINAL_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) reservedPresent += 1;
+  }
+  if (typeof body.sub !== "string") return null;
+  if (typeof body.email !== "string") return null;
+  if (typeof body.name !== "string") return null;
+  if (!Array.isArray(body.roles)) return null;
+  for (const entry of body.roles) {
+    if (typeof entry !== "string") return null;
+  }
+  if (typeof body.canComment !== "boolean") return null;
+  if (typeof body.canEdit !== "boolean") return null;
+  if (reservedPresent === 0) return body;
+
+  if (reservedPresent !== RESERVED_FINAL_FIELDS.length) return null;
+  if (body.doc !== docId) return null;
+  if (!ROLES.includes(body.role)) return null;
+  if (typeof body.shared !== "boolean") return null;
+  if (typeof body.canSuggest !== "boolean") return null;
+  if (typeof body.canAccept !== "boolean") return null;
+  if (typeof body.canShare !== "boolean") return null;
+  if (typeof body.canSeeMembers !== "boolean") return null;
+  if (body.roles.length !== 1) return null;
+  if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
+  return body;
+}
+
+/* Iterative deepest-first freeze over the parsed tree, never the call stack.
+   JSON cannot carry cycles, so a plain work stack is exact for its domain. */
+function deepFreeze(root) {
+  if (!isContainer(root)) return root;
+  const stack = [root];
+  const ordered = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    ordered.push(current);
+    for (const field of Object.keys(current)) {
+      const child = current[field];
+      if (isContainer(child)) stack.push(child);
+    }
+  }
+  for (let i = ordered.length - 1; i >= 0; i -= 1) {
+    Object.freeze(ordered[i]);
+  }
+  return root;
+}
+
+async function runSessionProbe() {
+  const protocol = location.protocol;
+  if (protocol !== "http:" && protocol !== "https:") return;
+
+  const meta = document.querySelector('meta[name="doc-id"]');
+  const content = meta === null ? null : meta.getAttribute("content");
+  const docId = typeof content === "string" ? content.trim() : "";
+  if (docId === "") return;
+
+  if (typeof fetch !== "function"
+    || typeof AbortController !== "function"
+    || typeof CustomEvent !== "function"
+    || typeof URL !== "function") {
+    return;
+  }
+
+  const endpoint = new URL("/api/session", location.href);
+  endpoint.searchParams.set("doc", docId);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      mode: "same-origin",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (response.status !== 200) return;
+    const header = response.headers.get("content-type");
+    if (header === null) return;
+    if (!isJsonContentType(header)) return;
+    const body = await response.json();
+    const session = validSession(body, docId);
+    if (session === null) return;
+    deepFreeze(session);
+    const maySuggest = Object.prototype.hasOwnProperty.call(session, "canSuggest")
+      ? session.canSuggest
+      : session.canEdit;
+    document.documentElement.dataset.session = maySuggest ? "editor" : "reader";
+    document.dispatchEvent(new CustomEvent("session", { detail: session }));
+  } catch (error) {
+    return;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 </script>

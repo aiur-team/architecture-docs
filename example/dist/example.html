@@ -247,6 +247,17 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sec-toggle svg{transition:none}}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
+/* One silent session reveal.  Capability-scoped controls stay hidden until a
+   valid authenticated response sets data-session on the root element.  These
+   are author-origin presentation hints only; the selectors never override an
+   element's own hidden state, and print suppresses both capability groups. */
+[data-reader-only],[data-editor-only] { display: none; }
+
+:root[data-session="reader"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-editor-only]:not([hidden]) { display: revert; }
+
+@media print {
+  [data-reader-only],[data-editor-only] { display: none!important; }
+}
 
 </style>
 
@@ -290,7 +301,7 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="a0eb14940">CI spends most of its time rebuilding things that have not changed</h2>
+<h2 data-aid="a0eb14940" data-editable>CI spends most of its time rebuilding things that have not changed</h2>
 
 <p data-aid="ad6195c8c">A full build of the monorepo takes <b>14 minutes</b>. A one-line change to a leaf package takes the
 same 14 minutes, because each CI runner starts from an empty working directory and no runner can see what
@@ -302,14 +313,14 @@ produced by an earlier build</b>. The work is not merely similar. It is the same
 <div class="grid2">
   <div class="card">
     <p class="kicker" data-aid="a59bd1ff6">What it costs</p>
-    <h4 data-aid="af2e32500">Reviewer latency, not compute</h4>
-    <p data-aid="a2e2f443f">Compute is cheap and getting cheaper. A reviewer who has context-switched away is expensive and
+    <h4 data-aid="af2e32500" data-editable>Reviewer latency, not compute</h4>
+    <p data-aid="a2e2f443f" data-editable>Compute is cheap and getting cheaper. A reviewer who has context-switched away is expensive and
     does not come back for twenty minutes. The 14 minutes is the real number.</p>
   </div>
   <div class="card">
     <p class="kicker" data-aid="a5bd2a1d1">Why it persists</p>
-    <h4 data-aid="ad4eaaa32">Local caches work, and do not travel</h4>
-    <p data-aid="a313d5341">Every build tool already caches locally. That is why the problem is invisible to the person who
+    <h4 data-aid="ad4eaaa32" data-editable>Local caches work, and do not travel</h4>
+    <p data-aid="a313d5341" data-editable>Every build tool already caches locally. That is why the problem is invisible to the person who
     introduced it: on their machine the second build takes nine seconds.</p>
   </div>
 </div>
@@ -348,7 +359,7 @@ asked to write a document has something honest to imitate.</p>
     </summary>
     <div class="sec-body"><div class="wrap">
 <div class="thesis">
-  <h3 data-aid="a9fb6f9bc">The cache is easy. Deciding what a cache key covers is the whole problem.</h3>
+  <h3 data-aid="a9fb6f9bc" data-editable>The cache is easy. Deciding what a cache key covers is the whole problem.</h3>
   <p data-aid="a6853770a">A remote cache is a hash map in front of an object store, and that part is a week of work. The
   question that decides whether it can be trusted is narrower and harder: <b>what counts as an input?</b>
   Miss one, and the cache returns a stale artifact that compiles, passes, and is wrong.</p>
@@ -359,14 +370,14 @@ asked to write a document has something honest to imitate.</p>
   </div>
 </div>
 
-<h2 data-aid="a35513482">The key is a hash of everything the build is allowed to read</h2>
+<h2 data-aid="a35513482" data-editable>The key is a hash of everything the build is allowed to read</h2>
 
 <p data-aid="a0a77bbf7">A cache entry is keyed by a digest over the ordered set of declared inputs: the content of every source
 file, the resolved toolchain version, the compiler flags, and the target platform. <b>The key is not the
 command line.</b> Two invocations that differ only in argument order must produce the same key, or the
 hit rate collapses without anybody noticing.</p>
 
-<p data-aid="a955a3ee5">Entries are immutable. A second write to an existing key is compared and dropped, never overwritten —
+<p data-aid="a955a3ee5" data-editable>Entries are immutable. A second write to an existing key is compared and dropped, never overwritten —
 so a poisoned entry cannot replace a good one, and a mismatch is a loud signal that some input is not in
 the key.</p>
 
@@ -405,9 +416,9 @@ key. An allow-list is the only workable answer, and it must be reviewed rather t
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="a3ce3beb3">Reads are open, writes are proved</h2>
+<h2 data-aid="a3ce3beb3" data-editable>Reads are open, writes are proved</h2>
 
-<p data-aid="a9c762f16">The two paths have almost nothing in common, and merging them is the design error to avoid. A read is
+<p data-aid="a9c762f16" data-editable>The two paths have almost nothing in common, and merging them is the design error to avoid. A read is
 the hot path: it happens thousands of times a build, it must be fast, and the worst case of serving it to
 the wrong person is disclosure of a build artifact. A write is rare, and the worst case is a poisoned
 entry that every future build trusts.</p>
@@ -415,21 +426,21 @@ entry that every future build trusts.</p>
 <div class="grid2">
   <div class="card">
     <p class="kicker" data-aid="a0a3f8ba2">Read path</p>
-    <h4 data-aid="aebb27e74">Redirect, never proxy</h4>
-    <p data-aid="a078e4985">The service answers with a short-lived signed URL and gets out of the way. Bytes never traverse the
+    <h4 data-aid="aebb27e74" data-editable>Redirect, never proxy</h4>
+    <p data-aid="a078e4985" data-editable>The service answers with a short-lived signed URL and gets out of the way. Bytes never traverse the
     application, so throughput is the object store's problem rather than ours.</p>
   </div>
   <div class="card">
     <p class="kicker" data-aid="a7570468c">Write path</p>
-    <h4 data-aid="a1346c54c">Only from a verified builder</h4>
-    <p data-aid="a167df87c">A write carries a workload identity token that names the repository and the commit. A developer
+    <h4 data-aid="a1346c54c" data-editable>Only from a verified builder</h4>
+    <p data-aid="a167df87c" data-editable>A write carries a workload identity token that names the repository and the commit. A developer
     laptop may read everything and write nothing.</p>
   </div>
 </div>
 
-<h2 data-aid="a91863990">Entries age out by value, not by date</h2>
+<h2 data-aid="a91863990" data-editable>Entries age out by value, not by date</h2>
 
-<p data-aid="a1c82e273">A fixed time-to-live throws away the entries worth keeping. The base image layer that every build reads
+<p data-aid="a1c82e273" data-editable>A fixed time-to-live throws away the entries worth keeping. The base image layer that every build reads
 is old and hot; a branch build's output is new and will never be read again. Eviction is scored on last
 access, not on age.</p>
 
@@ -446,9 +457,9 @@ is a bug report about the key function</b>, not a capacity problem, and the dash
 <details class="dx">
   <summary><span class="dxn">A</span>Why not just use the build tool's own remote cache?</summary>
   <div class="dxb">
-    <p data-aid="a51c3039c">Two reasons, and the first is not the interesting one. The build tools in use here disagree about
+    <p data-aid="a51c3039c" data-editable>Two reasons, and the first is not the interesting one. The build tools in use here disagree about
     key derivation, so a shared store behind them would hold two incompatible namespaces.</p>
-    <p data-aid="ad94a52b9">The real reason is that their write paths trust the client. Any developer who can read the cache can
+    <p data-aid="ad94a52b9" data-editable>The real reason is that their write paths trust the client. Any developer who can read the cache can
     write to it, which is acceptable inside one team and not acceptable once CI trusts the result. The
     write-side identity check is the part we cannot delegate.</p>
   </div>
@@ -457,9 +468,9 @@ is a bug report about the key function</b>, not a capacity problem, and the dash
 <details class="dx">
   <summary><span class="dxn">B</span>What happens when the cache is down?</summary>
   <div class="dxb">
-    <p data-aid="a3431d817">Builds get slower and nothing fails. The client treats every cache error — unreachable, slow,
+    <p data-aid="a3431d817" data-editable>Builds get slower and nothing fails. The client treats every cache error — unreachable, slow,
     malformed — as a miss, and a miss is just a normal build.</p>
-    <p data-aid="a6e9b9f37">This must be load-tested rather than assumed. The failure that actually happens is not an outage
+    <p data-aid="a6e9b9f37" data-editable>This must be load-tested rather than assumed. The failure that actually happens is not an outage
     but a cache that answers in 30 seconds, and a client without a short timeout turns a degraded cache
     into a broken build.</p>
   </div>
@@ -486,9 +497,9 @@ is a bug report about the key function</b>, not a capacity problem, and the dash
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="a71f3487c">The key function is the keystone, so it ships by itself</h2>
+<h2 data-aid="a71f3487c" data-editable>The key function is the keystone, so it ships by itself</h2>
 
-<p data-aid="a091418a8">Phase one is one task. Not because it is large, but because every later task hard-codes an assumption
+<p data-aid="a091418a8" data-editable>Phase one is one task. Not because it is large, but because every later task hard-codes an assumption
 about what a key covers, and a key function written twice is the most expensive rework available here. It
 also has to be the piece with tests before anything depends on it.</p>
 
@@ -510,7 +521,7 @@ also has to be the piece with tests before anything depends on it.</p>
 Attempting the read path and the client in parallel <em>before</em> the key exists is how two components
 end up disagreeing about what they are keyed on.</p>
 
-<h2 data-aid="a6cc97199">What would make this a failure</h2>
+<h2 data-aid="a6cc97199" data-editable>What would make this a failure</h2>
 
 <p data-aid="aaa43fef5">Stated up front so the answer is not negotiated later. <b>A hit rate below 40% on merge builds means
 the key function is wrong</b> and the project has not delivered, even if every task is closed. A single
@@ -536,16 +547,16 @@ verified poisoned entry is a stop-work condition, not a bug to triage.</p>
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2 data-aid="af30a3eb5">Open questions</h2>
+<h2 data-aid="af30a3eb5" data-editable>Open questions</h2>
 
-<p data-aid="ada2c6913">These are decisions, not research gaps. Each one has a cost that is not the author's to accept, and each
+<p data-aid="ada2c6913" data-editable>These are decisions, not research gaps. Each one has a cost that is not the author's to accept, and each
 is written so that a reader can answer it without reading the rest of the document.</p>
 
 <div class="qs">
   <div class="q">
     <span class="num">1</span>
     <div>
-      <h4 data-aid="a4813462e">May a developer machine write to the cache?</h4>
+      <h4 data-aid="a4813462e" data-editable>May a developer machine write to the cache?</h4>
       <p data-aid="a22f8b788">Allowing it roughly doubles the hit rate on the first build after a branch switch, because
       developers compile things CI has not reached yet. It also means the trusted store accepts bytes from
       an environment nobody attests to. <b>Assumed answer: CI only</b>, because a poisoned entry is
@@ -556,7 +567,7 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">2</span>
     <div>
-      <h4 data-aid="a6fbb3e2c">What is the storage budget?</h4>
+      <h4 data-aid="a6fbb3e2c" data-editable>What is the storage budget?</h4>
       <p data-aid="ab2c4b556">Eviction scoring is meaningless without a ceiling. At the measured artifact size and merge rate,
       an unbounded store grows by roughly 40&nbsp;GB a week. The band design in Architecture assumes a
       fixed budget with pressure-driven eviction; a policy of "keep everything for 90 days" is a different
@@ -566,7 +577,7 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">3</span>
     <div>
-      <h4 data-aid="a3e28f285">Can one key span platforms?</h4>
+      <h4 data-aid="a3e28f285" data-editable>Can one key span platforms?</h4>
       <p data-aid="a686bb58a">If the target platform is in the digest, an arm64 laptop never reuses an x86 CI artifact, and the
       developer-facing benefit largely disappears. If it is not in the digest, the cache will eventually
       serve the wrong binary. <b>Unresolved.</b> The safe reading is to include the platform and accept the
@@ -576,15 +587,17 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">4</span>
     <div>
-      <h4 data-aid="a2aa4da00">Is a cache miss observable enough to debug?</h4>
-      <p data-aid="a64da9655">A miss and a hit are indistinguishable in the build log today, which means a key regression looks
+      <h4 data-aid="a2aa4da00" data-editable>Is a cache miss observable enough to debug?</h4>
+      <p data-aid="a64da9655" data-editable data-md="A miss and a hit are indistinguishable in the build log today, which means a key regression looks
+      exactly like a slow week. Nothing in the plan surfaces *why* a key missed. This is not a
+      blocker, but it is the first thing anybody will ask for once phase two is live.">A miss and a hit are indistinguishable in the build log today, which means a key regression looks
       exactly like a slow week. Nothing in the plan surfaces <em>why</em> a key missed. This is not a
       blocker, but it is the first thing anybody will ask for once phase two is live.</p>
     </div>
   </div>
 </div>
 
-<h2 data-aid="aec903f93">What is deliberately not being built</h2>
+<h2 data-aid="aec903f93" data-editable>What is deliberately not being built</h2>
 
 <ul>
   <li data-aid="aa5b421ca"><b>Distributed execution.</b> A cache and a scheduler are different products. Reusing outputs does
@@ -953,4 +966,184 @@ export function scanBlocks(fragment) {
 }
 //# sourceMappingURL=anchor-core.js.map
 window.doc.anchor = { BLOCK, norm, scanBlocks };
+</script>
+<script type="module">
+/* Session probe — the one silent capability reveal.
+   Loading, signed out, malformed, and degraded states are visually identical
+   to the static document: nothing is created, logged, or announced until a
+   valid 200 response passes the exact content-type grammar and the session
+   shape check below.  That one success sets data-session on the root and
+   publishes the same recursively frozen parsed object to every module that
+   attached its listener before this final script ran. */
+document.documentElement.removeAttribute("data-session");
+runSessionProbe();
+
+/* Pure parser for the single accepted content-type grammar:
+   OWS "application" "/" "json" OWS [ ";" OWS "charset" "=" ( "utf-8" |
+   DQUOTE "utf-8" DQUOTE ) OWS ], ASCII-case-insensitive, OWS = SP/HTAB. */
+function isJsonContentType(value) {
+  if (typeof value !== "string") return false;
+  const bytes = value;
+  const length = bytes.length;
+  let at = 0;
+  const ows = () => {
+    while (at < length) {
+      const code = bytes.charCodeAt(at);
+      if (code === 32 || code === 9) at += 1;
+      else return;
+    }
+  };
+  const lower = (code) => (code >= 65 && code <= 90 ? code + 32 : code);
+  const word = (expected) => {
+    if (at + expected.length > length) return false;
+    for (let i = 0; i < expected.length; i += 1) {
+      if (lower(bytes.charCodeAt(at)) !== expected.charCodeAt(i)) return false;
+      at += 1;
+    }
+    return true;
+  };
+  const atEnd = () => at === length;
+
+  ows();
+  if (!word("application")) return false;
+  if (at >= length || bytes.charCodeAt(at) !== 47) return false;
+  at += 1;
+  if (!word("json")) return false;
+  ows();
+  if (atEnd()) return true;
+  if (bytes.charCodeAt(at) !== 59) return false;
+  at += 1;
+  ows();
+  if (!word("charset")) return false;
+  if (at >= length || bytes.charCodeAt(at) !== 61) return false;
+  at += 1;
+  if (at < length && bytes.charCodeAt(at) === 34) {
+    at += 1;
+    if (!word("utf-8")) return false;
+    if (at >= length || bytes.charCodeAt(at) !== 34) return false;
+    at += 1;
+  } else {
+    if (!word("utf-8")) return false;
+  }
+  ows();
+  return atEnd();
+}
+
+const RESERVED_FINAL_FIELDS = [
+  "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+];
+const ROLES = ["owner", "editor", "commenter", "viewer", "none"];
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isContainer(value) {
+  return value !== null && typeof value === "object";
+}
+
+/* Accept exactly one of two shapes.  Presence of any reserved final field
+   commits to the complete P3-H shape and rejects every partial or mixed body;
+   zero reserved fields selects the legacy P1-C shape. */
+function validSession(body, docId) {
+  if (!isRecord(body)) return null;
+  let reservedPresent = 0;
+  for (const field of RESERVED_FINAL_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) reservedPresent += 1;
+  }
+  if (typeof body.sub !== "string") return null;
+  if (typeof body.email !== "string") return null;
+  if (typeof body.name !== "string") return null;
+  if (!Array.isArray(body.roles)) return null;
+  for (const entry of body.roles) {
+    if (typeof entry !== "string") return null;
+  }
+  if (typeof body.canComment !== "boolean") return null;
+  if (typeof body.canEdit !== "boolean") return null;
+  if (reservedPresent === 0) return body;
+
+  if (reservedPresent !== RESERVED_FINAL_FIELDS.length) return null;
+  if (body.doc !== docId) return null;
+  if (!ROLES.includes(body.role)) return null;
+  if (typeof body.shared !== "boolean") return null;
+  if (typeof body.canSuggest !== "boolean") return null;
+  if (typeof body.canAccept !== "boolean") return null;
+  if (typeof body.canShare !== "boolean") return null;
+  if (typeof body.canSeeMembers !== "boolean") return null;
+  if (body.roles.length !== 1) return null;
+  if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
+  return body;
+}
+
+/* Iterative deepest-first freeze over the parsed tree, never the call stack.
+   JSON cannot carry cycles, so a plain work stack is exact for its domain. */
+function deepFreeze(root) {
+  if (!isContainer(root)) return root;
+  const stack = [root];
+  const ordered = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    ordered.push(current);
+    for (const field of Object.keys(current)) {
+      const child = current[field];
+      if (isContainer(child)) stack.push(child);
+    }
+  }
+  for (let i = ordered.length - 1; i >= 0; i -= 1) {
+    Object.freeze(ordered[i]);
+  }
+  return root;
+}
+
+async function runSessionProbe() {
+  const protocol = location.protocol;
+  if (protocol !== "http:" && protocol !== "https:") return;
+
+  const meta = document.querySelector('meta[name="doc-id"]');
+  const content = meta === null ? null : meta.getAttribute("content");
+  const docId = typeof content === "string" ? content.trim() : "";
+  if (docId === "") return;
+
+  if (typeof fetch !== "function"
+    || typeof AbortController !== "function"
+    || typeof CustomEvent !== "function"
+    || typeof URL !== "function") {
+    return;
+  }
+
+  const endpoint = new URL("/api/session", location.href);
+  endpoint.searchParams.set("doc", docId);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      mode: "same-origin",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (response.status !== 200) return;
+    const header = response.headers.get("content-type");
+    if (header === null) return;
+    if (!isJsonContentType(header)) return;
+    const body = await response.json();
+    const session = validSession(body, docId);
+    if (session === null) return;
+    deepFreeze(session);
+    const maySuggest = Object.prototype.hasOwnProperty.call(session, "canSuggest")
+      ? session.canSuggest
+      : session.canEdit;
+    document.documentElement.dataset.session = maySuggest ? "editor" : "reader";
+    document.dispatchEvent(new CustomEvent("session", { detail: session }));
+  } catch (error) {
+    return;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 </script>
