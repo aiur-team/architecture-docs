@@ -290,31 +290,31 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>CI spends most of its time rebuilding things that have not changed</h2>
+<h2 data-aid="a0eb14940">CI spends most of its time rebuilding things that have not changed</h2>
 
-<p>A full build of the monorepo takes <b>14 minutes</b>. A one-line change to a leaf package takes the
+<p data-aid="ad6195c8c">A full build of the monorepo takes <b>14 minutes</b>. A one-line change to a leaf package takes the
 same 14 minutes, because each CI runner starts from an empty working directory and no runner can see what
 any other runner has already produced.</p>
 
-<p>Measured across one week of merges, <b>83% of compiled artifacts were byte-identical to an artifact
+<p data-aid="a3118fa20">Measured across one week of merges, <b>83% of compiled artifacts were byte-identical to an artifact
 produced by an earlier build</b>. The work is not merely similar. It is the same bytes, computed again.</p>
 
 <div class="grid2">
   <div class="card">
-    <p class="kicker">What it costs</p>
-    <h4>Reviewer latency, not compute</h4>
-    <p>Compute is cheap and getting cheaper. A reviewer who has context-switched away is expensive and
+    <p class="kicker" data-aid="a59bd1ff6">What it costs</p>
+    <h4 data-aid="af2e32500">Reviewer latency, not compute</h4>
+    <p data-aid="a2e2f443f">Compute is cheap and getting cheaper. A reviewer who has context-switched away is expensive and
     does not come back for twenty minutes. The 14 minutes is the real number.</p>
   </div>
   <div class="card">
-    <p class="kicker">Why it persists</p>
-    <h4>Local caches work, and do not travel</h4>
-    <p>Every build tool already caches locally. That is why the problem is invisible to the person who
+    <p class="kicker" data-aid="a5bd2a1d1">Why it persists</p>
+    <h4 data-aid="ad4eaaa32">Local caches work, and do not travel</h4>
+    <p data-aid="a313d5341">Every build tool already caches locally. That is why the problem is invisible to the person who
     introduced it: on their machine the second build takes nine seconds.</p>
   </div>
 </div>
 
-<p class="note"><b>This is a worked example.</b> The subject is invented. It exists so that the template
+<p class="note" data-aid="a840dc89a"><b>This is a worked example.</b> The subject is invented. It exists so that the template
 has one document showing every component in a real argument rather than in a swatch, and so an agent
 asked to write a document has something honest to imitate.</p>
     </div></div>
@@ -348,40 +348,40 @@ asked to write a document has something honest to imitate.</p>
     </summary>
     <div class="sec-body"><div class="wrap">
 <div class="thesis">
-  <h3>The cache is easy. Deciding what a cache key covers is the whole problem.</h3>
-  <p>A remote cache is a hash map in front of an object store, and that part is a week of work. The
+  <h3 data-aid="a9fb6f9bc">The cache is easy. Deciding what a cache key covers is the whole problem.</h3>
+  <p data-aid="a6853770a">A remote cache is a hash map in front of an object store, and that part is a week of work. The
   question that decides whether it can be trusted is narrower and harder: <b>what counts as an input?</b>
   Miss one, and the cache returns a stale artifact that compiles, passes, and is wrong.</p>
   <div class="verdicts">
-    <div class="vc"><span class="tag ok">Sound</span><h4>Declared inputs</h4><p>Source files, the toolchain version, the flags. Hashable and complete.</p></div>
-    <div class="vc"><span class="tag warn">Partial</span><h4>Ambient inputs</h4><p>Environment variables and locale. Enumerable, but only if you look.</p></div>
-    <div class="vc"><span class="tag risk">Unsound</span><h4>Undeclared reads</h4><p>A build that reads the clock or the network cannot be cached at all.</p></div>
+    <div class="vc"><span class="tag ok">Sound</span><h4 data-aid="ab99b2cc0">Declared inputs</h4><p data-aid="a0959fc22">Source files, the toolchain version, the flags. Hashable and complete.</p></div>
+    <div class="vc"><span class="tag warn">Partial</span><h4 data-aid="afacab6ca">Ambient inputs</h4><p data-aid="a5ed71cec">Environment variables and locale. Enumerable, but only if you look.</p></div>
+    <div class="vc"><span class="tag risk">Unsound</span><h4 data-aid="a8907bbb3">Undeclared reads</h4><p data-aid="a35ebc1d2">A build that reads the clock or the network cannot be cached at all.</p></div>
   </div>
 </div>
 
-<h2>The key is a hash of everything the build is allowed to read</h2>
+<h2 data-aid="a35513482">The key is a hash of everything the build is allowed to read</h2>
 
-<p>A cache entry is keyed by a digest over the ordered set of declared inputs: the content of every source
+<p data-aid="a0a77bbf7">A cache entry is keyed by a digest over the ordered set of declared inputs: the content of every source
 file, the resolved toolchain version, the compiler flags, and the target platform. <b>The key is not the
 command line.</b> Two invocations that differ only in argument order must produce the same key, or the
 hit rate collapses without anybody noticing.</p>
 
-<p>Entries are immutable. A second write to an existing key is compared and dropped, never overwritten —
+<p data-aid="a955a3ee5">Entries are immutable. A second write to an existing key is compared and dropped, never overwritten —
 so a poisoned entry cannot replace a good one, and a mismatch is a loud signal that some input is not in
 the key.</p>
 
 <div class="tw"><table>
-  <thead><tr><th>Input class</th><th>In the key</th><th class="n">Cost to add</th><th>Consequence of omitting it</th></tr></thead>
+  <thead><tr><th data-aid="a83c258cc">Input class</th><th data-aid="a966cadbf">In the key</th><th class="n" data-aid="ae0e3a0e1">Cost to add</th><th data-aid="ad79be603">Consequence of omitting it</th></tr></thead>
   <tbody>
-    <tr><td>Source content</td><td><span class="pill ok">Yes</span></td><td class="n">0</td><td>Cache would be useless</td></tr>
-    <tr><td>Toolchain version</td><td><span class="pill ok">Yes</span></td><td class="n">0</td><td>Artifacts from two compilers collide silently</td></tr>
-    <tr><td>Compiler flags</td><td><span class="pill ok">Yes</span></td><td class="n">1</td><td>A debug build serves a release request</td></tr>
-    <tr><td>Environment variables</td><td><span class="pill warn">Allow-listed</span></td><td class="n">3</td><td>Hit rate drops to near zero if all are included</td></tr>
-    <tr><td>Wall-clock time</td><td><span class="pill n">Unsupported</span></td><td class="n">&mdash;</td><td>Such a build is not cacheable. Mark it, do not cache it</td></tr>
+    <tr><td data-aid="ad005af03">Source content</td><td data-aid="a5397e058"><span class="pill ok">Yes</span></td><td class="n" data-aid="ab6589fc6">0</td><td data-aid="a2ec309b0">Cache would be useless</td></tr>
+    <tr><td data-aid="a4c089037">Toolchain version</td><td data-aid="a637d60d1"><span class="pill ok">Yes</span></td><td class="n" data-aid="a5b2d0832">0</td><td data-aid="a7005d848">Artifacts from two compilers collide silently</td></tr>
+    <tr><td data-aid="aabfb8056">Compiler flags</td><td data-aid="a6bc1744a"><span class="pill ok">Yes</span></td><td class="n" data-aid="a356a192b">1</td><td data-aid="a79920b09">A debug build serves a release request</td></tr>
+    <tr><td data-aid="a1173b2e1">Environment variables</td><td data-aid="aa02d32b6"><span class="pill warn">Allow-listed</span></td><td class="n" data-aid="a77de68da">3</td><td data-aid="a070eb4b9">Hit rate drops to near zero if all are included</td></tr>
+    <tr><td data-aid="a93f35c14">Wall-clock time</td><td data-aid="afb52c13a"><span class="pill n">Unsupported</span></td><td class="n" data-aid="a1b93795b">&mdash;</td><td data-aid="ace6f75f5">Such a build is not cacheable. Mark it, do not cache it</td></tr>
   </tbody>
 </table></div>
 
-<p class="note">Including every environment variable is the mistake that looks safest. It is technically
+<p class="note" data-aid="afcdd5ca9">Including every environment variable is the mistake that looks safest. It is technically
 correct and makes the cache useless, because <code>CI_JOB_ID</code> changes on every run and so does the
 key. An allow-list is the only workable answer, and it must be reviewed rather than guessed.</p>
     </div></div>
@@ -405,31 +405,31 @@ key. An allow-list is the only workable answer, and it must be reviewed rather t
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>Reads are open, writes are proved</h2>
+<h2 data-aid="a3ce3beb3">Reads are open, writes are proved</h2>
 
-<p>The two paths have almost nothing in common, and merging them is the design error to avoid. A read is
+<p data-aid="a9c762f16">The two paths have almost nothing in common, and merging them is the design error to avoid. A read is
 the hot path: it happens thousands of times a build, it must be fast, and the worst case of serving it to
 the wrong person is disclosure of a build artifact. A write is rare, and the worst case is a poisoned
 entry that every future build trusts.</p>
 
 <div class="grid2">
   <div class="card">
-    <p class="kicker">Read path</p>
-    <h4>Redirect, never proxy</h4>
-    <p>The service answers with a short-lived signed URL and gets out of the way. Bytes never traverse the
+    <p class="kicker" data-aid="a0a3f8ba2">Read path</p>
+    <h4 data-aid="aebb27e74">Redirect, never proxy</h4>
+    <p data-aid="a078e4985">The service answers with a short-lived signed URL and gets out of the way. Bytes never traverse the
     application, so throughput is the object store's problem rather than ours.</p>
   </div>
   <div class="card">
-    <p class="kicker">Write path</p>
-    <h4>Only from a verified builder</h4>
-    <p>A write carries a workload identity token that names the repository and the commit. A developer
+    <p class="kicker" data-aid="a7570468c">Write path</p>
+    <h4 data-aid="a1346c54c">Only from a verified builder</h4>
+    <p data-aid="a167df87c">A write carries a workload identity token that names the repository and the commit. A developer
     laptop may read everything and write nothing.</p>
   </div>
 </div>
 
-<h2>Entries age out by value, not by date</h2>
+<h2 data-aid="a91863990">Entries age out by value, not by date</h2>
 
-<p>A fixed time-to-live throws away the entries worth keeping. The base image layer that every build reads
+<p data-aid="a1c82e273">A fixed time-to-live throws away the entries worth keeping. The base image layer that every build reads
 is old and hot; a branch build's output is new and will never be read again. Eviction is scored on last
 access, not on age.</p>
 
@@ -439,16 +439,16 @@ access, not on age.</p>
   <div class="band risk"><span class="rng">&gt; 30d</span><span class="act">Evict<em>never read after upload</em></span><span class="pill risk">evict</span></div>
 </div>
 
-<p>The middle band is the one that matters. An entry uploaded and never read is the signature of a key
+<p data-aid="aeb22b1ae">The middle band is the one that matters. An entry uploaded and never read is the signature of a key
 that is too specific — it means some volatile input crept into the digest. <b>A rising count in that band
 is a bug report about the key function</b>, not a capacity problem, and the dashboard should say so.</p>
 
 <details class="dx">
   <summary><span class="dxn">A</span>Why not just use the build tool's own remote cache?</summary>
   <div class="dxb">
-    <p>Two reasons, and the first is not the interesting one. The build tools in use here disagree about
+    <p data-aid="a51c3039c">Two reasons, and the first is not the interesting one. The build tools in use here disagree about
     key derivation, so a shared store behind them would hold two incompatible namespaces.</p>
-    <p>The real reason is that their write paths trust the client. Any developer who can read the cache can
+    <p data-aid="ad94a52b9">The real reason is that their write paths trust the client. Any developer who can read the cache can
     write to it, which is acceptable inside one team and not acceptable once CI trusts the result. The
     write-side identity check is the part we cannot delegate.</p>
   </div>
@@ -457,9 +457,9 @@ is a bug report about the key function</b>, not a capacity problem, and the dash
 <details class="dx">
   <summary><span class="dxn">B</span>What happens when the cache is down?</summary>
   <div class="dxb">
-    <p>Builds get slower and nothing fails. The client treats every cache error — unreachable, slow,
+    <p data-aid="a3431d817">Builds get slower and nothing fails. The client treats every cache error — unreachable, slow,
     malformed — as a miss, and a miss is just a normal build.</p>
-    <p>This must be load-tested rather than assumed. The failure that actually happens is not an outage
+    <p data-aid="a6e9b9f37">This must be load-tested rather than assumed. The failure that actually happens is not an outage
     but a cache that answers in 30 seconds, and a client without a short timeout turns a degraded cache
     into a broken build.</p>
   </div>
@@ -486,33 +486,33 @@ is a bug report about the key function</b>, not a capacity problem, and the dash
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>The key function is the keystone, so it ships by itself</h2>
+<h2 data-aid="a71f3487c">The key function is the keystone, so it ships by itself</h2>
 
-<p>Phase one is one task. Not because it is large, but because every later task hard-codes an assumption
+<p data-aid="a091418a8">Phase one is one task. Not because it is large, but because every later task hard-codes an assumption
 about what a key covers, and a key function written twice is the most expensive rework available here. It
 also has to be the piece with tests before anything depends on it.</p>
 
 <div class="tw"><table>
-  <thead><tr><th>Task</th><th>Phase</th><th>Work</th><th>Depends on</th></tr></thead>
+  <thead><tr><th data-aid="a7bb0ddf9">Task</th><th data-aid="af6371a49">Phase</th><th data-aid="a00040bab">Work</th><th data-aid="a8bfa3626">Depends on</th></tr></thead>
   <tbody>
-    <tr><td>BC-1</td><td><span class="pill ok">1</span></td><td>The digest: input classes, ordering, the environment allow-list, and a fixture proving two orderings agree</td><td>&mdash;</td></tr>
-    <tr><td>BC-2</td><td><span class="pill warn">2</span></td><td><code>GET /cas/{digest}</code> and the signed-URL redirect</td><td>BC-1</td></tr>
-    <tr><td>BC-3</td><td><span class="pill warn">2</span></td><td>Object-store layout, immutability, and the compare-on-rewrite check</td><td>BC-1</td></tr>
-    <tr><td>BC-4</td><td><span class="pill warn">2</span></td><td>Client: lookup, a hard timeout, and treat every error as a miss</td><td>BC-1</td></tr>
-    <tr><td>BC-5</td><td><span class="pill warn">3</span></td><td><code>POST /cas</code>, workload identity, and rejecting laptop writes</td><td>BC-2, BC-3</td></tr>
-    <tr><td>BC-6</td><td><span class="pill warn">3</span></td><td>Upload from CI on a miss, and the poisoned-entry alarm</td><td>BC-5</td></tr>
-    <tr><td>BC-7</td><td><span class="pill risk">4</span></td><td>Eviction scoring on last access</td><td>BC-3</td></tr>
-    <tr><td>BC-8</td><td><span class="pill risk">4</span></td><td>The uploaded-never-read metric, surfaced as a key-quality signal</td><td>BC-6, BC-7</td></tr>
+    <tr><td data-aid="a024004d0">BC-1</td><td data-aid="afaebccd5"><span class="pill ok">1</span></td><td data-aid="aa2ccf460">The digest: input classes, ordering, the environment allow-list, and a fixture proving two orderings agree</td><td data-aid="a312a21ba">&mdash;</td></tr>
+    <tr><td data-aid="adf923eeb">BC-2</td><td data-aid="ada4b9237"><span class="pill warn">2</span></td><td data-aid="aaa9a6581"><code>GET /cas/{digest}</code> and the signed-URL redirect</td><td data-aid="a4435a84e">BC-1</td></tr>
+    <tr><td data-aid="a8a07122b">BC-3</td><td data-aid="a17cf6930"><span class="pill warn">2</span></td><td data-aid="a71f8220f">Object-store layout, immutability, and the compare-on-rewrite check</td><td data-aid="addca11f5">BC-1</td></tr>
+    <tr><td data-aid="a3a8ab37d">BC-4</td><td data-aid="ab2c11b8a"><span class="pill warn">2</span></td><td data-aid="a47c70a2c">Client: lookup, a hard timeout, and treat every error as a miss</td><td data-aid="a1d37c82a">BC-1</td></tr>
+    <tr><td data-aid="a864402a2">BC-5</td><td data-aid="a8810ca64"><span class="pill warn">3</span></td><td data-aid="a7c940208"><code>POST /cas</code>, workload identity, and rejecting laptop writes</td><td data-aid="adab21a95">BC-2, BC-3</td></tr>
+    <tr><td data-aid="a59208128">BC-6</td><td data-aid="a44c091ae"><span class="pill warn">3</span></td><td data-aid="a9975ef79">Upload from CI on a miss, and the poisoned-entry alarm</td><td data-aid="aabde5eb9">BC-5</td></tr>
+    <tr><td data-aid="aa8e94d7e">BC-7</td><td data-aid="a1b645389"><span class="pill risk">4</span></td><td data-aid="a542e759f">Eviction scoring on last access</td><td data-aid="ae011fa06">BC-3</td></tr>
+    <tr><td data-aid="afb054cd5">BC-8</td><td data-aid="abbdb72e4"><span class="pill risk">4</span></td><td data-aid="a8b30edce">The uploaded-never-read metric, surfaced as a key-quality signal</td><td data-aid="a75cc4af4">BC-6, BC-7</td></tr>
   </tbody>
 </table></div>
 
-<p class="note">Phase two is three tasks wide only because BC-1 defined the shape they all build against.
+<p class="note" data-aid="a62ae0cd0">Phase two is three tasks wide only because BC-1 defined the shape they all build against.
 Attempting the read path and the client in parallel <em>before</em> the key exists is how two components
 end up disagreeing about what they are keyed on.</p>
 
-<h2>What would make this a failure</h2>
+<h2 data-aid="a6cc97199">What would make this a failure</h2>
 
-<p>Stated up front so the answer is not negotiated later. <b>A hit rate below 40% on merge builds means
+<p data-aid="aaa43fef5">Stated up front so the answer is not negotiated later. <b>A hit rate below 40% on merge builds means
 the key function is wrong</b> and the project has not delivered, even if every task is closed. A single
 verified poisoned entry is a stop-work condition, not a bug to triage.</p>
     </div></div>
@@ -536,17 +536,17 @@ verified poisoned entry is a stop-work condition, not a bug to triage.</p>
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>Open questions</h2>
+<h2 data-aid="af30a3eb5">Open questions</h2>
 
-<p>These are decisions, not research gaps. Each one has a cost that is not the author's to accept, and each
+<p data-aid="ada2c6913">These are decisions, not research gaps. Each one has a cost that is not the author's to accept, and each
 is written so that a reader can answer it without reading the rest of the document.</p>
 
 <div class="qs">
   <div class="q">
     <span class="num">1</span>
     <div>
-      <h4>May a developer machine write to the cache?</h4>
-      <p>Allowing it roughly doubles the hit rate on the first build after a branch switch, because
+      <h4 data-aid="a4813462e">May a developer machine write to the cache?</h4>
+      <p data-aid="a22f8b788">Allowing it roughly doubles the hit rate on the first build after a branch switch, because
       developers compile things CI has not reached yet. It also means the trusted store accepts bytes from
       an environment nobody attests to. <b>Assumed answer: CI only</b>, because a poisoned entry is
       unrecoverable in a way a slow build is not. Reversing this is a one-line policy change; reversing a
@@ -556,8 +556,8 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">2</span>
     <div>
-      <h4>What is the storage budget?</h4>
-      <p>Eviction scoring is meaningless without a ceiling. At the measured artifact size and merge rate,
+      <h4 data-aid="a6fbb3e2c">What is the storage budget?</h4>
+      <p data-aid="ab2c4b556">Eviction scoring is meaningless without a ceiling. At the measured artifact size and merge rate,
       an unbounded store grows by roughly 40&nbsp;GB a week. The band design in Architecture assumes a
       fixed budget with pressure-driven eviction; a policy of "keep everything for 90 days" is a different
       design and a larger one.</p>
@@ -566,8 +566,8 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">3</span>
     <div>
-      <h4>Can one key span platforms?</h4>
-      <p>If the target platform is in the digest, an arm64 laptop never reuses an x86 CI artifact, and the
+      <h4 data-aid="a3e28f285">Can one key span platforms?</h4>
+      <p data-aid="a686bb58a">If the target platform is in the digest, an arm64 laptop never reuses an x86 CI artifact, and the
       developer-facing benefit largely disappears. If it is not in the digest, the cache will eventually
       serve the wrong binary. <b>Unresolved.</b> The safe reading is to include the platform and accept the
       lower hit rate, but this has not been measured against real builds and the measurement is cheap.</p>
@@ -576,26 +576,26 @@ is written so that a reader can answer it without reading the rest of the docume
   <div class="q">
     <span class="num">4</span>
     <div>
-      <h4>Is a cache miss observable enough to debug?</h4>
-      <p>A miss and a hit are indistinguishable in the build log today, which means a key regression looks
+      <h4 data-aid="a2aa4da00">Is a cache miss observable enough to debug?</h4>
+      <p data-aid="a64da9655">A miss and a hit are indistinguishable in the build log today, which means a key regression looks
       exactly like a slow week. Nothing in the plan surfaces <em>why</em> a key missed. This is not a
       blocker, but it is the first thing anybody will ask for once phase two is live.</p>
     </div>
   </div>
 </div>
 
-<h2>What is deliberately not being built</h2>
+<h2 data-aid="aec903f93">What is deliberately not being built</h2>
 
 <ul>
-  <li><b>Distributed execution.</b> A cache and a scheduler are different products. Reusing outputs does
+  <li data-aid="aa5b421ca"><b>Distributed execution.</b> A cache and a scheduler are different products. Reusing outputs does
   not require moving the work.</li>
-  <li><b>Cache warming.</b> Predicting the next build's inputs is a research problem for a saving that
+  <li data-aid="ac0388a09"><b>Cache warming.</b> Predicting the next build's inputs is a research problem for a saving that
   eviction scoring mostly already delivers.</li>
-  <li><b>A UI.</b> The hit rate and the uploaded-never-read count belong on an existing dashboard. A new
+  <li data-aid="a1f24d3b2"><b>A UI.</b> The hit rate and the uploaded-never-read count belong on an existing dashboard. A new
   web application is not warranted by two metrics.</li>
 </ul>
 
-<p class="note">An open-questions section earns its place only if the questions are real. If everything in
+<p class="note" data-aid="a5d1a7267">An open-questions section earns its place only if the questions are real. If everything in
 it has an obvious answer, delete the section rather than padding it &mdash; and if the document has no
 genuine unknowns, say that in one line instead.</p>
     </div></div>
@@ -654,4 +654,303 @@ genuine unknowns, say that in one line instead.</p>
 
 <script>
 
+</script>
+<script type="module">
+/**
+ * The single shared block boundary and normalisation core.
+ *
+ * This module is the only source of the block tag list, whitespace
+ * normalisation, and raw-HTML block scanning. It has no imports and must not
+ * reference Node built-ins or any global host object: the builder compiles
+ * this exact ESM, inlines it into the page ahead of the feature modules, and
+ * exposes only the runtime values through the shared anchor object.
+ *
+ * `scanBlocks()` implements the bounded HTML grammar this platform relies on:
+ * paired block candidates from `BLOCK`, opaque comments and `script`/`style`
+ * raw text, quoted attributes, and the exact semicolon-required character
+ * reference set. It never mutates its argument and reports source offsets so
+ * the Node pass can splice generated attributes without reserializing markup.
+ */
+export const BLOCK = [
+    "p", "li", "h2", "h3", "h4", "td", "th", "pre", "blockquote", "figcaption", "dd", "dt",
+];
+/** Collapse every run of JavaScript whitespace to one space, then trim. */
+export const norm = (s) => s.replace(/\s+/g, " ").trim();
+const BLOCK_SET = new Set(BLOCK);
+const NAMED = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    harr: "\u2194",
+    lt: "<",
+    mdash: "\u2014",
+    nbsp: "\u00a0",
+    ndash: "\u2013",
+    quot: '"',
+    rarr: "\u2192",
+};
+function coreErr(offset, message) {
+    throw new Error(`anchor scan at ${offset}: ${message}`);
+}
+const isAsciiLetter = (c) => c !== undefined && c.length === 1 && /[A-Za-z]/.test(c);
+const isAsciiDigit = (c) => c !== undefined && c.length === 1 && /[0-9]/.test(c);
+const isAsciiAlnum = (c) => isAsciiLetter(c) || isAsciiDigit(c);
+const isHexDigit = (c) => c !== undefined && c.length === 1 && /[0-9a-fA-F]/.test(c);
+const isAsciiWhitespace = (c) => c !== undefined && c.length === 1 && /[ \t\n\r\f\v]/.test(c);
+/** Tag names are ASCII letters then letters, digits or hyphens. */
+const isTagNameChar = (c) => isAsciiAlnum(c) || c === "-";
+/**
+ * Scan a section-body fragment and return its outermost nonempty block
+ * elements in source order. Every member of `BLOCK` is paired; comments and
+ * raw-text elements are opaque; other tags are ordinary markup.
+ */
+export function scanBlocks(fragment) {
+    const results = [];
+    const stack = [];
+    const n = fragment.length;
+    let i = 0;
+    const top = () => stack[stack.length - 1];
+    const appendText = (s) => {
+        if (stack.length > 0)
+            top().chunks.push(s);
+    };
+    // ------------------------------------------------------------------- entities
+    const decodeReference = (amp) => {
+        const next = fragment[amp + 1];
+        if (next === "#") {
+            let j = amp + 2;
+            let hex = false;
+            const x = fragment[j];
+            if (x === "x" || x === "X") {
+                hex = true;
+                j++;
+            }
+            const digitsStart = j;
+            while (j < n && (hex ? isHexDigit(fragment[j]) : isAsciiDigit(fragment[j])))
+                j++;
+            if (j === digitsStart)
+                coreErr(amp, "numeric character reference is malformed");
+            const after = fragment[j];
+            if (isAsciiLetter(after))
+                coreErr(amp, "numeric character reference is malformed");
+            if (after !== ";")
+                coreErr(amp, 'numeric character reference is missing ";"');
+            const value = parseInt(fragment.slice(digitsStart, j), hex ? 16 : 10);
+            const scalar = value >= 1 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff);
+            if (!scalar)
+                coreErr(amp, "numeric character reference is not a Unicode scalar value");
+            appendText(String.fromCodePoint(value));
+            return j + 1;
+        }
+        if (isAsciiLetter(next)) {
+            let j = amp + 1;
+            while (j < n && isAsciiAlnum(fragment[j]))
+                j++;
+            if (j >= n || fragment[j] !== ";") {
+                coreErr(amp, 'named character reference is missing ";"');
+            }
+            const name = fragment.slice(amp + 1, j);
+            const decoded = NAMED[name];
+            if (decoded === undefined)
+                coreErr(amp, `unknown named character reference "${name}"`);
+            appendText(decoded);
+            return j + 1;
+        }
+        // A bare ampersand not starting a candidate is literal text.
+        appendText("&");
+        return amp + 1;
+    };
+    // ------------------------------------------------------------------ raw text
+    const skipRawText = (open, openEnd, tag) => {
+        let m = openEnd;
+        while (m < n) {
+            const lt = fragment.indexOf("<", m);
+            if (lt === -1)
+                coreErr(open, `unclosed raw-text element ${tag}`);
+            if (fragment[lt + 1] === "/") {
+                let q = lt + 2;
+                const ns = q;
+                while (q < n && isTagNameChar(fragment[q]))
+                    q++;
+                if (fragment.slice(ns, q).toLowerCase() === tag) {
+                    let r = q;
+                    while (r < n && isAsciiWhitespace(fragment[r]))
+                        r++;
+                    if (fragment[r] === ">")
+                        return r + 1;
+                }
+            }
+            m = lt + 1;
+        }
+        coreErr(open, `unclosed raw-text element ${tag}`);
+    };
+    // ------------------------------------------------------------- tag handling
+    /**
+     * Read a complete start-tag token beginning at `<`. Returns its end offset
+     * (just past the closing `>`), whether it is self-closing, and the
+     * canonical-lowercased tag name. Throws `unterminated tag` when the `>` is
+     * never found, honoring quoted attribute values.
+     */
+    const readStartTag = (start) => {
+        let k = start + 1;
+        const ns = k;
+        while (k < n && isTagNameChar(fragment[k]))
+            k++;
+        const name = fragment.slice(ns, k).toLowerCase();
+        let quote = null;
+        for (; k < n; k++) {
+            const c = fragment[k];
+            if (quote !== null) {
+                if (c === quote)
+                    quote = null;
+            }
+            else if (c === '"' || c === "'") {
+                quote = c;
+            }
+            else if (c === ">") {
+                return { name, end: k + 1, selfClosing: false };
+            }
+            else if (c === "/" && fragment[k + 1] === ">") {
+                return { name, end: k + 2, selfClosing: true };
+            }
+        }
+        coreErr(start, "unterminated tag");
+    };
+    /**
+     * Consume an ordinary tag-like token (`</name ...>`, `<!DOCTYPE>`, ...) that
+     * does not participate in block scanning. Throws `unterminated tag` when the
+     * token never reaches a `>`.
+     */
+    const skipOrdinaryToken = (start) => {
+        let k = start + 1;
+        let quote = null;
+        for (; k < n; k++) {
+            const c = fragment[k];
+            if (quote !== null) {
+                if (c === quote)
+                    quote = null;
+            }
+            else if (c === '"' || c === "'") {
+                quote = c;
+            }
+            else if (c === ">") {
+                return k + 1;
+            }
+        }
+        coreErr(start, "unterminated tag");
+    };
+    while (i < n) {
+        const c = fragment[i];
+        if (c === "<") {
+            if (fragment.startsWith("<!--", i)) {
+                const end = fragment.indexOf("-->", i + 4);
+                if (end === -1)
+                    coreErr(i, "unterminated HTML comment");
+                i = end + 3;
+                continue;
+            }
+            const slash = fragment[i + 1] === "/";
+            const nameStart = slash ? i + 2 : i + 1;
+            if (isAsciiLetter(fragment[nameStart])) {
+                if (slash) {
+                    // Candidate closing tag: parse the name and require only ASCII
+                    // whitespace between it and the closing `>`.
+                    let q = nameStart;
+                    const ns = q;
+                    while (q < n && isTagNameChar(fragment[q]))
+                        q++;
+                    const closeName = fragment.slice(ns, q);
+                    let r = q;
+                    while (r < n && isAsciiWhitespace(fragment[r]))
+                        r++;
+                    if (fragment[r] === ">") {
+                        const closeEnd = r + 1;
+                        const lower = closeName.toLowerCase();
+                        if (BLOCK_SET.has(lower)) {
+                            if (stack.length === 0 || top().tag !== lower) {
+                                coreErr(i, `unexpected closing block </${lower}>`);
+                            }
+                            const frame = stack.pop();
+                            const raw = frame.chunks.join("");
+                            if (frame.outer) {
+                                const text = norm(raw);
+                                if (text !== "") {
+                                    results.push({
+                                        tag: frame.tag,
+                                        openStart: frame.openStart,
+                                        openEnd: frame.openEnd,
+                                        innerStart: frame.openEnd,
+                                        innerEnd: i,
+                                        closeEnd,
+                                        text,
+                                    });
+                                }
+                            }
+                            else if (stack.length > 0) {
+                                top().chunks.push(raw);
+                            }
+                            i = closeEnd;
+                        }
+                        else {
+                            // An ordinary non-block closing tag contributes no text.
+                            i = closeEnd;
+                        }
+                        continue;
+                    }
+                    // `</name ...>` with junk before `>` is not a valid closing tag;
+                    // consume it as ordinary markup and continue scanning inside.
+                    i = skipOrdinaryToken(i);
+                    continue;
+                }
+                const tag = readStartTag(i);
+                if (tag.name === "script" || tag.name === "style") {
+                    if (tag.selfClosing) {
+                        i = tag.end;
+                    }
+                    else {
+                        i = skipRawText(i, tag.end, tag.name);
+                    }
+                    continue;
+                }
+                if (BLOCK_SET.has(tag.name)) {
+                    if (tag.selfClosing)
+                        coreErr(i, `self-closing block ${tag.name}`);
+                    stack.push({
+                        tag: tag.name,
+                        openStart: i,
+                        openEnd: tag.end,
+                        outer: stack.length === 0,
+                        chunks: [],
+                    });
+                    i = tag.end;
+                    continue;
+                }
+                // Ordinary non-block start tag: its descendant text still counts.
+                i = tag.end;
+                continue;
+            }
+            // A stray `<` that does not begin a comment, close or open tag is text.
+            appendText("<");
+            i++;
+            continue;
+        }
+        if (c === "&" && stack.length > 0) {
+            i = decodeReference(i);
+            continue;
+        }
+        // Consume a literal run up to the next structural boundary.
+        const runStart = i;
+        while (i < n && fragment[i] !== "<" && !(fragment[i] === "&" && stack.length > 0))
+            i++;
+        if (i > runStart)
+            appendText(fragment.slice(runStart, i));
+    }
+    if (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        coreErr(frame.openStart, `unclosed block ${frame.tag}`);
+    }
+    return results;
+}
+//# sourceMappingURL=anchor-core.js.map
+window.doc.anchor = { BLOCK, norm, scanBlocks };
 </script>
