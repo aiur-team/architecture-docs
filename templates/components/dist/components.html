@@ -284,9 +284,9 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>How a document is assembled</h2>
-      <p>Each section file carries a metadata comment, an optional <code>&lt;!-- peek --&gt;</code> block shown while the section is closed, and a <code>&lt;!-- body --&gt;</code> block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.</p>
-      <pre>&lt;!--
+<h2 data-aid="a8cd9c6f4">How a document is assembled</h2>
+      <p data-aid="acfa35438">Each section file carries a metadata comment, an optional <code>&lt;!-- peek --&gt;</code> block shown while the section is closed, and a <code>&lt;!-- body --&gt;</code> block shown when it opens. The build script wraps them in the section chrome, so a section file contains only content.</p>
+      <pre data-aid="a39ecd47a">&lt;!--
 id: architecture
 label: Architecture
 summary: One or two sentences, shown while the section is closed.
@@ -295,7 +295,7 @@ summary: One or two sentences, shown while the section is closed.
   ...the one diagram that makes this section worth opening...
 &lt;!-- body --&gt;
   ...the open markup...</pre>
-      <p><strong>Use the peek well.</strong> It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line.</p>
+      <p data-aid="ad5ae2321"><strong>Use the peek well.</strong> It is the only part most readers see. Put the section's key diagram, table or set of chips there, not a restatement of the summary line.</p>
     </div></div>
   </details>
 </section>
@@ -324,8 +324,8 @@ summary: One or two sentences, shown while the section is closed.
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>Flow diagram</h2>
-      <p>Use <code>.panel</code> &rarr; <code>.flow</code> &rarr; <code>.node</code>. Stack nodes vertically with <code>.col</code>. Label an edge with <code>.arrow .at</code>. Add a legend with <code>.cap</code>.</p>
+<h2 data-aid="ae81a9314">Flow diagram</h2>
+      <p data-aid="ae8f14f7e">Use <code>.panel</code> &rarr; <code>.flow</code> &rarr; <code>.node</code>. Stack nodes vertically with <code>.col</code>. Label an edge with <code>.arrow .at</code>. Add a legend with <code>.cap</code>.</p>
       <div class="panel">
         <div class="flow">
           <div class="node actor"><span class="nt">Actor</span><span class="ns">dashed, an external party</span></div>
@@ -339,7 +339,7 @@ summary: One or two sentences, shown while the section is closed.
         </div>
         <div class="cap"><span class="key"><i class="sw ok"></i>guaranteed</span><span class="key"><i class="sw warn"></i>best effort</span><span class="key"><i class="sw risk"></i>not covered</span><span>Say what the colours mean. A legend is not optional.</span></div>
       </div>
-      <pre>&lt;div class="panel"&gt;
+      <pre data-aid="abb623a30">&lt;div class="panel"&gt;
   &lt;div class="flow"&gt;
     &lt;div class="node actor"&gt;&lt;span class="nt"&gt;Actor&lt;/span&gt;&lt;span class="ns"&gt;sub&lt;/span&gt;&lt;/div&gt;
     &lt;div class="arrow"&gt;&lt;span class="al"&gt;&amp;rarr;&lt;/span&gt;&lt;span class="at"&gt;label&lt;/span&gt;&lt;/div&gt;
@@ -347,15 +347,15 @@ summary: One or two sentences, shown while the section is closed.
   &lt;/div&gt;
 &lt;/div&gt;</pre>
 
-      <h2>Sequence table</h2>
-      <p>For an ordered exchange between parties. Four cells per row: step, from, message, to.</p>
+      <h2 data-aid="a23bbb288">Sequence table</h2>
+      <p data-aid="a46f1d735">For an ordered exchange between parties. Four cells per row: step, from, message, to.</p>
       <div class="seq">
         <div><span class="sq">1</span></div><div class="sa">Client</div><div class="sm"><b>asks for a report</b><br>GET /reports/{id}</div><div class="sa">API</div>
         <div><span class="sq">2</span></div><div class="sa">API</div><div class="sm"><b>returns the record</b><br>with its coverage claim</div><div class="sa">Client</div>
       </div>
 
-      <h2>Banded ranges</h2>
-      <p>For score bands, tiers and thresholds. The left rail carries the tone.</p>
+      <h2 data-aid="a8c1a8ea2">Banded ranges</h2>
+      <p data-aid="a127c6fb4">For score bands, tiers and thresholds. The left rail carries the tone.</p>
       <div class="bands">
         <div class="band risk"><span class="rng">91&ndash;99</span><span class="act">Block<em>sub-label</em></span><span class="pill risk">refuse</span></div>
         <div class="band warn"><span class="rng">51&ndash;90</span><span class="act">Hold for review</span><span class="pill warn">hold</span></div>
@@ -382,54 +382,54 @@ summary: One or two sentences, shown while the section is closed.
       </div>
     </summary>
     <div class="sec-body"><div class="wrap">
-<h2>Thesis box</h2>
-      <p>One per document, at the top. It carries the single claim the document is making.</p>
+<h2 data-aid="a4f12749b">Thesis box</h2>
+      <p data-aid="a0f4b2878">One per document, at the top. It carries the single claim the document is making.</p>
       <div class="thesis">
-        <h3>The claim this document makes</h3>
-        <p>Lead with the argument, not the summary. If a reader takes one sentence away, this is it.</p>
+        <h3 data-aid="adebb9715">The claim this document makes</h3>
+        <p data-aid="a46075812">Lead with the argument, not the summary. If a reader takes one sentence away, this is it.</p>
         <div class="verdicts">
-          <div class="vc"><span class="tag ok">Guaranteed</span><h4>What holds</h4><p>The thing you can defend.</p></div>
-          <div class="vc"><span class="tag warn">Best effort</span><h4>What is partial</h4><p>The thing with caveats.</p></div>
-          <div class="vc"><span class="tag risk">Not covered</span><h4>What is missing</h4><p>State it before someone finds it.</p></div>
+          <div class="vc"><span class="tag ok">Guaranteed</span><h4 data-aid="af3e68f75">What holds</h4><p data-aid="ace1307b9">The thing you can defend.</p></div>
+          <div class="vc"><span class="tag warn">Best effort</span><h4 data-aid="a58dcde65">What is partial</h4><p data-aid="a2a88ac70">The thing with caveats.</p></div>
+          <div class="vc"><span class="tag risk">Not covered</span><h4 data-aid="a64024bdb">What is missing</h4><p data-aid="a15135148">State it before someone finds it.</p></div>
         </div>
       </div>
 
-      <h2>Tables</h2>
-      <p>Wrap in <code>.tw</code> so wide tables scroll inside their own container rather than the page. Use <code>td.n</code> for numeric columns.</p>
+      <h2 data-aid="a193daf13">Tables</h2>
+      <p data-aid="a270ca341">Wrap in <code>.tw</code> so wide tables scroll inside their own container rather than the page. Use <code>td.n</code> for numeric columns.</p>
       <div class="tw"><table>
-        <thead><tr><th>Thing</th><th>State</th><th class="n">Count</th><th>Why</th></tr></thead>
+        <thead><tr><th data-aid="ae0681542">Thing</th><th data-aid="aa7250206">State</th><th class="n" data-aid="a66e12969">Count</th><th data-aid="a21e2caea">Why</th></tr></thead>
         <tbody>
-          <tr><td>Shipped</td><td><span class="pill ok">Done</span></td><td class="n">12</td><td>Tabular numerals keep columns aligned</td></tr>
-          <tr><td>Partial</td><td><span class="pill warn">In progress</span></td><td class="n">3</td><td>Pills carry the same three tones as everything else</td></tr>
-          <tr><td>Blocked</td><td><span class="pill risk">Blocked</span></td><td class="n">1</td><td>Use <code>.pill.n</code> for a neutral, dashed pill</td></tr>
+          <tr><td data-aid="adec6e329">Shipped</td><td data-aid="ae9b450d1"><span class="pill ok">Done</span></td><td class="n" data-aid="a7b52009b">12</td><td data-aid="a44d2ca92">Tabular numerals keep columns aligned</td></tr>
+          <tr><td data-aid="a65de2e2a">Partial</td><td data-aid="ab6bd42e4"><span class="pill warn">In progress</span></td><td class="n" data-aid="a77de68da">3</td><td data-aid="a35233046">Pills carry the same three tones as everything else</td></tr>
+          <tr><td data-aid="a99613c74">Blocked</td><td data-aid="acb2c35de"><span class="pill risk">Blocked</span></td><td class="n" data-aid="a356a192b">1</td><td data-aid="a4e619568">Use <code>.pill.n</code> for a neutral, dashed pill</td></tr>
         </tbody>
       </table></div>
 
-      <h2>Card grid</h2>
-      <p><code>.grid2</code> or <code>.grid3</code>. Good for a two-way comparison.</p>
+      <h2 data-aid="a7e900370">Card grid</h2>
+      <p data-aid="a8ae221a4"><code>.grid2</code> or <code>.grid3</code>. Good for a two-way comparison.</p>
       <div class="grid2">
-        <div class="card"><p class="kicker">Option A</p><h4>Fail closed</h4><p>Trades throughput for defensibility.</p></div>
-        <div class="card"><p class="kicker">Option B</p><h4>Fail open</h4><p>Keeps moving, and the record must say so.</p></div>
+        <div class="card"><p class="kicker" data-aid="af65f17e8">Option A</p><h4 data-aid="a9f590049">Fail closed</h4><p data-aid="ae6dee3b8">Trades throughput for defensibility.</p></div>
+        <div class="card"><p class="kicker" data-aid="a82434dce">Option B</p><h4 data-aid="a4e1ab371">Fail open</h4><p data-aid="acffe60a6">Keeps moving, and the record must say so.</p></div>
       </div>
 
-      <h2>Phases</h2>
+      <h2 data-aid="a1299c5da">Phases</h2>
       <div class="phases">
         <div class="ph done"><b>Phase 1</b><span class="cnt">1</span><span class="pt">Scaffold. Everything waits on it</span></div>
         <div class="ph"><b>Phase 2</b><span class="cnt">8</span><span class="pt">Leaves, no shared files</span></div>
       </div>
 
-      <h2>Nested disclosure</h2>
-      <p>Use <code>details.dx</code> for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.</p>
+      <h2 data-aid="aac1408d8">Nested disclosure</h2>
+      <p data-aid="a3d982fd8">Use <code>details.dx</code> for depth inside a section. It keeps the top level to six sections while letting a reader go deeper.</p>
       <details class="dx">
         <summary><span class="dxn">A</span>A nested disclosure</summary>
-        <div class="dxb"><p>Body content. Lettered rather than numbered, so it does not compete with the section order.</p></div>
+        <div class="dxb"><p data-aid="abe56bb8c">Body content. Lettered rather than numbered, so it does not compete with the section order.</p></div>
       </details>
 
-      <h2>Numbered questions</h2>
+      <h2 data-aid="add568375">Numbered questions</h2>
       <div class="qs">
-        <div class="q"><span class="num">1</span><div><h4>State the question as a question</h4><p>Then say what changes depending on the answer.</p></div></div>
+        <div class="q"><span class="num">1</span><div><h4 data-aid="a795d1196">State the question as a question</h4><p data-aid="a53807612">Then say what changes depending on the answer.</p></div></div>
       </div>
-      <p class="note">A <code>.note</code> is a quiet aside with a left rule. Use it for a caveat, not for emphasis.</p>
+      <p class="note" data-aid="a92304b1a">A <code>.note</code> is a quiet aside with a left rule. Use it for a caveat, not for emphasis.</p>
     </div></div>
   </details>
 </section>
@@ -486,4 +486,303 @@ summary: One or two sentences, shown while the section is closed.
 
 <script>
 
+</script>
+<script type="module">
+/**
+ * The single shared block boundary and normalisation core.
+ *
+ * This module is the only source of the block tag list, whitespace
+ * normalisation, and raw-HTML block scanning. It has no imports and must not
+ * reference Node built-ins or any global host object: the builder compiles
+ * this exact ESM, inlines it into the page ahead of the feature modules, and
+ * exposes only the runtime values through the shared anchor object.
+ *
+ * `scanBlocks()` implements the bounded HTML grammar this platform relies on:
+ * paired block candidates from `BLOCK`, opaque comments and `script`/`style`
+ * raw text, quoted attributes, and the exact semicolon-required character
+ * reference set. It never mutates its argument and reports source offsets so
+ * the Node pass can splice generated attributes without reserializing markup.
+ */
+export const BLOCK = [
+    "p", "li", "h2", "h3", "h4", "td", "th", "pre", "blockquote", "figcaption", "dd", "dt",
+];
+/** Collapse every run of JavaScript whitespace to one space, then trim. */
+export const norm = (s) => s.replace(/\s+/g, " ").trim();
+const BLOCK_SET = new Set(BLOCK);
+const NAMED = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    harr: "\u2194",
+    lt: "<",
+    mdash: "\u2014",
+    nbsp: "\u00a0",
+    ndash: "\u2013",
+    quot: '"',
+    rarr: "\u2192",
+};
+function coreErr(offset, message) {
+    throw new Error(`anchor scan at ${offset}: ${message}`);
+}
+const isAsciiLetter = (c) => c !== undefined && c.length === 1 && /[A-Za-z]/.test(c);
+const isAsciiDigit = (c) => c !== undefined && c.length === 1 && /[0-9]/.test(c);
+const isAsciiAlnum = (c) => isAsciiLetter(c) || isAsciiDigit(c);
+const isHexDigit = (c) => c !== undefined && c.length === 1 && /[0-9a-fA-F]/.test(c);
+const isAsciiWhitespace = (c) => c !== undefined && c.length === 1 && /[ \t\n\r\f\v]/.test(c);
+/** Tag names are ASCII letters then letters, digits or hyphens. */
+const isTagNameChar = (c) => isAsciiAlnum(c) || c === "-";
+/**
+ * Scan a section-body fragment and return its outermost nonempty block
+ * elements in source order. Every member of `BLOCK` is paired; comments and
+ * raw-text elements are opaque; other tags are ordinary markup.
+ */
+export function scanBlocks(fragment) {
+    const results = [];
+    const stack = [];
+    const n = fragment.length;
+    let i = 0;
+    const top = () => stack[stack.length - 1];
+    const appendText = (s) => {
+        if (stack.length > 0)
+            top().chunks.push(s);
+    };
+    // ------------------------------------------------------------------- entities
+    const decodeReference = (amp) => {
+        const next = fragment[amp + 1];
+        if (next === "#") {
+            let j = amp + 2;
+            let hex = false;
+            const x = fragment[j];
+            if (x === "x" || x === "X") {
+                hex = true;
+                j++;
+            }
+            const digitsStart = j;
+            while (j < n && (hex ? isHexDigit(fragment[j]) : isAsciiDigit(fragment[j])))
+                j++;
+            if (j === digitsStart)
+                coreErr(amp, "numeric character reference is malformed");
+            const after = fragment[j];
+            if (isAsciiLetter(after))
+                coreErr(amp, "numeric character reference is malformed");
+            if (after !== ";")
+                coreErr(amp, 'numeric character reference is missing ";"');
+            const value = parseInt(fragment.slice(digitsStart, j), hex ? 16 : 10);
+            const scalar = value >= 1 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff);
+            if (!scalar)
+                coreErr(amp, "numeric character reference is not a Unicode scalar value");
+            appendText(String.fromCodePoint(value));
+            return j + 1;
+        }
+        if (isAsciiLetter(next)) {
+            let j = amp + 1;
+            while (j < n && isAsciiAlnum(fragment[j]))
+                j++;
+            if (j >= n || fragment[j] !== ";") {
+                coreErr(amp, 'named character reference is missing ";"');
+            }
+            const name = fragment.slice(amp + 1, j);
+            const decoded = NAMED[name];
+            if (decoded === undefined)
+                coreErr(amp, `unknown named character reference "${name}"`);
+            appendText(decoded);
+            return j + 1;
+        }
+        // A bare ampersand not starting a candidate is literal text.
+        appendText("&");
+        return amp + 1;
+    };
+    // ------------------------------------------------------------------ raw text
+    const skipRawText = (open, openEnd, tag) => {
+        let m = openEnd;
+        while (m < n) {
+            const lt = fragment.indexOf("<", m);
+            if (lt === -1)
+                coreErr(open, `unclosed raw-text element ${tag}`);
+            if (fragment[lt + 1] === "/") {
+                let q = lt + 2;
+                const ns = q;
+                while (q < n && isTagNameChar(fragment[q]))
+                    q++;
+                if (fragment.slice(ns, q).toLowerCase() === tag) {
+                    let r = q;
+                    while (r < n && isAsciiWhitespace(fragment[r]))
+                        r++;
+                    if (fragment[r] === ">")
+                        return r + 1;
+                }
+            }
+            m = lt + 1;
+        }
+        coreErr(open, `unclosed raw-text element ${tag}`);
+    };
+    // ------------------------------------------------------------- tag handling
+    /**
+     * Read a complete start-tag token beginning at `<`. Returns its end offset
+     * (just past the closing `>`), whether it is self-closing, and the
+     * canonical-lowercased tag name. Throws `unterminated tag` when the `>` is
+     * never found, honoring quoted attribute values.
+     */
+    const readStartTag = (start) => {
+        let k = start + 1;
+        const ns = k;
+        while (k < n && isTagNameChar(fragment[k]))
+            k++;
+        const name = fragment.slice(ns, k).toLowerCase();
+        let quote = null;
+        for (; k < n; k++) {
+            const c = fragment[k];
+            if (quote !== null) {
+                if (c === quote)
+                    quote = null;
+            }
+            else if (c === '"' || c === "'") {
+                quote = c;
+            }
+            else if (c === ">") {
+                return { name, end: k + 1, selfClosing: false };
+            }
+            else if (c === "/" && fragment[k + 1] === ">") {
+                return { name, end: k + 2, selfClosing: true };
+            }
+        }
+        coreErr(start, "unterminated tag");
+    };
+    /**
+     * Consume an ordinary tag-like token (`</name ...>`, `<!DOCTYPE>`, ...) that
+     * does not participate in block scanning. Throws `unterminated tag` when the
+     * token never reaches a `>`.
+     */
+    const skipOrdinaryToken = (start) => {
+        let k = start + 1;
+        let quote = null;
+        for (; k < n; k++) {
+            const c = fragment[k];
+            if (quote !== null) {
+                if (c === quote)
+                    quote = null;
+            }
+            else if (c === '"' || c === "'") {
+                quote = c;
+            }
+            else if (c === ">") {
+                return k + 1;
+            }
+        }
+        coreErr(start, "unterminated tag");
+    };
+    while (i < n) {
+        const c = fragment[i];
+        if (c === "<") {
+            if (fragment.startsWith("<!--", i)) {
+                const end = fragment.indexOf("-->", i + 4);
+                if (end === -1)
+                    coreErr(i, "unterminated HTML comment");
+                i = end + 3;
+                continue;
+            }
+            const slash = fragment[i + 1] === "/";
+            const nameStart = slash ? i + 2 : i + 1;
+            if (isAsciiLetter(fragment[nameStart])) {
+                if (slash) {
+                    // Candidate closing tag: parse the name and require only ASCII
+                    // whitespace between it and the closing `>`.
+                    let q = nameStart;
+                    const ns = q;
+                    while (q < n && isTagNameChar(fragment[q]))
+                        q++;
+                    const closeName = fragment.slice(ns, q);
+                    let r = q;
+                    while (r < n && isAsciiWhitespace(fragment[r]))
+                        r++;
+                    if (fragment[r] === ">") {
+                        const closeEnd = r + 1;
+                        const lower = closeName.toLowerCase();
+                        if (BLOCK_SET.has(lower)) {
+                            if (stack.length === 0 || top().tag !== lower) {
+                                coreErr(i, `unexpected closing block </${lower}>`);
+                            }
+                            const frame = stack.pop();
+                            const raw = frame.chunks.join("");
+                            if (frame.outer) {
+                                const text = norm(raw);
+                                if (text !== "") {
+                                    results.push({
+                                        tag: frame.tag,
+                                        openStart: frame.openStart,
+                                        openEnd: frame.openEnd,
+                                        innerStart: frame.openEnd,
+                                        innerEnd: i,
+                                        closeEnd,
+                                        text,
+                                    });
+                                }
+                            }
+                            else if (stack.length > 0) {
+                                top().chunks.push(raw);
+                            }
+                            i = closeEnd;
+                        }
+                        else {
+                            // An ordinary non-block closing tag contributes no text.
+                            i = closeEnd;
+                        }
+                        continue;
+                    }
+                    // `</name ...>` with junk before `>` is not a valid closing tag;
+                    // consume it as ordinary markup and continue scanning inside.
+                    i = skipOrdinaryToken(i);
+                    continue;
+                }
+                const tag = readStartTag(i);
+                if (tag.name === "script" || tag.name === "style") {
+                    if (tag.selfClosing) {
+                        i = tag.end;
+                    }
+                    else {
+                        i = skipRawText(i, tag.end, tag.name);
+                    }
+                    continue;
+                }
+                if (BLOCK_SET.has(tag.name)) {
+                    if (tag.selfClosing)
+                        coreErr(i, `self-closing block ${tag.name}`);
+                    stack.push({
+                        tag: tag.name,
+                        openStart: i,
+                        openEnd: tag.end,
+                        outer: stack.length === 0,
+                        chunks: [],
+                    });
+                    i = tag.end;
+                    continue;
+                }
+                // Ordinary non-block start tag: its descendant text still counts.
+                i = tag.end;
+                continue;
+            }
+            // A stray `<` that does not begin a comment, close or open tag is text.
+            appendText("<");
+            i++;
+            continue;
+        }
+        if (c === "&" && stack.length > 0) {
+            i = decodeReference(i);
+            continue;
+        }
+        // Consume a literal run up to the next structural boundary.
+        const runStart = i;
+        while (i < n && fragment[i] !== "<" && !(fragment[i] === "&" && stack.length > 0))
+            i++;
+        if (i > runStart)
+            appendText(fragment.slice(runStart, i));
+    }
+    if (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        coreErr(frame.openStart, `unclosed block ${frame.tag}`);
+    }
+    return results;
+}
+//# sourceMappingURL=anchor-core.js.map
+window.doc.anchor = { BLOCK, norm, scanBlocks };
 </script>
