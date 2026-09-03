@@ -69,7 +69,10 @@ const DOC_ID_PATTERN = /^[0-9a-f]{6}$/;
 const THREAD_ID_PATTERN = /^t_[0-9a-z]+_[0-9a-f]{8}$/;
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 const EVENT_ID_PATTERN = /^\d{13}-[0-9a-f]{6}$/;
-const ANCHOR_ID_PATTERN = /^a[0-9a-f]{7}$/;
+// Anchor IDs are canonically `a` + 8 hex (P1-D: `"a" + sha1(text)[:8]`). The
+// ticket's own executable key fixture uses the 7-hex sample `a3f19c2b`, so
+// 7 hex is tolerated as well; the Executor ruled this range must not widen.
+const ANCHOR_ID_PATTERN = /^a[0-9a-f]{7,8}$/;
 const SUGGESTION_ID_PATTERN = /^s_[0-9a-z]+_[0-9a-f]{8}$/;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
