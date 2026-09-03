@@ -1,11 +1,11 @@
-<title>{{TITLE}}</title>
+{{DOC_ID}}<title>{{TITLE}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
 {{THEME_CSS}}
 {{COMPONENTS_CSS}}
-{{EXTRA_CSS}}
+{{SESSION_CSS}}{{COMMENTS_CSS}}{{EDIT_CSS}}{{HISTORY_CSS}}{{PRESENCE_CSS}}{{SHARE_CSS}}{{EXTRA_CSS}}
 </style>
 
 <header class="masthead">
@@ -31,10 +31,11 @@
 
 <footer><div class="wrap">{{FOOTER}}</div></footer>
 
+{{HISTORY_JSON}}<script>window.doc = { rail: null, panel: null };</script>
 <script>
 {{APP_JS}}
 </script>
 
 <script>
 {{EXTRA_JS}}
-</script>
+</script>{{ANCHOR_CORE_JS}}{{EDIT_JS}}{{COMMENTS_JS}}{{HISTORY_JS}}{{REALTIME_JS}}{{PRESENCE_JS}}{{SHARE_JS}}{{SESSION_JS}}
