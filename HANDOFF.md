@@ -6,6 +6,25 @@ is already in GitHub issues. **Read this whole file before running anything.**
 The work is already planned. Nothing here asks you to design the platform — that argument is settled in
 `docs/research/00-integration-plan.md`, which rules over every numbered research document.
 
+## Current coordination status
+
+The Phase 1 specifications in `docs/tickets/P1-A.md` through `docs/tickets/P1-E.md` are complete,
+reviewed as implementable without the integration plan, pushed to the handoff branch, and copied exactly
+into issues #1 through #5. A separate specification lane is researching every remaining ticket phase by
+phase. It will add and push `docs/tickets/P2-*.md`, `P3-*.md`, and `P4-*.md` and replace only the matching
+issue bodies after each phase passes a body-only review.
+
+**That specification work does not block Aiur from beginning Phase 1 now.** The Aiur Executor may dispatch
+Phase 1 from issues #1 through #5 while the specification lane works on issues #6 through #42. Do not
+dispatch a later phase until its rewritten issue bodies have been pushed and reviewed. The two lanes must
+not edit the same issue or ticket document: the specification lane owns only the remaining ticket docs and
+issue bodies, while Aiur owns Phase 1 implementation branches and pull requests.
+
+Phase 1 maximizes parallel source work without pretending integration is parallel. P1-A, P1-B, P1-C, and
+P1-E may be authored concurrently in isolated worktrees; integrate P1-A before P1-B, start P1-D from the
+integrated P1-B contract, and integrate P1-E only after P1-A and P1-B. Generated compiler output, document
+HTML, anchor state, `_site/`, and the repository-wide gates are refreshed serially on the combined branch.
+
 ---
 
 ## The sequence
@@ -52,9 +71,12 @@ its dependencies and the files it owns. **Do not re-derive the dependency graph 
 issue bodies are the authority, and `docs/research/00-integration-plan.md` §4.3 to §4.7 is where they came
 from.
 
-Two properties of the graph you must preserve, because getting them wrong wastes a whole phase:
+Properties of the graph you must preserve, because getting them wrong wastes a whole phase:
 
-- **P1-B (issue #2) is the keystone.** Everything in phases 2 to 4 waits on it. It lands alone.
+- **P1-B (issue #2) is the keystone.** Everything in phases 2 to 4 waits on it, and P1-D amends a stub it
+  creates. Phase 1 source authoring may still fan out: P1-A, P1-B, P1-C, and P1-E have disjoint source
+  ownership. Integration is ordered P1-A, then P1-B; P1-D follows P1-B; P1-C is independent; P1-E merges
+  and completes site acceptance after P1-A and P1-B, with that acceptance rerun after P1-D if necessary.
 - **Phase 4 is sequenced, not parallel, wherever a file is shared.** Nine phase-4 tickets amend a file an
   earlier ticket creates. Each issue names it. Treat any file that several ready tickets all list as a
   clique and admit those tickets one at a time.
@@ -83,6 +105,11 @@ The labels already exist (`agent:todo`, `build-order`, `phase:1` to `phase:4`, `
 Invoke the `aiur-run` skill and act as Executor. That skill owns the detail: launch flags, the wake
 monitor, the capacity audit, the hourly retrospective, review fan-out, and the merge policy. This file
 only records what is specific to *this* repository.
+
+Phase 1 may start as soon as the operator has completed step 2; it does not wait for the separate ticket
+specification lane to finish phases 2 through 4. Before advancing Aiur to a later phase, confirm that the
+matching `docs/tickets/` files exist on the handoff branch, their issue bodies match, and the phase's
+body-only reviewer passed them.
 
 ---
 
