@@ -7,6 +7,10 @@ const DOC_ID = /^[0-9a-f]{6}$/;
 const THREAD_ID = /^t_[0-9a-z]+_[0-9a-f]{8}$/;
 const SUGGESTION_ID = /^s_[0-9a-z]+_[0-9a-f]{8}$/;
 const ANCHOR_ID = /^a[0-9a-f]{8}$/;
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+).get;
 
 function invalidDependencies() {
   throw new TypeError(INVALID_DEPENDENCIES);
@@ -43,6 +47,7 @@ function validWebhookUrl(value) {
     typeof value !== "string" ||
     value.trim() === "" ||
     /\s/u.test(value) ||
+    /[?#]/u.test(value) ||
     value !== value.trim()
   ) {
     return null;
@@ -72,6 +77,7 @@ function validSiteOrigin(value) {
   if (
     typeof value !== "string" ||
     /\s/u.test(value) ||
+    /[?#]/u.test(value) ||
     value !== value.trim()
   ) {
     return null;
@@ -304,6 +310,12 @@ async function acceptedSlackResponse(response) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (
+        !ArrayBuffer.isView(value) ||
+        typedArrayTag.call(value) !== "Uint8Array"
+      ) {
+        return false;
+      }
       byteLength += value.byteLength;
       if (byteLength > 16) return false;
       chunks.push(value);
