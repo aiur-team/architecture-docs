@@ -107,12 +107,8 @@ nav.jump a.history-changed::after {
 }
 
 @media print {
-  .history-changebar {
-    display: none;
-  }
-  section.history-changed > details.sec > summary .sec-label::before {
-    display: none;
-  }
+  .history-changebar,
+  section.history-changed > details.sec > summary .sec-label::before,
   nav.jump a.history-changed::after {
     display: none;
   }

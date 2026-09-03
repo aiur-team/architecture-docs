@@ -128,17 +128,21 @@ function isValidHistory(history) {
 /* ---- current-section resolution ---------------------------------------- */
 
 function resolveCurrentSections(since) {
-  const ids = [];
-  const seen = new Set();
+  const ids = new Set();
   for (const version of since) {
     for (const change of version.changed) {
-      if (seen.has(change.id)) continue;
-      seen.add(change.id);
-      ids.push(change.id);
+      ids.add(change.id);
     }
   }
 
   const navLinks = document.querySelectorAll("nav.jump a");
+  const linksByTarget = new Map();
+  for (const link of navLinks) {
+    if (link instanceof HTMLAnchorElement && !linksByTarget.has(link.getAttribute("href"))) {
+      linksByTarget.set(link.getAttribute("href"), link);
+    }
+  }
+
   const current = [];
   for (const id of ids) {
     const section = document.getElementById(id);
@@ -146,14 +150,7 @@ function resolveCurrentSections(since) {
     const details = section.querySelector("details.sec");
     if (!details) continue;
 
-    let link = null;
-    const target = "#" + id;
-    for (const candidate of navLinks) {
-      if (candidate instanceof HTMLAnchorElement && candidate.getAttribute("href") === target) {
-        link = candidate;
-        break;
-      }
-    }
+    const link = linksByTarget.get("#" + id) ?? null;
 
     const labelNode = section.querySelector(".sec-label");
     let label = labelNode ? labelNode.textContent.trim() : "";
