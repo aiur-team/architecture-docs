@@ -23,5 +23,32 @@ jobs:
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
+      - name: edge gate config is fail-closed
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          const toml = readFileSync("netlify.toml", "utf8");
+          const marker = "[[edge_functions]]";
+          const start = toml.indexOf(marker);
+          assert.notEqual(start, -1, "missing [[edge_functions]] block");
+          assert.equal(toml.indexOf(marker, start + marker.length), -1, "expected exactly one edge_functions block");
+          const tail = toml.slice(start + marker.length);
+          const nextBlock = tail.search(/^\[/m);
+          const block = nextBlock === -1 ? tail : tail.slice(0, nextBlock);
+          assert.match(block, /^\s*path\s*=\s*"\/\*"\s*$/m);
+          assert.match(block, /^\s*function\s*=\s*"gate"\s*$/m);
+          const line = block.match(/^\s*excludedPath\s*=\s*\[(.*)\]\s*$/m);
+          assert.ok(line, "missing excludedPath");
+          const quoted = [...line[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+          assert.deepEqual(quoted, ["/login/*", "/api/*", "/_assets/*"]);
+          assert.equal(line[1].replace(/"[^"]+"/g, "").replace(/[\s,]/g, ""), "");
+          console.log("PASS  edge gate config is fail-closed");
+          NODE
+
+      - name: complete site builds
+        run: templates/build --site
+
       - name: every document rebuilds byte-identically
         run: templates/check-dist
