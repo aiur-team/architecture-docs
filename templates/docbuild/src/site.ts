@@ -120,11 +120,14 @@ function collectDocuments(root: string): string[] {
     for (const ent of entries) {
       const name = ent.name;
       const childRel = rel === "" ? name : `${rel}/${name}`;
+      if (name === "doc.json") continue;
+      // Name-based exclusions apply before traversal, so an excluded path is
+      // neither opened, followed, nor treated as a visited symlink.
+      if (isExcluded(rel, name)) continue;
       if (ent.isSymbolicLink()) {
         return fail(`${childRel}: symbolic links are not supported in site discovery`);
       }
-      if (name === "doc.json" || !ent.isDirectory()) continue;
-      if (isExcluded(rel, name)) continue;
+      if (!ent.isDirectory()) continue;
       walk(join(abs, name), childRel);
     }
   };
