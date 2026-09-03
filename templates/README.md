@@ -134,7 +134,7 @@ rm -f cache-notes-source/dist/cache-notes.html
 rm -f cache-notes-source/dist/cache-notes.edit.json
 templates/build cache-notes-source
 templates/build --site
-git add -A cache-notes cache-notes-source
+git add -A -- cache-notes-source
 ```
 
 Before moving it, verify that `history.json` is absent rather than removing one. Leave `id`, `slug`, and
