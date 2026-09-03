@@ -106,6 +106,10 @@
   overflow-wrap: anywhere;
 }
 
+.share-value {
+  unicode-bidi: isolate;
+}
+
 @media (forced-colors: active) {
   .share-btn,
   .share-pop,
