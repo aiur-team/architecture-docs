@@ -874,6 +874,7 @@ async function listThreadIds(store, docId) {
       throw fail("unavailable");
     }
   } catch (error) {
+    await closeIterator(iterator);
     throw error instanceof EndpointError ? error : fail("unavailable");
   }
   const ids = new Set();
