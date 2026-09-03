@@ -8,22 +8,121 @@ everything.
 
 ## Make a new document
 
+Choose one lowercase kebab-case name that is not already a slug or alias, and replace every
+`cache-notes` below with that name. Copy the skeleton, generate the permanent ID once, and replace the
+skeleton's placeholder `id` and `slug` before publication. Paste the generated six-hex value into `id`,
+write `cache-notes` into `slug`, and leave `aliases` as `[]` for this never-published name.
+
 ```bash
-cp -r templates/skeleton my-doc
-openssl rand -hex 3                      # -> the permanent id, paste it into doc.json
-$EDITOR my-doc/doc.json                  # id, slug, title, lede, masthead metadata
-$EDITOR my-doc/sections/*.html           # one file per section
-templates/build my-doc                   # -> my-doc/dist/my-doc.html
+cp -R templates/skeleton cache-notes
+openssl rand -hex 3
+"${EDITOR:-vi}" cache-notes/doc.json
+"${EDITOR:-vi}" cache-notes/sections/*.html
+templates/build cache-notes
+git add cache-notes
+templates/build --site
+git add cache-notes
+templates/check-dist
+scripts/scrub-check.sh
+npm --prefix templates/docbuild run check
+git diff --check
+git diff --cached --check
 ```
+
+The first `git add cache-notes` makes the new document part of the tracked-document inventory before site
+validation. Site mode discovers regular `doc.json` files in the working tree, creates the new route, and
+checks global identity collisions; staging also ensures the tracked-document `templates/check-dist` gate
+includes the new instance. The second `git add cache-notes` restages any committed outputs refreshed by
+site mode.
+
+Read the instance build's anchor report and review both `git diff` and the staged diff before publishing.
+Confirm that the instance identity checks and the site build's global ID, slug, and alias checks passed.
+Commit `doc.json`, `sections/`,
+`anchors.json`, `history.json` when produced, and `dist/` together. `_site/` is generated deploy output and
+is not committed.
 
 The builder is TypeScript with **zero runtime dependencies**. `templates/build` compiles it on first run
 and caches the output, so the only thing you need installed is **Node 18 or later**. TypeScript is the one
 devDependency and it is fetched once.
 
-Run `templates/check-dist` to rebuild every document and assert the committed `dist/` is unchanged. That is
-the acceptance test which allowed this builder to be rewritten twice without altering one byte of output.
+Open `cache-notes/dist/cache-notes.html` in a browser, or publish it as an artifact.
 
-Open `my-doc/dist/my-doc.html` in a browser, or publish it as an artifact.
+## Document identity and URLs
+
+Every `doc.json` requires `id`, `slug`, and `aliases`. For example:
+
+```json
+{
+  "id": "4b7d2a",
+  "slug": "cache-notes",
+  "aliases": [],
+  "title": "Cache notes"
+}
+```
+
+- **`id`** is exactly six lowercase hexadecimal characters. Generate it once with
+  `openssl rand -hex 3`. It must be globally unique across tracked `doc.json` files and is used as
+  `<docId>` for comment, edit, and history state and for the permanent `/d/<id>` route. The `id` is never edited,
+  reused, or derived from a URL, slug, directory, or other meaningful value.
+- **`slug`** matches `^[a-z0-9]+(?:-[a-z0-9]+)*$` and must be globally unique. It controls the current
+  hosted URL at `/<slug>/` and may change.
+- **`aliases`** is a required array of prior slugs. Every alias follows the same grammar, is globally
+  unique across all current slugs and aliases, and must not equal the document's current slug.
+
+The routes `api`, `d`, `login`, `invite`, and `_assets` are reserved and cannot be slugs or aliases.
+The copied skeleton's placeholder `id` and `slug` are not publishable values.
+
+The instance directory is only a filesystem location and build input. It is not document identity and
+need not match the URL. Never derive a state key from a URL or directory. Share `/d/<id>` links when the
+link must remain permanent.
+
+### Rename a published document
+
+A URL rename is one atomic metadata edit. For a rename from `cache-notes` to `bounded-cache`, the result
+is:
+
+```json
+{
+  "id": "4b7d2a",
+  "slug": "bounded-cache",
+  "aliases": ["cache-notes"]
+}
+```
+
+1. Record the current `id` and `slug` from `doc.json`.
+2. Confirm that the new slug is valid, is not reserved, and is absent from every tracked current slug
+   and alias.
+3. Keep `id` byte-for-byte unchanged.
+4. Append the old slug once to the end of `aliases`, preserving every earlier alias, then set `slug` to
+   the new value.
+5. Run `templates/build <instance>` and `templates/build --site`.
+6. Require `_site/bounded-cache/index.html` and these generated lines in `_site/_redirects`:
+
+   ```text
+   /d/4b7d2a /bounded-cache/ 301
+   /cache-notes /bounded-cache/ 301!
+   ```
+
+7. Read the anchor report, run every repository gate in the new-document checklist, review the diff, and
+   publish the metadata and refreshed generated committed inputs together.
+
+Do not replace an old alias or remove an alias after its redirect has been shared. Do not change `id`,
+rename the directory merely to change the URL, or edit `_site/_redirects` by hand. A rename does not
+repair a previously changed or reused ID, resolve an existing alias collision, or migrate state between
+deployment modes.
+
+### Rename an instance directory
+
+A directory rename is optional and separate from a URL rename. If repository organization requires one,
+move the complete instance before either build:
+
+```bash
+git mv <old-instance> <new-instance>
+```
+
+Leave `id` unchanged and decide the URL only with `slug` and `aliases`. Keep the instance's source,
+`anchors.json`, `history.json`, and `dist/` together. Review the resulting diff and the builder's history
+behavior: a filesystem move alone is not promised to change or preserve a URL.
 
 ## What is in a document
 
@@ -33,9 +132,9 @@ Open `my-doc/dist/my-doc.html` in a browser, or publish it as an artifact.
 | `sections/*.html` | One section each, ordered by filename. Rename to reorder |
 | `extra.css` | Optional. Per-document CSS, appended last so it wins |
 | `extra.js` | Optional. Per-document JavaScript, for something genuinely specific to one document |
-| `anchors.json` | Generated by the build and committed. The block ids that comments attach to. Never edit, never delete |
-| `history.json` | Generated by the build from local git, when git is available, and committed. The changelog the page shows |
-| `dist/` | Build output. Committed, so a reviewer can open it without a toolchain. Holds the HTML and the `.edit.json` manifest |
+| `anchors.json` | Generated by the build and committed. The block IDs that comments attach to. Never hand-edit it |
+| `history.json` | Generated from local Git when available and committed. The changelog the page shows |
+| `dist/` | Generated artifact HTML and `.edit.json` manifest. Commit it so reviewers need no toolchain |
 
 The skeleton starts with six sections, which is the shape most of these documents want:
 
@@ -48,128 +147,6 @@ The skeleton starts with six sections, which is the shape most of these document
 
 Delete what you do not need. Add more by adding files. Use `details.dx` for depth inside a section rather
 than adding top-level sections, so the jump nav stays scannable.
-
-## Identity: `id`, `slug` and `aliases`
-
-Every `doc.json` starts with three fields:
-
-```json
-{
-  "id": "a2e912",
-  "slug": "example",
-  "aliases": []
-}
-```
-
-- **`id`** is the document's permanent key. Six random lowercase hexadecimal characters, generated once
-  with `openssl rand -hex 3`, never edited. It is meaningless on purpose: a meaningful id is an id someone
-  will eventually want to correct. Every comment thread, inline edit and history entry is stored under
-  this id, and the site serves `/d/<id>` as a redirect to the current slug forever.
-- **`slug`** is the readable URL. The site serves the document at `/<slug>/`. It usually matches the
-  directory name, but nothing depends on that. It may change.
-- **`aliases`** lists every slug the document has previously used. Each alias redirects to the current
-  slug. The list only grows.
-
-Three rules the site build enforces, and fails loudly on:
-
-1. An `id` is exactly six characters from `0-9a-f`. A `slug` or alias is one lowercase kebab-case path
-   segment: `build-cache`, not `Build_Cache` and not `docs/build-cache`.
-2. No two documents share an id, and no slug or alias is used by more than one document. An alias may
-   not repeat the document's own slug.
-3. `api`, `d`, `login`, `invite` and `_assets` are reserved routes. They cannot be a slug or an alias.
-
-The directory name is not part of a document's identity. It appears only in the edit manifest as the git
-path that inline edits commit to, and the build regenerates that manifest every time.
-
-**Share `/d/<id>` links, not slug links.** Put that URL in the document footer so a reader can copy the
-permanent one. `doc.json` drives the footer, so that is a `doc.json` edit, not a template change.
-
-## Renaming a document
-
-A rename changes the slug, optionally the directory, and nothing else. Comments survive because they are
-keyed on the `id` and on the block ids in `anchors.json`, so the procedure protects those two things.
-
-1. **Leave `id` alone.** Changing it orphans every thread on the document at once.
-2. **Move the directory, if you want the directory to match.** Use `git mv old-name new-name` so
-   `anchors.json`, `history.json` and `dist/` travel with the sections. Never recreate the directory from
-   the skeleton and copy the sections across: a build with no `anchors.json` mints fresh block ids, and
-   every existing comment loses its block.
-3. **Set `slug`** to the new name.
-4. **Append the old slug to `aliases`.** Do not remove anything already in the list. Old links in Slack,
-   pull requests and Notion keep working only for as long as the alias exists.
-5. **Rebuild** with `templates/build new-name`. The anchor report should show every section as
-   `N equal, 0 edited, 0 moved, 0 ORPHANED`. Any other number means step 2 went wrong; fix it before
-   committing.
-6. **Check the redirects** with `templates/build --site` and read `_site/_redirects`. The old slug and
-   `/d/<id>` both point at the new slug.
-7. **Commit the source and `dist/` together.** `templates/check-dist` must pass.
-
-For a document with `id: a2e912` renamed from `example` to `build-cache`, the finished `doc.json` starts:
-
-```json
-{
-  "id": "a2e912",
-  "slug": "build-cache",
-  "aliases": ["example"]
-}
-```
-
-and the site build emits:
-
-```
-/d/a2e912 /build-cache/ 301
-/d/a2e912/* /build-cache/ 301
-/example /build-cache/ 301!
-/example/* /build-cache/:splat 301!
-```
-
-`301!` forces the redirect even when a file exists at the old path, so a retired slug can never be
-shadowed by accident.
-
-## Write one sentence per line
-
-Inside a `<p>`, a `<li>` or any other block, put each sentence on its own line and do not hard-wrap at a
-column. Every future diff then says "this sentence changed" instead of "this 400-character line changed",
-and a reviewer reads exactly what moved. It costs the writer nothing.
-
-The build is indifferent to line breaks. The anchoring pass collapses all whitespace before it compares
-block text, so rewrapping a paragraph, or converting an older hard-wrapped document to this convention,
-changes no `data-aid` and orphans no comment. The example document predates the convention and is still
-hard-wrapped; new writing should not be.
-
-## The site build
-
-`templates/build <instance>` produces the artifact copy of one document. `templates/build --site`
-produces the site copy of every document. Both run the same composition, so the two outputs cannot
-drift: a hosted page differs from its artifact by exactly one line, the script tag for the enhancer that
-adds comments and editing on the site.
-
-```bash
-templates/build --site       # -> _site/, one directory per slug
-```
-
-Site mode discovers every directory in the repository that holds a `doc.json`, except
-`templates/skeleton`, dot-directories, `_site`, `node_modules`, `dist` and `netlify`. The root `login/`
-and `invite/` directories are static pages, copied as they are. It then validates the whole inventory
-against the identity rules above, rebuilds each document's `dist/` through the ordinary builder, and
-writes `_site/` from scratch:
-
-| Path in `_site/` | What it is |
-|---|---|
-| `<slug>/index.html` | The hosted copy of each document, at the clean URL `/<slug>/` |
-| `index.html` | A root index listing every document, in slug order, with no script |
-| `_redirects` | The `/d/<id>` and alias redirects |
-| `_assets/enhance.<hash>.js` | The enhancer, content-hashed, present only when `templates/enhance/enhance.js` exists |
-| `_headers` | `X-Robots-Tag: noindex`, written only when `CONTEXT` is not `production` |
-
-`_site/` is disposable deploy output and is never committed. Every expected failure, a bad `doc.json`, a
-duplicate slug, a symlink where a file should be, is caught before the previous `_site/` is deleted or
-any `dist/` is touched.
-
-Netlify runs `templates/build --site` as its build command and publishes `_site/`. The site build reads
-only committed files. It never runs git, so `history.json` is refreshed and committed on the writer's
-machine, and CI can assert that a rebuild is byte-identical. CI runs the site build and
-`templates/check-dist` on every pull request.
 
 ## Section file format
 
@@ -216,52 +193,69 @@ The semantic trio `ok` / `warn` / `risk` is deliberately generic. Each document 
 mean and states it in a legend. The compliance document uses them as hard guarantee, best effort, and
 bypass.
 
+## Build an artifact or a site
+
+| Command | Scope | Required result | Commit? |
+|---|---|---|---|
+| `templates/build <instance>` | One source instance | Refresh `<instance>/dist/<basename>.html` and generated committed inputs | Commit changed `dist/`, `anchors.json`, and `history.json` when validly refreshed |
+| `templates/build --site` | Every publishable tracked instance | Refresh artifacts and build `_site/<slug>/index.html`, `_site/index.html`, `_site/_redirects`, and the hashed enhancement asset | Do not commit `_site/` |
+| `templates/check-dist` | Every tracked document | Rebuild and prove committed output byte-identical | No rewrite accepted; update source and generated inputs first |
+
+Site mode discovers publishable tracked instances, validates their identities together, refreshes each
+artifact, and writes `_site/` from scratch. `_site/` is disposable deploy output and is never committed.
+Netlify runs `templates/build --site` and publishes `_site/`.
+
+Artifact and site HTML differ only by the hosted enhancement-script line. Both contain the document-ID
+meta element. Neither mode fetches comments or live state into committed artifacts. Local builds,
+including `templates/build --site`, may validly refresh `history.json` from Git before it is committed.
+On Netlify (`NETLIFY=true`), builds skip that refresh and use the committed canonical history when present,
+or omit history when it is absent.
+
+`docbuild --site` is the underlying CLI spelling. Writers normally use the repository wrapper
+`templates/build --site`.
+
+## Write prose one sentence per line
+
+Inside `sections/*.html`, start each new prose sentence on a new source line in paragraphs, headings,
+list items, blockquotes, table cells, and `<details>` copy while preserving the enclosing HTML. Do not
+reflow code or preformatted blocks, diagram source, JSON, shell examples, URLs, or a sentence merely
+because it wraps visually.
+
+Browsers collapse ordinary HTML whitespace. This convention makes Git diffs readable; it does not
+intentionally add `<br>`, change rendered spacing, or alter text content. The anchor normalizer also
+collapses whitespace, so rewrapping existing prose alone does not change its `data-aid`.
+
+## Read the anchor report
+
+Every prose block carries a `data-aid`, and comments attach to that permanent block ID. The build aligns
+current text with the committed `anchors.json` and reports what happened:
+
+| Report token | Meaning | Writer action |
+|---|---|---|
+| `equal` | Block text/order match retained the existing `data-aid` | No action beyond normal diff review |
+| `edited` | Similar replacement at or above the 0.6 threshold retained the ID | Confirm the intended block kept the ID and inspect comment quote drift |
+| `moved` | Exact orphaned text reappeared and reclaimed its prior ID | Confirm the move is intentional |
+| `ORPHANED` | An old block ID no longer has a safe match | Review `anchors.json` and affected prose; accept only when comments should become moved/orphaned |
+
+On a first build without `anchors.json`, every block is new, every count is zero, and the build creates the
+file. On an unchanged second build, every section must report zero `ORPHANED` and leave `anchors.json`
+byte-identical.
+
+The report is a warning, not permission to hand-edit IDs until it becomes green. Restore or revise prose
+when an orphan is unintended. A whole rewrite may legitimately orphan threads, but make that loss visible
+in review instead of suppressing it.
+
 ## What the build checks
 
-`docbuild` fails on a missing section field, a duplicate section id, and an unfilled placeholder. After
-writing it reports tag balance, the theme-state count, and the file size — the two bugs that actually bite
-being an unbalanced tag and a colour trapped in a theme block.
+`docbuild` fails on invalid or duplicate document identity, a missing section field, a duplicate section
+ID, and an unfilled placeholder. After writing, it reports anchor alignment, tag balance, theme-state
+count, and file size. Read every report before committing.
+
+Run `templates/check-dist` to rebuild every tracked document and prove the committed output is
+byte-identical. Run the complete repository gate sequence in the new-document checklist before
+publication.
 
 It has no runtime dependencies. Node only, and only to build — a reader needs nothing.
-
-## The anchor report
-
-Every block in a section body (`p`, `li`, headings, table cells, `pre`, and so on) carries a `data-aid`.
-That id is what a comment attaches to. The build assigns ids by aligning the new block texts against the
-texts recorded in `anchors.json` from the previous build, and it prints what it decided:
-
-```
-anchors
-      problem: 10 equal, 0 edited, 0 moved, 0 ORPHANED
-      solution: 36 equal, 1 edited, 1 moved, 2 ORPHANED
-  orphans          2 (solution/a3f19c2b, solution/a90b7de1)
-```
-
-One line per section, in document order, plus a line for any removed section that still owned anchors.
-
-- **equal** — the block text is unchanged. The id is carried.
-- **edited** — the block changed but still resembles its predecessor. The id is carried, so comments stay
-  on the block. A comment whose quoted words were rewritten shows as "text changed" rather than
-  vanishing.
-- **moved** — a block with exactly the same text reappeared elsewhere in the document, in any section.
-  The id follows it.
-- **ORPHANED** — an old block has no match. Its id is gone, and every comment on it becomes orphaned:
-  still readable, grouped under "not attached any more" with its quote, but no longer in place. The
-  `orphans` line names up to eight of them as `section/aid`.
-
-On a first build there is no `anchors.json` yet, so every block is new and every count is zero. The
-file is created by that build; commit it.
-
-The alignment respects order, so two similar neighbouring paragraphs never swap ids, and it refuses to
-pair blocks below a 0.6 similarity. Below that floor it orphans rather than guesses. Splitting a
-paragraph in two therefore orphans its id, and rewriting a whole section orphans every id in it. That is
-correct behaviour, and the report exists so a writer finds out at the moment they do it, not when a
-reader asks where the thread went.
-
-**Read the report before you commit.** If it shows an orphan you did not intend, restore the text and
-rebuild. The ids are a property of the text, so the id comes back. `anchors.json` is rewritten on every
-build and committed next to the section that changed, which puts anchor churn in the same diff as the
-edit that caused it, where a reviewer can see it.
 
 ## Where to put a component
 
