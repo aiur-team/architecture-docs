@@ -193,10 +193,16 @@ function assertLinkState(path, before) {
   }
 }
 
-async function runHosted(connectModule) {
+async function runHosted(connectModule, {
+  fetchFn = fetch,
+  fetchTimeoutMs = 10_000,
+  scheduleDeadline = setTimeout,
+  clearDeadline = clearTimeout,
+  repositoryRoot: suppliedRepositoryRoot = null,
+} = {}) {
   const lifecycle = new AbortController();
-  const deadline = setTimeout(() => lifecycle.abort(new Error("hosted lifecycle timeout")), HOSTED_TIMEOUT);
-  const repositoryRoot = resolve(dirname(fileURLToPath(new URL("./connect.mjs", import.meta.url))), "..");
+  const deadline = scheduleDeadline(() => lifecycle.abort(new Error("hosted lifecycle timeout")), HOSTED_TIMEOUT);
+  const repositoryRoot = suppliedRepositoryRoot ?? resolve(dirname(fileURLToPath(new URL("./connect.mjs", import.meta.url))), "..");
   const tempRoot = realpathSync(tmpdir());
   const evidenceRoot = printableStrictChild(tempRoot, mkdtempSync(join(tempRoot, "p4s-hosted-"), { encoding: "utf8", mode: 0o700 }));
   const remediationPath = printableStrictChild(evidenceRoot, join(evidenceRoot, "manual-remediation.json"));
@@ -348,20 +354,23 @@ async function runHosted(connectModule) {
     const fetchController = new AbortController();
     const abortFetch = () => fetchController.abort(lifecycle.signal.reason);
     lifecycle.signal.addEventListener("abort", abortFetch, { once: true });
-    const fetchTimer = setTimeout(() => fetchController.abort(new Error("hosted fetch timeout")), 10_000);
+    const fetchTimer = setTimeout(() => fetchController.abort(new Error("hosted fetch timeout")), fetchTimeoutMs);
     let response;
     try {
-      response = await fetch(first.url, { redirect: "manual", signal: fetchController.signal });
+      response = await fetchFn(first.url, { redirect: "manual", signal: fetchController.signal });
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get("location"), "/login/?next=%2F");
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal((await response.arrayBuffer()).byteLength, 0);
+    } catch (error) {
+      try { await response?.body?.cancel?.(); } catch {}
+      throw error;
     } finally {
       clearTimeout(fetchTimer);
       lifecycle.signal.removeEventListener("abort", abortFetch);
     }
-    assert.equal(response.status, 302);
-    assert.equal(response.headers.get("location"), "/login/?next=%2F");
-    assert.equal(response.headers.get("cache-control"), "private, no-store");
-    assert.equal((await response.arrayBuffer()).byteLength, 0);
   } finally {
-    clearTimeout(deadline);
+    clearDeadline(deadline);
     try {
       const matches = await search(null);
       if (cleanupTarget === null && matches.length === 1) {
@@ -922,13 +931,46 @@ const state = JSON.parse(readFileSync(statePath, "utf8"));
 const siteId = "123e4567-e89b-12d3-a456-426614174000";
 const exact = (expected) => JSON.stringify(args) === JSON.stringify(expected);
 const reject = () => { process.exitCode = 2; };
-if (args[0] === "env:get") {
+const save = () => writeFileSync(statePath, JSON.stringify(state));
+const help = {
+  "sites:create": ["$ netlify sites:create [options]", ["--disable-linking", "--json", "--name <name>"]],
+  "sites:search": ["$ netlify sites:search [options] <search-term>", ["--json"]],
+  "env:get": ["$ netlify env:get [options] <name>", ["--context <context>"]],
+  "env:set": ["$ netlify env:set [options] <key> [value]", []],
+  "blobs:set": ["$ netlify blobs:set [options] <store> <key> [value...]", ["--input <path>"]],
+  "blobs:get": ["$ netlify blobs:get [options] <store> <key>", ["--output <path>"]],
+  "blobs:delete": ["$ netlify blobs:delete [options] <store> <key>", ["--force"]],
+  deploy: ["$ netlify deploy [options]", ["--prod", "--no-build", "--dir <path>", "--json"]],
+  "sites:delete": ["$ netlify sites:delete [options] <id>", ["--force"]],
+};
+if (exact(["--version"])) process.stdout.write("netlify-cli/27.4.2\\n");
+else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefined) {
+  const [usage, options] = help[args[0]];
+  process.stdout.write("USAGE\\n" + usage + "\\n\\nOPTIONS\\n" + options.map((option) => "  " + option + "  fixture").join("\\n") + "\\n");
+} else if (args[0] === "sites:search") {
+  if (args.length !== 3 || args[2] !== "--json") reject();
+  else process.stdout.write(JSON.stringify(state.siteName === args[1] ? [{ id: siteId, name: state.siteName }] : []));
+} else if (args[0] === "sites:create") {
+  if (args.length !== 5 || args[1] !== "--name" || args[3] !== "--disable-linking" || args[4] !== "--json") reject();
+  else { state.siteName = args[2]; save(); process.stdout.write(JSON.stringify({ site_id: siteId })); }
+} else if (args[0] === "sites:delete") {
+  if (!exact(["sites:delete", siteId, "--force"])) reject();
+  else { delete state.siteName; delete state.owner; state.deleted = (state.deleted ?? 0) + 1; save(); }
+} else if (args[0] === "blobs:delete") {
+  if (!exact(["blobs:delete", "doc-state", "mode/4b7d2a/manifest.json", "--force"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
+} else if (args[0] === "env:get") {
   if (!exact(["env:get", "DOC_OWNERS", "--context", "production"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
   else if (state.owner === undefined) process.exitCode = 1;
   else process.stdout.write(state.owner + "\\n");
 } else if (args[0] === "env:set") {
-  if (!exact(["env:set", "DOC_OWNERS", "4b7d2a:owner@example.com"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
-  else { state.owner = args[2]; writeFileSync(statePath, JSON.stringify(state)); }
+  if (
+    args.length !== 3 ||
+    args[0] !== "env:set" ||
+    args[1] !== "DOC_OWNERS" ||
+    !["4b7d2a:owner@example.com", "4b7d2a:hosted@example.com"].includes(args[2]) ||
+    process.env.NETLIFY_SITE_ID !== siteId
+  ) reject();
+  else { state.owner = args[2]; save(); }
 } else if (args[0] === "blobs:set") {
   const input = args[4];
   if (args.length !== 5 || !exact(["blobs:set", "doc-state", "mode/4b7d2a/manifest.json", "--input", input]) || !isAbsolute(input) || basename(input) !== "manifest.input" || process.env.NETLIFY_SITE_ID !== siteId) reject();
@@ -943,6 +985,63 @@ if (args[0] === "env:get") {
 } else process.exitCode = 2;
 `);
   chmodSync(fakeCli, 0o700);
+  const originalCliPath = Object.getOwnPropertyDescriptor(process.env, "NETLIFY_CLI_PATH")?.value;
+  process.env.NETLIFY_CLI_PATH = fakeCli;
+  try {
+    for (const abortKind of ["fetch timeout", "lifecycle timeout"]) {
+      let deadlineCallback = null;
+      let bodyStarted = false;
+      let bodyAborted = false;
+      let bodyCancelled = false;
+      const fakeFetch = async (_url, options) => ({
+        status: 302,
+        headers: new Map([
+          ["location", "/login/?next=%2F"],
+          ["cache-control", "private, no-store"],
+        ]),
+        body: {
+          async cancel() { bodyCancelled = true; },
+        },
+        arrayBuffer() {
+          bodyStarted = true;
+          return new Promise((_resolvePromise, rejectPromise) => {
+            const aborted = () => {
+              bodyAborted = true;
+              rejectPromise(options.signal.reason);
+            };
+            options.signal.addEventListener("abort", aborted, { once: true });
+            if (options.signal.aborted) aborted();
+            if (abortKind === "lifecycle timeout") process.nextTick(() => deadlineCallback());
+          });
+        },
+      });
+      const hostedFailure = runHosted(connect, {
+        fetchFn: fakeFetch,
+        fetchTimeoutMs: abortKind === "fetch timeout" ? 5 : 10_000,
+        repositoryRoot,
+        ...(abortKind === "lifecycle timeout" ? {
+          scheduleDeadline(callback) {
+            deadlineCallback = callback;
+            return { kind: "deadline" };
+          },
+          clearDeadline() {},
+        } : {}),
+      });
+      let hostedError;
+      try { await hostedFailure; } catch (error) { hostedError = error; }
+      assert.ok(hostedError, `${abortKind} rejected`);
+      assert.equal(hostedError.message, `hosted ${abortKind}`);
+      assert.equal(bodyStarted, true, `${abortKind} body started: ${hostedError.stack}\n${readFileSync(statePath, "utf8")}`);
+      assert.equal(bodyAborted, true, `${abortKind} aborted stalled body`);
+      assert.equal(bodyCancelled, true, `${abortKind} cancelled failed body`);
+      const hostedState = JSON.parse(readFileSync(statePath, "utf8"));
+      assert.equal(hostedState.siteName, undefined, `${abortKind} remote cleanup`);
+      assert.ok(hostedState.deleted >= 1, `${abortKind} site deleted`);
+    }
+  } finally {
+    if (originalCliPath === undefined) delete process.env.NETLIFY_CLI_PATH;
+    else process.env.NETLIFY_CLI_PATH = originalCliPath;
+  }
   const rejectedBlob = spawnSync(fakeCli, [
     "blobs:set", "wrong-store", `mode/${docId}/manifest.json`, "--input", join(inputRoot, "edit.json"),
   ], {
