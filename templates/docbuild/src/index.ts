@@ -13,6 +13,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { anchorSections } from "./anchors.js";
+import { markEditable } from "./editable.js";
+import { changelogSection, refresh } from "./history.js";
+
 const CHEVRON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
@@ -187,6 +191,37 @@ function read(path: string, label = path): string {
   }
 }
 
+/** Inline templates/base/<name> if it exists, else nothing. */
+const slot = (base: string, name: string): string =>
+  existsSync(join(base, name)) ? readFileSync(join(base, name), "utf8") : "";
+
+/**
+ * Every optional feature asset is an inline ES module, never `async`, so
+ * document order is execution order: the anchor core installs the shared
+ * scanner first and the session probe fires last, after every listener exists.
+ *
+ * An empty slot emits nothing at all — not an empty wrapper, not a blank line.
+ */
+const moduleScript = (src: string): string =>
+  src.trim() === "" ? "" : `\n<script type="module">\n${src}\n</script>`;
+
+/**
+ * Layout code owned here, not by the core: the compiled module is deliberately
+ * free of `window`, the DOM and Node, so the builder can also import it.
+ */
+const ANCHOR_ADAPTER = "window.doc.anchor = { BLOCK, norm, scanBlocks };";
+
+/** The anchor pass's build report. Silent until it has something to say. */
+function printAnchorReport(anchors: { report: string[]; orphans: Array<[string, string]> }): void {
+  if (anchors.report.length === 0 && anchors.orphans.length === 0) return;
+  console.log("anchors");
+  for (const line of anchors.report) console.log(`  ${line}`);
+  if (anchors.orphans.length > 0) {
+    const sample = anchors.orphans.slice(0, 8).map(([id, aid]) => `${id}/${aid}`);
+    console.log(`  orphans          ${anchors.orphans.length} (${sample.join(", ")})`);
+  }
+}
+
 const isDir = (p: string): boolean => {
   try {
     return statSync(p).isDirectory();
@@ -231,6 +266,7 @@ export function build(root: string, instance: string): string {
   const doc = parseDoc(read(join(inst, "doc.json")), `${instance}/doc.json`);
   const title = doc.get("title");
   if (title === undefined) fail(`${instance}/doc.json: missing 'title'`);
+  const id = doc.get("id");
 
   const dir = join(inst, "sections");
   let names: string[];
@@ -255,6 +291,23 @@ export function build(root: string, instance: string): string {
   }
   if (dupes.size > 0) fail(`duplicate section ids: ${[...dupes].sort().join(", ")}`);
 
+  // History, then anchors, then editability. The changelog has to exist before
+  // anchoring so it is anchored like any other section, and editability needs
+  // the `data-aid` attributes anchoring adds.
+  const labels: Array<[string, string]> = sections.map((s) => [s.id, s.label]);
+
+  const history = refresh(inst);
+  let historyJson = "";
+  if (history !== null) {
+    sections.push(changelogSection(history, labels));
+    // `</` inside a data script would close the element early.
+    const data = JSON.stringify(history).split("</").join("<\\/");
+    historyJson = `<script type="application/json" id="doc-history">${data}</script>\n`;
+  }
+
+  const anchors = anchorSections(inst, sections);
+  markEditable(sections, doc, inst);
+
   const nav = sections.map((s) => `<a href="#${s.id}">${s.nav}</a>`).join("\n    ");
   const meta = doc
     .meta()
@@ -264,12 +317,33 @@ export function build(root: string, instance: string): string {
 
   const optional = (p: string): string => (existsSync(p) ? read(p) : "");
 
+  // The composition surface for every planned client asset. An absent optional
+  // file is absence, not empty feature chrome: it contributes zero bytes, so a
+  // document built with no features is byte-for-byte what it was before the
+  // slots existed.
+  //
+  // The compiled anchor core is resolved from the running module rather than
+  // from `base`, because an installed package has no templates/ directory.
+  const compiledDir = dirname(fileURLToPath(import.meta.url));
+  const anchorCoreSource = slot(compiledDir, "anchor-core.js");
+  // The newline matters: a trailing line comment in the compiled core would
+  // otherwise swallow the adapter.
+  const anchorCore = anchorCoreSource === "" ? "" : `${anchorCoreSource}\n${ANCHOR_ADAPTER}`;
+
   let html = read(join(base, "layout.html"));
   const subs: Array<[string, string]> = [
     ["{{TITLE}}", title!],
     ["{{THEME_CSS}}", read(join(base, "theme.css"))],
     ["{{COMPONENTS_CSS}}", read(join(base, "components.css"))],
+    ["{{SESSION_CSS}}", slot(base, "session.css")],
+    ["{{COMMENTS_CSS}}", slot(base, "comments.css")],
+    ["{{EDIT_CSS}}", slot(base, "edit.css")],
+    ["{{HISTORY_CSS}}", slot(base, "history.css")],
+    ["{{PRESENCE_CSS}}", slot(base, "presence.css")],
+    ["{{SHARE_CSS}}", slot(base, "share.css")],
     ["{{EXTRA_CSS}}", optional(join(inst, "extra.css"))],
+    // Structural, not an attribute value: absent metadata emits no element.
+    ["{{DOC_ID}}", id ? `<meta name="doc-id" content="${id}">\n` : ""],
     ["{{EYEBROW}}", doc.getOr("eyebrow", "")],
     ["{{STATUS}}", doc.getOr("status", "")],
     ["{{HEADING}}", doc.getOr("heading", title!)],
@@ -280,7 +354,23 @@ export function build(root: string, instance: string): string {
     ["{{FOOTER}}", doc.getOr("footer", "")],
     ["{{APP_JS}}", read(join(base, "app.js"))],
     ["{{EXTRA_JS}}", optional(join(inst, "extra.js"))],
+    ["{{HISTORY_JSON}}", historyJson],
+    ["{{ANCHOR_CORE_JS}}", moduleScript(anchorCore)],
+    ["{{EDIT_JS}}", moduleScript(slot(base, "edit.js"))],
+    ["{{COMMENTS_JS}}", moduleScript(slot(base, "comments.js"))],
+    ["{{HISTORY_JS}}", moduleScript(slot(base, "history.js"))],
+    ["{{REALTIME_JS}}", moduleScript(slot(base, "realtime.js"))],
+    ["{{PRESENCE_JS}}", moduleScript(slot(base, "presence.js"))],
+    ["{{SHARE_JS}}", moduleScript(slot(base, "share.js"))],
+    ["{{SESSION_JS}}", moduleScript(slot(base, "session.js"))],
   ];
+  // A slot silently dropped from layout.html would never fail a build: the
+  // unfilled-placeholder scan only sees tokens that survive, never ones that
+  // went missing. Every feature that lands later depends on its slot existing,
+  // so assert that before substituting anything away.
+  const missing = subs.map(([token]) => token).filter((token) => !html.includes(token));
+  if (missing.length > 0) fail(`layout.html is missing placeholders: ${missing.sort().join(", ")}`);
+
   for (const [token, value] of subs) {
     // split/join, never replaceAll: a string replacement in replaceAll treats
     // `$&`, `$'` and `` $` `` as capture references, and real section bodies
@@ -290,6 +380,8 @@ export function build(root: string, instance: string): string {
 
   const left = findPlaceholders(html);
   if (left.length > 0) fail(`unfilled placeholders: ${left.join(", ")}`);
+
+  printAnchorReport(anchors);
 
   const outDir = join(inst, "dist");
   try {
@@ -345,7 +437,8 @@ export interface CheckResult {
  */
 export function check(path: string): CheckResult {
   const t = read(path);
-  const bad = PAIRED.filter((tag) => countOpen(t, tag) !== countClose(t, tag));
+  const countable = withoutJsonData(t);
+  const bad = PAIRED.filter((tag) => countOpen(countable, tag) !== countClose(countable, tag));
 
   const media = countOccurrences(t, "prefers-color-scheme");
   const stamped = countOccurrences(t, '[data-theme="dark"]');
@@ -360,6 +453,25 @@ export function check(path: string): CheckResult {
       `  size             ${(Buffer.byteLength(t, "utf8") / 1024).toFixed(1)} KB`,
     ],
   };
+}
+
+/**
+ * Drop `application/json` data blocks before counting tags. Their payload is
+ * escaped text, not markup: serialized history holds `<\/p>`, which the close
+ * counter would miss while the open counter still saw `<p>`.
+ */
+function withoutJsonData(t: string): string {
+  const OPEN = '<script type="application/json"';
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const start = t.indexOf(OPEN, at);
+    if (start === -1) return out + t.slice(at);
+    const end = t.indexOf("</script>", start);
+    if (end === -1) return out + t.slice(at);
+    out += t.slice(at, start);
+    at = end + "</script>".length;
+  }
 }
 
 function countOccurrences(t: string, needle: string): number {
