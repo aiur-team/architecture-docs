@@ -114,6 +114,13 @@ test("scanner honors quoted greater-than signs and suppresses nested blocks", ()
   assert.equal(frag.slice(blocks[0]!.openStart, blocks[0]!.openEnd).endsWith('">'), true);
 });
 
+test("scanner skips blocks whose normalized text is empty", () => {
+  assert.deepEqual(
+    scanBlocks("<p></p><p> <!-- x --> <b></b> </p><p>kept</p>").map((b) => b.text),
+    ["kept"],
+  );
+});
+
 test("scanner ignores complete comments and their tag-looking contents", () => {
   const frag = "<p>a<!-- <p>fake</p> &amp; nonsense -->b</p>";
   const blocks = scanBlocks(frag);
@@ -151,7 +158,10 @@ test("scanner treats script and style as opaque raw text", () => {
     scanBlocks(style).map((b) => b.text),
     ["xy"],
   );
-  // Case-varied closing tag is honored; an unclosed element is an error.
+  // Closing-tag matching for raw text is ASCII case-insensitive.
+  assert.deepEqual(scanBlocks("<p>a<script>x</SCRIPT>b</p>").map((b) => b.text), ["ab"]);
+  assert.deepEqual(scanBlocks("<p>x<STYLE>y</Style>z</p>").map((b) => b.text), ["xz"]);
+  // An unclosed element is an error.
   assert.throws(
     () => scanBlocks("<p>a<style>opaque"),
     { message: "anchor scan at 4: unclosed raw-text element style" },
@@ -355,7 +365,7 @@ test("first build mints deterministic globally unique aids and exact JSON bytes"
 test("unchanged rebuild preserves section bodies, ids, JSON bytes, and report format", (t) => {
   const dir = instance(t);
   const markup = [
-    section("intro", "1.html", "<h2>Title</h2><p>Body paragraph.</p>"),
+    section("intro", "1.html", "<h2>Title</h2><p class=\"x\">Body paragraph.</p>"),
     section("more", "2.html", "<p>Only one block.</p>"),
   ];
   const run1 = markup.map((s) => section(s.id, s.file, s.body));
@@ -366,6 +376,13 @@ test("unchanged rebuild preserves section bodies, ids, JSON bytes, and report fo
     more: { ids: string[]; texts: string[] };
   }>(dir);
   const firstJson = readFileSync(join(dir, "anchors.json"), "utf8");
+  // The injection itself: exactly one `data-aid`, carrying the minted id, placed
+  // immediately before the opening tag's final `>` (after existing attributes).
+  assert.deepEqual(injectedBodies, [
+    `<h2 data-aid="${firstState.intro.ids[0]}">Title</h2>` +
+      `<p class="x" data-aid="${firstState.intro.ids[1]}">Body paragraph.</p>`,
+    `<p data-aid="${firstState.more.ids[0]}">Only one block.</p>`,
+  ]);
 
   const fresh = markup.map((s) => section(s.id, s.file, s.body));
   const second = anchorSections(dir, fresh);
@@ -432,6 +449,17 @@ test("replace below 0.6 orphans the old id and mints a new id", (t) => {
   assert.notEqual(state.a.ids[0], oldId);
   assert.deepEqual(after.report, ["    a: 0 equal, 0 edited, 0 moved, 1 ORPHANED"]);
   assert.deepEqual(after.orphans, [["a", oldId]]);
+
+  // A near miss just under the floor (similarity 0.4) is still an orphan, so
+  // the floor is exactly 0.6 rather than any lower value that would also
+  // reject a total rewrite.
+  const dir2 = instance(t);
+  anchorSections(dir2, [section("a", "a.html", "<p>abcde</p>")]);
+  const near = readState<{ a: { ids: string[]; texts: string[] } }>(dir2);
+  const nearOld = near.a.ids[0]!;
+  const nearAfter = anchorSections(dir2, [section("a", "a.html", "<p>axyze</p>")]);
+  assert.notEqual((anchors(dir2) as { a: { ids: string[] } }).a.ids[0], nearOld);
+  assert.deepEqual(nearAfter.orphans, [["a", nearOld]]);
 });
 
 test("delete and removed-section opcodes return orphans in prior order", (t) => {
