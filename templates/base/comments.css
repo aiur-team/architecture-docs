@@ -1,0 +1,77 @@
+/* Comments client, read only.  Nothing here applies until comments.js has
+   committed a valid thread list and created the toggle, rail and panel; the
+   two block classes are the non-mutating fallback for engines without the CSS
+   Custom Highlight API.  Colours read the document tokens when they exist and
+   fall back to values that keep panel contrast above 4.5:1 in either scheme. */
+
+#doc-comments-panel{--doc-comments-bg:var(--surface,#FFFFFF);--doc-comments-ink:var(--ink,#15181E);--doc-comments-ink-2:var(--ink-2,#49525F);--doc-comments-border:var(--border-strong,#CBD2DA);--doc-comments-accent:var(--accent,#C0122A);--doc-comments-soft:var(--surface-2,#EEF1F4)}
+@media (prefers-color-scheme:dark){
+  #doc-comments-panel{--doc-comments-bg:var(--surface,#14181E);--doc-comments-ink:var(--ink,#E7EAEE);--doc-comments-ink-2:var(--ink-2,#A6AEBA);--doc-comments-border:var(--border-strong,#39424E);--doc-comments-accent:var(--accent,#FF7A6B);--doc-comments-soft:var(--surface-2,#1B212A)}
+}
+
+/* ---- header toggle ---- */
+#doc-comments-toggle{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono,ui-monospace,monospace);font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2,#49525F);background:var(--surface,#FFFFFF);border:1px solid var(--border-strong,#CBD2DA);border-radius:999px;padding:7px 13px;cursor:pointer}
+#doc-comments-toggle:hover{border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+
+/* ---- margin rail: absolutely positioned, takes no layout space ---- */
+#doc-comments-rail{position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:15}
+.doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
+.doc-comment-marker[hidden]{display:none}
+.doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+
+/* ---- non-mutating fallback when custom highlights are unavailable ---- */
+.doc-comment-block{border-inline-start:3px solid var(--warn,#A85B00);background-color:var(--warn-soft,#FBF0DF);padding-inline-start:8px}
+.doc-comment-block-active{outline:2px solid var(--accent,#C0122A);outline-offset:2px}
+
+/* ---- custom highlights ---- */
+::highlight(doc-comments-open){background-color:rgba(232,168,32,.35)}
+::highlight(doc-comments-active){background-color:rgba(232,88,32,.5)}
+
+/* ---- panel: complementary region, right edge on wide viewports ---- */
+#doc-comments-panel{position:fixed;top:0;right:0;bottom:0;width:min(26rem,40vw);display:flex;flex-direction:column;overflow-y:auto;box-sizing:border-box;padding:16px 20px 24px;background:var(--doc-comments-bg);color:var(--doc-comments-ink);border-inline-start:1px solid var(--doc-comments-border);font-family:var(--sans,system-ui,sans-serif);font-size:.92rem;line-height:1.5;z-index:30;transition:opacity .2s ease}
+#doc-comments-panel[hidden]{display:none}
+#doc-comments-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+#doc-comments-title{margin:0;font-size:1.15rem;color:var(--doc-comments-ink);max-width:none}
+#doc-comments-panel button{font-family:var(--mono,ui-monospace,monospace);font-size:.7rem;letter-spacing:.04em;text-transform:uppercase;color:var(--doc-comments-ink-2);background:var(--doc-comments-bg);border:1px solid var(--doc-comments-border);border-radius:999px;padding:5px 11px;cursor:pointer}
+#doc-comments-panel button[aria-pressed="true"]{color:var(--doc-comments-ink);border-color:var(--doc-comments-accent);background:var(--doc-comments-soft);text-decoration:underline}
+#doc-comments-status{min-height:1.2em;font-size:.8rem;color:var(--doc-comments-ink-2)}
+#doc-comments-truncation{margin:8px 0;padding:8px 10px;border:1px solid var(--doc-comments-border);border-radius:8px;font-size:.82rem;color:var(--doc-comments-ink)}
+#doc-comments-filters{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 12px}
+#doc-comments-filters [role="group"]{display:flex;flex-wrap:wrap;gap:6px}
+.doc-comments-group>h3{margin:14px 0 8px;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--doc-comments-ink-2)}
+.doc-comments-group>ul,.doc-comments-messages{list-style:none;margin:0;padding:0}
+.doc-comments-card{margin:0 0 12px;padding:12px 14px;border:1px solid var(--doc-comments-border);border-radius:10px;background:var(--doc-comments-bg)}
+.doc-comments-card-active{border-color:var(--doc-comments-accent);box-shadow:inset 3px 0 0 var(--doc-comments-accent)}
+.doc-comments-card h4{margin:0 0 4px;font-size:1rem;color:var(--doc-comments-ink)}
+.doc-comments-meta,.doc-comments-byline{margin:0 0 6px;font-size:.78rem;color:var(--doc-comments-ink-2);max-width:none}
+.doc-comments-state{margin:0 0 6px;font-size:.8rem;font-weight:600;color:var(--doc-comments-ink)}
+.doc-comments-card blockquote{margin:0 0 8px;padding:6px 10px;border-inline-start:3px solid var(--doc-comments-border);color:var(--doc-comments-ink-2);font-style:italic}
+.doc-comments-messages>li{margin:0 0 10px}
+.doc-comments-body{margin:0;color:var(--doc-comments-ink);white-space:pre-wrap;overflow-wrap:anywhere;max-width:none}
+.doc-comments-author{font-weight:600;color:var(--doc-comments-ink)}
+.doc-comments-edited{font-style:italic}
+.doc-comments-empty{color:var(--doc-comments-ink-2)}
+
+/* ---- keyboard focus ---- */
+#doc-comments-toggle:focus-visible,#doc-comments-panel :focus-visible,.doc-comment-marker:focus-visible{outline:2px solid var(--doc-comments-accent,var(--accent,#C0122A));outline-offset:2px}
+
+/* ---- narrow: bottom sheet, no rail ---- */
+@media (max-width:720px){
+  #doc-comments-panel{top:auto;left:0;right:0;bottom:0;width:100%;max-height:60vh;border-inline-start:none;border-top:1px solid var(--doc-comments-border)}
+  #doc-comments-rail{display:none}
+}
+
+/* ---- motion, forced colours, print ---- */
+@media (prefers-reduced-motion:reduce){
+  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card{animation-duration:0s;transition-duration:0s}
+}
+@media (forced-colors:active){
+  #doc-comments-panel{border:1px solid CanvasText}
+  .doc-comment-block{border-inline-start:3px solid CanvasText}
+  .doc-comment-block-active{outline:2px solid Highlight}
+}
+@media print{
+  #doc-comments-toggle,#doc-comments-rail,#doc-comments-panel{display:none!important}
+  .doc-comment-block,.doc-comment-block-active{border-inline-start-color:transparent;outline-color:transparent;background-color:transparent;box-shadow:none}
+  ::highlight(doc-comments-open),::highlight(doc-comments-active){background-color:transparent}
+}
