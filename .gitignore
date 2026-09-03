@@ -4,3 +4,4 @@
 node_modules/
 templates/docbuild/dist/
 .DS_Store
+_site/
