@@ -366,10 +366,10 @@ export function parseDocOwners(value) {
 async function sha256Prefix(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   let hex = "";
-  for (const byte of new Uint8Array(digest)) {
+  for (const byte of new Uint8Array(digest).subarray(0, 16)) {
     hex += byte.toString(16).padStart(2, "0");
   }
-  return hex.slice(0, 32);
+  return hex;
 }
 
 /**
@@ -434,11 +434,11 @@ function hasExactShape(value, expectedKeys) {
   if (Object.getOwnPropertySymbols(value).length !== 0) {
     return false;
   }
-  const names = Object.getOwnPropertyNames(value).sort();
+  const names = Object.getOwnPropertyNames(value);
   if (names.length !== expectedKeys.length) {
     return false;
   }
-  return names.every((name, index) => name === expectedKeys[index]);
+  return expectedKeys.every((name) => Object.hasOwn(value, name));
 }
 
 /**
@@ -995,7 +995,7 @@ export async function resolveRole(docId, user, options = {}) {
 
     if (grant !== null) {
       if (consume && email !== "") {
-        const invitationKey = await accessInvitationKey(docId, email);
+        const invitationKey = invitationKeyForHash(docId, await sha256Prefix(email));
         const invitation = await liveInvitation(store, docId, invitationKey, email, now);
         if (invitation !== null) {
           await deleteInvitation(store, invitationKey);
@@ -1005,7 +1005,7 @@ export async function resolveRole(docId, user, options = {}) {
     }
 
     if (email !== "") {
-      const hash = await emailHash(email);
+      const hash = await sha256Prefix(email);
       const invitationKey = invitationKeyForHash(docId, hash);
       const invitation = await liveInvitation(store, docId, invitationKey, email, now);
       if (invitation !== null) {
