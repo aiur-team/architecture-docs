@@ -29,11 +29,10 @@ git diff --check
 git diff --cached --check
 ```
 
-The first `git add cache-notes` makes the new document part of the tracked-document inventory before site
-validation. Site mode discovers regular `doc.json` files in the working tree, creates the new route, and
-checks global identity collisions; staging also ensures the tracked-document `templates/check-dist` gate
-includes the new instance. The second `git add cache-notes` restages any committed outputs refreshed by
-site mode.
+Site mode discovers publishable regular `doc.json` directories in the working tree, including untracked
+instances, creates the new route, and checks global identity collisions. It does not require staging. The
+first `git add cache-notes` brings the new instance into Git's tracked inventory so `templates/check-dist`
+includes it. The second `git add cache-notes` restages any committed outputs refreshed by site mode.
 
 Read the instance build's anchor report and review both `git diff` and the staged diff before publishing.
 Confirm that the instance identity checks and the site build's global ID, slug, and alias checks passed.
@@ -198,10 +197,10 @@ bypass.
 | Command | Scope | Required result | Commit? |
 |---|---|---|---|
 | `templates/build <instance>` | One source instance | Refresh `<instance>/dist/<basename>.html` and generated committed inputs | Commit changed `dist/`, `anchors.json`, and `history.json` when validly refreshed |
-| `templates/build --site` | Every publishable tracked instance | Refresh artifacts and build `_site/<slug>/index.html`, `_site/index.html`, `_site/_redirects`, and the hashed enhancement asset | Do not commit `_site/` |
-| `templates/check-dist` | Every tracked document | Rebuild and prove committed output byte-identical | No rewrite accepted; update source and generated inputs first |
+| `templates/build --site` | Every publishable working-tree instance | Refresh artifacts and build `_site/<slug>/index.html`, `_site/index.html`, `_site/_redirects`, and the hashed enhancement asset | Do not commit `_site/` |
+| `templates/check-dist` | Every tracked document | Rebuild and prove committed `*/dist/*.html` byte-identical | No rewrite accepted; commit changed dist HTML with its source first |
 
-Site mode discovers publishable tracked instances, validates their identities together, refreshes each
+Site mode discovers publishable working-tree instances, validates their identities together, refreshes each
 artifact, and writes `_site/` from scratch. `_site/` is disposable deploy output and is never committed.
 Netlify runs `templates/build --site` and publishes `_site/`.
 
@@ -251,9 +250,7 @@ in review instead of suppressing it.
 ID, and an unfilled placeholder. After writing, it reports anchor alignment, tag balance, theme-state
 count, and file size. Read every report before committing.
 
-Run `templates/check-dist` to rebuild every tracked document and prove the committed output is
-byte-identical. Run the complete repository gate sequence in the new-document checklist before
-publication.
+Run the complete repository gate sequence in the new-document checklist before publication.
 
 It has no runtime dependencies. Node only, and only to build — a reader needs nothing.
 
