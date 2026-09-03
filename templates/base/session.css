@@ -1,0 +1,11 @@
+/* One silent session reveal.  Capability-scoped controls stay hidden until a
+   valid authenticated response sets data-session on the root element.  These
+   are author-origin presentation hints only; the selectors never override an
+   element's own hidden state, and print suppresses both capability groups. */
+[data-reader-only],[data-editor-only] { display: none; }
+
+:root[data-session="reader"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-reader-only]:not([hidden]),:root[data-session="editor"] [data-editor-only]:not([hidden]) { display: revert; }
+
+@media print {
+  [data-reader-only],[data-editor-only] { display: none!important; }
+}

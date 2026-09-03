@@ -1,12 +1,12 @@
 import { getUser, verifyRequestOrigin } from "@netlify/identity";
 
 /**
- * The Phase 1 organization suffix from the ruling plan. The reserved sample
- * suffix is defined once here; P1-C introduces no undocumented environment
- * variable. Replacing it with a deployment-specific contract needs an
- * explicit later ruling.
+ * The reserved organization domain suffix from the ruling plan. Identity
+ * classifies whether the normalized email carries this suffix; it never
+ * grants document authority. P2-G's resolveRole() is the final document role
+ * and capability decision.
  */
-const ORG_SUFFIX = "@example.com";
+const ORG_DOMAIN = "@example.com";
 
 /**
  * @param {Request} req
@@ -14,10 +14,7 @@ const ORG_SUFFIX = "@example.com";
  *   sub: string,
  *   email: string,
  *   name: string,
- *   roles: string[],
- *   canComment: boolean,
- *   canEdit: boolean,
- *   docs: string[]
+ *   isOrg: boolean
  * }>}
  */
 export async function identify(req) {
@@ -28,40 +25,9 @@ export async function identify(req) {
 
   const email = (user.email ?? "").toLowerCase();
   const name = user.name ?? email.split("@")[0];
+  const isOrg = email.endsWith(ORG_DOMAIN);
 
-  // Read provider roles defensively so either storage shape is safe (the
-  // account-level `role` string or the `app_metadata.roles` array). Phase 1
-  // never forwards them: the public classification below is forced to exactly
-  // `member` for the reserved org suffix and `guest` for every other account.
-  const providerRoles = user.roles ?? (user.role ? [user.role] : []);
-
-  if (email.endsWith(ORG_SUFFIX)) {
-    return {
-      sub: user.id,
-      email,
-      name,
-      roles: ["member"],
-      canComment: true,
-      canEdit: true,
-      docs: [],
-    };
-  }
-
-  const appMetadataDocs = user.appMetadata?.docs;
-  const docs =
-    Array.isArray(appMetadataDocs) &&
-    appMetadataDocs.every((doc) => typeof doc === "string")
-      ? appMetadataDocs
-      : [];
-  return {
-    sub: user.id,
-    email,
-    name,
-    roles: ["guest"],
-    canComment: false,
-    canEdit: false,
-    docs,
-  };
+  return { sub: user.id, email, name, isOrg };
 }
 
 /**
