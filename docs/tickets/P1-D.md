@@ -363,6 +363,7 @@ The safe source-code waves do not grant parallel ownership of generated HTML. P1
 - [ ] The builder remains zero-runtime-dependency and Node 18 compatible.
 - [ ] Refreshed `example` and `templates/components` artifacts pass the repository's deterministic-dist gate.
 - [ ] No implementation source outside the five owned paths is edited.
+- [ ] GitHub issue #4 retains the exact ticket title and exact two-paragraph canonical-document pointer; its parsed full commit SHA and path resolve through `git show` to bytes identical to `docs/tickets/P1-D.md`.
 
 ## Test plan
 
@@ -510,6 +511,40 @@ Run every command from the repository root.
 
    Expected: P1-D contributes only the five owned implementation paths, the ticket specification, and refreshed generated `example/dist/example.html` and `templates/components/dist/components.html`. Other coordination-branch ticket documents may also be present; `templates/docbuild/src/index.ts`, `templates/base/layout.html`, package files, and source section fragments are not P1-D changes.
 
+9. After the canonical document is committed, pushed, and linked from the tracker, verify the immutable issue pointer:
+
+   ```bash
+   set -euo pipefail
+   p1d_issue_json="$(mktemp "${TMPDIR:-/tmp}/p1-d-issue.XXXXXX")"
+   p1d_linked_blob="$(mktemp "${TMPDIR:-/tmp}/p1-d-linked.XXXXXX")"
+   trap 'rm -f "$p1d_issue_json" "$p1d_linked_blob"' EXIT
+   gh issue view 4 --repo aiur-team/architecture-docs --json title,body >"$p1d_issue_json"
+   read -r p1d_commit_sha p1d_linked_path < <(
+     P1D_ISSUE_JSON="$p1d_issue_json" \
+     P1D_TICKET_PATH="docs/tickets/P1-D.md" \
+     P1D_EXPECTED_TITLE="P1-D — anchors.ts: scanner, normaliser, alignment, move pass, report" \
+       node --input-type=module <<'NODE'
+   import assert from "node:assert/strict";
+   import { readFileSync } from "node:fs";
+
+   const issue = JSON.parse(readFileSync(process.env.P1D_ISSUE_JSON, "utf8"));
+   assert.equal(issue.title, process.env.P1D_EXPECTED_TITLE, "issue title changed");
+   const match = issue.body.match(/^Implementation specification: \[`([^`\n]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40})\/([^)\n]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/);
+   assert.ok(match, "issue body is not the exact two-paragraph pointer form");
+   assert.equal(match[1], process.env.P1D_TICKET_PATH, "link label path changed");
+   assert.equal(match[3], process.env.P1D_TICKET_PATH, "link target path changed");
+   process.stdout.write(`${match[2]} ${match[3]}\n`);
+   NODE
+   )
+   git show "$p1d_commit_sha:$p1d_linked_path" >"$p1d_linked_blob"
+   cmp -s docs/tickets/P1-D.md "$p1d_linked_blob"
+   rm -f "$p1d_issue_json" "$p1d_linked_blob"
+   trap - EXIT
+   echo "PASS  P1-D issue #4 points to the byte-identical canonical document"
+   ```
+
+   Expected: exit `0` and exactly `PASS  P1-D issue #4 points to the byte-identical canonical document`. The gate fails if the title changes, the body differs from the exact two-paragraph short form in `docs/prompts/rewrite-tickets.md`, the URL does not contain one full lowercase 40-character commit SHA and the exact canonical path, or that committed blob differs by one byte from the local document.
+
 ## Failure modes
 
 ### Handled
@@ -578,6 +613,7 @@ None block implementation. If the owner later chooses a broader entity table, ne
 
 ## References
 
+- `docs/prompts/rewrite-tickets.md`, **The goal**, **Method**, and **The acceptance test for your own work** — the document-only canonical source and immutable short-pointer publication contract.
 - `HANDOFF.md`, **What “done” means** and **Decisions that are already made** — strict TypeScript, zero runtime dependencies, deterministic `check-dist`, one shared normaliser/scanner, and no second anchoring implementation.
 - `README.md`, **Checks** and **The platform** — Node 18 baseline, self-contained output, typecheck, scrub gate, and the integration plan's authority.
 - `docs/research/00-integration-plan.md` §2.2, **Anchor** — `data-aid` is the block half of the stored anchor and reader state is computed rather than persisted.

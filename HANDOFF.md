@@ -9,14 +9,16 @@ The work is already planned. Nothing here asks you to design the platform — th
 ## Current coordination status
 
 The Phase 1 specifications in `docs/tickets/P1-A.md` through `docs/tickets/P1-E.md` are complete,
-reviewed as implementable without the integration plan, pushed to the handoff branch, and copied exactly
-into issues #1 through #5. A separate specification lane is researching every remaining ticket phase by
-phase. It will add and push `docs/tickets/P2-*.md`, `P3-*.md`, and `P4-*.md` and replace only the matching
-issue bodies after each phase passes a body-only review.
+reviewed as implementable without the integration plan, and pushed to the handoff branch. The repository
+documents are the canonical specifications; GitHub issue bodies are short permanent links to them, not
+copies. Phase 2 is also complete, reviewed, and pushed. A separate specification lane is finishing Phase
+3 and then researching Phase 4. It will push `docs/tickets/P3-*.md` and `P4-*.md`, then replace only the
+matching issue bodies with commit-permalink pointers after each phase passes a document-only review.
 
 **That specification work does not block Aiur from beginning Phase 1 now.** The Aiur Executor may dispatch
-Phase 1 from issues #1 through #5 while the specification lane works on issues #6 through #42. Do not
-dispatch a later phase until its rewritten issue bodies have been pushed and reviewed. The two lanes must
+Phase 1 from the canonical documents linked by issues #1 through #5 while the specification lane works on
+issues #6 through #42. Do not dispatch a later phase until its canonical documents have been pushed and
+reviewed and its issue pointers resolve to those exact bytes. The two lanes must
 not edit the same issue or ticket document: the specification lane owns only the remaining ticket docs and
 issue bodies, while Aiur owns Phase 1 implementation branches and pull requests.
 
@@ -66,10 +68,10 @@ Write the planning pack and register it with Aiur. The schema, from a working pa
 written before the issues existed. That is not the case here — the issues exist, and a pack with nulls
 will not connect a ticket to its issue.
 
-Take `id`, `phase`, `depends_on` and the file surface from each issue body; every issue states its phase,
-its dependencies and the files it owns. **Do not re-derive the dependency graph from the prose** — the
-issue bodies are the authority, and `docs/research/00-integration-plan.md` §4.3 to §4.7 is where they came
-from.
+Follow each issue's permanent link to `docs/tickets/<ID>.md`, then take `id`, `phase`, `depends_on` and the
+file surface from that canonical document. **Do not re-derive the dependency graph from the research
+prose** — the linked ticket documents are the authority, and `docs/research/00-integration-plan.md` §4.3
+to §4.7 is where they came from.
 
 Properties of the graph you must preserve, because getting them wrong wastes a whole phase:
 
@@ -108,8 +110,8 @@ only records what is specific to *this* repository.
 
 Phase 1 may start as soon as the operator has completed step 2; it does not wait for the separate ticket
 specification lane to finish phases 2 through 4. Before advancing Aiur to a later phase, confirm that the
-matching `docs/tickets/` files exist on the handoff branch, their issue bodies match, and the phase's
-body-only reviewer passed them.
+matching `docs/tickets/` files exist on the handoff branch, each issue's commit permalink resolves to the
+exact canonical file bytes, and the phase's document-only reviewer passed them.
 
 ---
 

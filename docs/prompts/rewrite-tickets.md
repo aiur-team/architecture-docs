@@ -9,8 +9,8 @@ Read `HANDOFF.md`, `README.md` and `docs/research/00-integration-plan.md` in thi
 
 ## The problem
 
-The 42 Build Order tickets — issues **#1 to #42** — are too thin to implement from. The mean body is
-about 900 bytes, which is a pointer rather than a specification.
+The 42 Build Order tickets — issues **#1 to #42** — are too thin to implement from. Their original
+bodies average about 900 bytes and do not point to complete, executable specifications.
 
 Issue **#27, "P4-D — The Slack webhook"**, is the clearest example. It says to fire from
 `context.waitUntil` and names one file. It never says what the notification *contains*, where the webhook
@@ -21,28 +21,39 @@ Every ticket has this problem to some degree.
 
 ## The goal
 
-**Rewrite all 42 issue bodies so each is implementable without reading the plan.**
+**Write all 42 canonical ticket documents so each is implementable without reading the plan, then make
+each GitHub issue body a short permanent link to its canonical document.**
 
-The relationship between the documents and the tickets inverts. Today the ticket points at the plan and
-the plan holds the detail. After this work, **the ticket is the specification** — what to build, and how
-to know it is done — and the research documents are background and citation for *why* a thing is the way
-it is. A reader should be able to implement a ticket from its body alone and consult the plan only when
-they want the reasoning.
+The relationship between the documents and the tracker inverts. Today the issue points at the plan and
+the plan holds the detail. After this work, **`docs/tickets/<TICKET-ID>.md` is the specification** — what
+to build, and how to know it is done — while the issue is only its tracker pointer and the research
+documents are background and citation for *why* a thing is the way it is. A reader should be able to
+implement a ticket from the linked document alone and consult the plan only when they want the reasoning.
 
 ## Method
 
 **Fan out background agents, one per ticket.** Each agent owns exactly two artifacts:
 
 - `docs/tickets/<TICKET-ID>.md` — new
-- the body of its own issue
+- the short pointer body of its own issue
 
 It must not touch the plan, the research documents, another ticket's document, or another issue. That is
 the same file-ownership rule the repository already applies to code: if two agents would write the same
 file, one of them is wrong.
 
 Per agent, use the compound-engineering skills — **`/ce-brainstorm` to settle WHAT, then `/ce-plan` to
-settle HOW** — writing the result to `docs/tickets/<ID>.md`, then replace the issue body from that
-document with `gh issue edit`.
+settle HOW** — writing the result to `docs/tickets/<ID>.md`. After the phase documents are reviewed,
+committed, and pushed, replace each issue body with this short form, using that pushed commit's full SHA:
+
+```md
+Implementation specification: [`docs/tickets/<ID>.md`](https://github.com/aiur-team/architecture-docs/blob/<FULL-COMMIT-SHA>/docs/tickets/<ID>.md)
+
+This issue tracks implementation of the linked canonical specification.
+```
+
+Do not copy the specification into the issue. A full commit permalink is required so the issue never
+silently changes meaning and does not break if the handoff branch is later deleted. Verify that
+`git show <FULL-COMMIT-SHA>:docs/tickets/<ID>.md` is byte-identical to the local canonical document.
 
 > **`ce-brainstorm` is interactive and a background agent cannot answer its questions.** It asks one
 > question per turn and blocks. Instruct each agent to take its Phase 0.2 *"requirements are already
@@ -82,7 +93,7 @@ cover the same ground. `/ce-brainstorm` is known to be present.
   every new file and every rewritten body. **Any example payload, comment body, hostname, address or
   person must be invented.** Do not reach for something real. The one leak the gate caught during this
   repository's extraction was sample data, not identifiers.
-- **Do not create or close issues.** Edit bodies only.
+- **Do not create or close issues.** Replace bodies only with the exact short canonical-document pointer.
 - **Do not change ticket IDs or titles.** The Aiur planning pack keys on issue numbers, and a retitled
   issue breaks the mapping.
 - **Do not change anything under `docs/research/` or `templates/`.**
@@ -100,9 +111,9 @@ should be corrected after five tickets rather than after forty-two.
 
 ## The acceptance test for your own work
 
-After each batch, dispatch **one reviewer agent that reads only the rewritten ticket body** — not the
-plan, not the research documents, not the code — and reports whether it could implement that ticket from
-the text alone.
+After each batch, dispatch **one reviewer agent that reads only the canonical `docs/tickets/*.md`
+documents** — not the issue pointer, plan, research documents, or code — and reports whether it could
+implement each ticket from that text alone.
 
 This is the only honest test of "implementable without the plan", because an agent that has already read
 the plan cannot judge it: it will fill the gaps from memory and call the ticket complete. Anything the

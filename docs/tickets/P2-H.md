@@ -197,6 +197,7 @@ P3-J later replaces P2-A's organization-only gate decision with `resolveRole()`-
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #13 retains the exact title `P2-H — Split identity from authorisation`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-H.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] The implementation diff amends only P1-C's `netlify/lib/identity.mjs` and creates no test, package, configuration, generated, or consumer source file.
 - [ ] The module exports exactly `identify` and `requireOrigin`; `ORG_DOMAIN` remains private.
 - [ ] Across `netlify/**/*.{mjs,ts}`, the sole executable access to the package's `getUser()` is one zero-argument call in `netlify/lib/identity.mjs`, bound to its single direct, unaliased named value import from exactly `@netlify/identity`; no alias, default/namespace import, re-export, `require()`, or dynamic-import route exists, and comments or string literals do not count.
@@ -2675,6 +2676,44 @@ Run from the repository root on a branch with the P1-C implementation present. U
 
    Expected: exit `0` and exactly `PASS  P2-H exclusive source ownership`. Only `identity.mjs` changes. Step 1 proves deletion of its external fixture; step 6 asserts absence of the enumerated repository paths and makes no claim about unrelated ignored/provider state. Each owning ticket still closes its normal inner resources; P2-H step 4 additionally contains every release fixture below its own guarded outer root so forced group cleanup cannot strand an unreported child artifact.
 
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #13's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2h-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 13 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-H — Split identity from authorisation";
+const expectedPath = "docs/tickets/P2-H.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-H issue #13 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-H.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-H issue #13 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 ### Handled
@@ -2760,4 +2799,5 @@ None block implementation. The pinned package's `README.md` and `dist/main.d.ts`
 - `docs/tickets/P2-C.md` — HTTP session compatibility and client-hint boundary.
 - `docs/tickets/P2-F.md` — realtime identity policy and access check.
 - `docs/tickets/P2-G.md` — `AccessUser`, `resolveRole()`, capabilities, and errors.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - `@netlify/identity@2.0.0` packaged `README.md` and `dist/main.d.ts` — server requirements, `User`, and `getUser()` contract.

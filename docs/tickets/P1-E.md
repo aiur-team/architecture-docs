@@ -487,6 +487,7 @@ P1-E's Phase 1 Definition of Done stops at deterministic local preview-header ge
 - [ ] After P1-A and P1-B are integrated and committed artifacts are refreshed, a site build followed by `git diff --exit-code -- '*/dist/*.html'` is clean.
 - [ ] No file outside the five owned implementation paths changes, apart from ignored/generated outputs produced while testing.
 - [ ] The repository scrub gate passes for this ticket and all implementation changes.
+- [ ] GitHub issue #5 retains the exact ticket title and exact two-paragraph canonical-document pointer; its parsed full commit SHA and path resolve through `git show` to bytes identical to `docs/tickets/P1-E.md`.
 
 ## Test plan
 
@@ -851,6 +852,40 @@ The full site tests require P1-A's metadata and P1-B's shared layout/hook contra
    Expected: P1-E contributes only the five owned implementation paths plus `docs/tickets/P1-E.md` on the coordination branch.
    `_site/` and `templates/docbuild/dist/` do not appear; other agents' ticket documents may appear as separately owned untracked files.
 
+10. After the canonical document is committed, pushed, and linked from the tracker, verify the immutable issue pointer:
+
+   ```bash
+   set -euo pipefail
+   p1e_issue_json="$(mktemp "${TMPDIR:-/tmp}/p1-e-issue.XXXXXX")"
+   p1e_linked_blob="$(mktemp "${TMPDIR:-/tmp}/p1-e-linked.XXXXXX")"
+   trap 'rm -f "$p1e_issue_json" "$p1e_linked_blob"' EXIT
+   gh issue view 5 --repo aiur-team/architecture-docs --json title,body >"$p1e_issue_json"
+   read -r p1e_commit_sha p1e_linked_path < <(
+     P1E_ISSUE_JSON="$p1e_issue_json" \
+     P1E_TICKET_PATH="docs/tickets/P1-E.md" \
+     P1E_EXPECTED_TITLE="P1-E — Netlify configuration, the site build mode, and CI" \
+       node --input-type=module <<'NODE'
+   import assert from "node:assert/strict";
+   import { readFileSync } from "node:fs";
+
+   const issue = JSON.parse(readFileSync(process.env.P1E_ISSUE_JSON, "utf8"));
+   assert.equal(issue.title, process.env.P1E_EXPECTED_TITLE, "issue title changed");
+   const match = issue.body.match(/^Implementation specification: \[`([^`\n]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40})\/([^)\n]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/);
+   assert.ok(match, "issue body is not the exact two-paragraph pointer form");
+   assert.equal(match[1], process.env.P1E_TICKET_PATH, "link label path changed");
+   assert.equal(match[3], process.env.P1E_TICKET_PATH, "link target path changed");
+   process.stdout.write(`${match[2]} ${match[3]}\n`);
+   NODE
+   )
+   git show "$p1e_commit_sha:$p1e_linked_path" >"$p1e_linked_blob"
+   cmp -s docs/tickets/P1-E.md "$p1e_linked_blob"
+   rm -f "$p1e_issue_json" "$p1e_linked_blob"
+   trap - EXIT
+   echo "PASS  P1-E issue #5 points to the byte-identical canonical document"
+   ```
+
+   Expected: exit `0` and exactly `PASS  P1-E issue #5 points to the byte-identical canonical document`. The gate fails if the title changes, the body differs from the exact two-paragraph short form in `docs/prompts/rewrite-tickets.md`, the URL does not contain one full lowercase 40-character commit SHA and the exact canonical path, or that committed blob differs by one byte from the local document.
+
 ## Failure modes
 
 ### Handled
@@ -920,6 +955,7 @@ If Netlify's actual account selects a different Node 22 minor or reports a missi
 
 ## References
 
+- `docs/prompts/rewrite-tickets.md`, **The goal**, **Method**, and **The acceptance test for your own work** — the document-only canonical source and immutable short-pointer publication contract.
 - `HANDOFF.md`, “Non-negotiable: this repository becomes public,” “What done means for a ticket here,” and “Decisions that are already made” — scrub-first CI, deterministic `dist/`, zero runtime dependencies, TypeScript, and settled system boundaries.
 - `README.md`, “Checks” and “The platform” — current builder commands, Node 18 minimum, committed artifact contract, and ruling-plan authority.
 - `docs/research/00-integration-plan.md` §1.2–§1.4 — exact edge-gate target/exclusions, permanent ID/slug/alias roles, and repo-backed versus standalone deployment boundaries.

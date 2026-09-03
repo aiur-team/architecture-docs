@@ -310,6 +310,7 @@ P2-A has two explicit completion states. **Source-complete** means tests 1, 2, 3
 - [ ] `templates/build --site` copies `login/index.html` byte-for-byte to `_site/login/index.html`; the source page is not generated and `_site/` is not committed.
 - [ ] No source outside the four owned implementation paths changes.
 - [ ] The committed document artifacts remain byte-identical, the TypeScript builder typechecks, and the repository scrub gate passes.
+- [ ] GitHub issue #6 retains the exact title `P2-A — The edge gate, login and logout`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-A.md` path resolve through `git show` to bytes identical to this local canonical document.
 
 ### Hosted integration/release gate
 
@@ -4062,7 +4063,45 @@ The local source gate supports macOS or Linux with Git, Bash 3.2 or later, Node 
    BASH
    ```
 
-   Expected: the Node check prints exactly `PASS  implementation diff is exactly P2-A's four owned source paths` and every `test` exits `0`. The check reads tracked, staged, and untracked paths, ignores only this ticket body, and mechanically rejects any implementation change outside the four owned paths, any other changed ticket/document, or any missing owned path. Cleanup accepts only a direct child of the resolved temporary parent whose basename has the exact prefix and six generated characters, including under EXIT, HUP, INT, and TERM. `_site/`, compiler output, runtime links, packages, credentials, cookies, and response artifacts do not appear.
+   Expected: the Node check prints exactly `PASS  implementation diff is exactly P2-A's four owned source paths` and every `test` exits `0`. The check reads tracked, staged, and untracked paths, ignores only this ticket document, and mechanically rejects any implementation change outside the four owned paths, any other changed ticket/document, or any missing owned path. Cleanup accepts only a direct child of the resolved temporary parent whose basename has the exact prefix and six generated characters, including under EXIT, HUP, INT, and TERM. `_site/`, compiler output, runtime links, packages, credentials, cookies, and response artifacts do not appear.
+
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #6's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2a-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 6 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-A — The edge gate, login and logout";
+const expectedPath = "docs/tickets/P2-A.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-A issue #6 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-A.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-A issue #6 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
 
 ## Failure modes
 
@@ -4160,6 +4199,7 @@ If the live Edge smoke test contradicts the current official contract, report th
 - `docs/tickets/P1-C.md` — exact `identify(req)`, `requireOrigin(req)`, root package, Functions v2, normalized errors, cookie secrecy, and downstream-consumer boundaries.
 - `docs/tickets/P1-E.md` — exact `netlify.toml` declaration, fail-closed CI assertion, static `login/` copy seam, `_site` ownership, and deferred provider verification that P2-A closes.
 - `docs/tickets/P2-H.md` — final four-field identity shape, authoritative `isOrg` boolean, removal of `roles`, P2-A compatibility predicate, and source-disjoint integration order.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - [Netlify: Use Identity in functions](https://docs.netlify.com/manage/security/secure-access-to-sites/identity/use-identity-in-functions/) — current official `getUser()` Edge/Function support, server-side login/logout, runtime handling of `nf_jwt` and `nf_refresh`, and mandatory origin verification.
 - [Netlify: `@netlify/identity@2.0.0` API reference](https://www.npmjs.com/package/@netlify/identity/v/2.0.0) — pinned signatures, v2/Edge prerequisite, `login()`/`logout()` behavior, cookie lifecycle, full-navigation requirement, and CSRF threat model.
 - [Netlify: Edge Functions API](https://docs.netlify.com/build/edge-functions/api/) — Fetch handler/response contract and `undefined` pass-through behavior.

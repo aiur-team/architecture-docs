@@ -319,6 +319,7 @@ Reordering P2-D before P1-D is a build error because eligible tags would lack th
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #9 retains the exact title `P2-D — inline_md.ts, the round-trip gate, editable.ts and the manifest`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-D.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] `inline_md.ts` exports exactly `toMd` and `toHtml`, has no import or environment dependency, and implements the declared ordered `untag`, entity, encoding, and `wrap` operations byte-for-byte; an AST check enforces its source surface.
 - [ ] The converter supports only exact `code`, `strong`, and `em` under the declared ordered passes, including only those cross-mark nested forms that the sequential transforms reproduce exactly; it implements no recursive nesting grammar, and every non-representable construct is preserved/demoted through exact equality rather than silently normalized.
 - [ ] `inline.json` has exactly the declared ordered array and two-key string schema; every row passes both directions.
@@ -2962,6 +2963,44 @@ Run every command from the repository root. All fixture prose, ids, paths, and m
 
    Expected: `check-dist` ends with `PASS  every committed document is byte-identical after a rebuild`; scrub reports no denied term or warning; diff check is silent; and the final line is exactly `PASS  P2-D implementation ownership`. The ownership assertion includes tracked, staged, unstaged, and untracked paths; requires all three owned implementation files; permits only the ticket-document set and the declared shared compiler/real-document outputs; and rejects every other changed implementation path. It therefore replaces a visual `git status` judgment. The coordination branch may contain other agents' ticket documents, but it must not contain another ticket's implementation source during this ownership gate.
 
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #9's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2d-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 9 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-D — inline_md.ts, the round-trip gate, editable.ts and the manifest";
+const expectedPath = "docs/tickets/P2-D.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-D issue #9 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-D.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-D issue #9 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 ### Handled
@@ -3031,4 +3070,5 @@ No new external or platform research is required for this ticket. Its material c
 - `docs/research/04-comments-and-discussion.md` §§3–4, 8.2–8.4, 15–16 — aid as shared block identity, scanner reuse, generated HTML boundaries, and later block-anchored consumers.
 - `docs/tickets/P1-B.md` — creator of the `editable.ts` stub, exact signature/call site, hook order, `Section.file`, `BuildError`, and shared generated-artifact rules.
 - `docs/tickets/P1-D.md` — authoritative scanner/tag/offset contract, source-versus-generated `data-aid`, mutation order, browser seam, and downstream prohibition on `data-eid`.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - GitHub issues #18, #25, #26, and #36–#40 — P3-E pending filtering, P4 edit/twin/apply/suggestion consumers that depend on this stable manifest, converter, and editable-policy contract.

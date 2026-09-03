@@ -318,6 +318,7 @@ The disposable browser gate requires macOS or Linux with Node 22.12 or later on 
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #8 retains the exact title `P2-C — The session probe and the reveal rules`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-C.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] The implementation creates exactly `templates/base/session.js` and `templates/base/session.css` as P2-C source changes and edits no other implementation source.
 - [ ] Both documents in P2-C's frozen integration inventory embed `session.css` in the existing CSS order and `session.js` exactly once as the final script and final non-async feature module; P2-C does not edit the slots, defer startup to a task or microtask, wait for a lifecycle event, or use top-level `await`.
 - [ ] `file://`, `data:`, and every other non-HTTP(S) scheme return before timer installation or request construction and produce no page error.
@@ -3184,6 +3185,44 @@ Expected: all commands exit `0`; neither owned source exists in the recorded tre
 
    Expected: all quiet assertions exit `0`, both owned sources are tracked additions relative to the exact recorded base, no unexpected path is printed, and the final line is exactly `PASS  P2-C owns every changed implementation path`. Run this ownership proof before combining P2-C with any other phase-2 source branch.
 
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #8's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2c-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 8 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-C — The session probe and the reveal rules";
+const expectedPath = "docs/tickets/P2-C.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-C issue #8 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-C.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-C issue #8 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 ### Handled
@@ -3260,6 +3299,7 @@ None. If implementation cannot preserve the one-probe/one-event contract inside 
 - `docs/research/00-integration-plan.md` §1.2 for the one probe, root attribute, event, and no-client-authority ruling; §2.9 for the session response; §4.1 for P1-B's slots and module order; §4.4 for P2-C ownership; §4.7 for downstream session consumers; and §6 agreement 4 for silent offline/artifact degradation.
 - `docs/tickets/P1-B.md`, "Placeholder and file mapping," "The emitted script/data order," and the P2-C dependency row for the exact slot and listener-before-probe boundaries.
 - `docs/tickets/P1-C.md`, "GET /api/session" for method, status, response, and cache behavior, and "Dependencies" for the initial P2-C response boundary.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - `docs/research/02-auth.md` §3.2 for the two-second probe, default-hidden reveal model, `file:` guard, silent artifact behavior, and the single downstream event.
 - `docs/research/07-realtime-and-presence.md` §8.3 and §9 for the session event as the only realtime start signal and for no-broker/offline degradation.
 - `docs/research/09-sharing-and-roles.md` §3.4 for `canSuggest` superseding the old reveal meaning of `canEdit`, and §7.2–7.4 for listener-only share startup and absence in unsupported contexts.

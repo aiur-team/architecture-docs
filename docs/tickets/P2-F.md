@@ -238,6 +238,7 @@ Downstream boundaries are exact:
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #11 retains the exact title `P2-F — The realtime server contract`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-F.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] Only the two owned implementation files are added, with no dependency, SDK, configuration, lockfile, generated-output, access, identity, or template change.
 - [ ] `realtime.mjs` exports exactly `mintToken` and `publish`, with the documented signatures, result projections, validation, timeout, and error/degradation semantics.
 - [ ] With no effective `ABLY_API_KEY`, both helpers resolve to `null` before validating bad arguments and make zero fetch calls.
@@ -2318,6 +2319,44 @@ Read the key without echo into a process environment variable, with shell tracin
 
 In an unconditional cleanup trap, stop the script, unset `ABLY_API_KEY`, delete its temporary directory, and remove any capture. Delete the disposable Ably API key and application in the provider dashboard; channels require no separate provisioned resource, but the invented message may remain in disposable history until the application is deleted. If key/application deletion cannot be confirmed, the smoke is not complete: record only the disposable application identifier needed for targeted cleanup, never its secret, and finish deletion before reporting success.
 
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #11's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2f-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 11 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-F — The realtime server contract";
+const expectedPath = "docs/tickets/P2-F.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-F issue #11 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-F.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-F issue #11 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 | Failure | Required behavior |
@@ -2389,6 +2428,7 @@ None block implementation. P3-F must choose a current valid integer message-coun
 - `docs/tickets/P1-A.md`, “Interface contract” and “Assumptions and open questions” — exact permanent document ID grammar and resolution of the plan's invalid sample.
 - `docs/tickets/P1-C.md`, “Interface contract” and “Dependencies” — Functions v2 identity boundary, read-only Origin behavior, root Node 22 package, and temporary Phase 1 fields that P2-H later removes.
 - `docs/tickets/P1-E.md`, “Interface contract” and “Dependencies” — Netlify Functions configuration, Node 22 deployment runtime, `/api/*` edge exclusion, and shared-runtime serialization.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - [Ably REST API reference](https://ably.com/docs/api/rest-api) — Basic authentication, JSON/version headers, common 20x/error behavior, exact `requestToken` and channel publish routes, and the publish 201 acknowledgement.
 - [Ably TokenRequest specification](https://ably.com/docs/api/token-request-spec) — unsigned request JSON, TTL/capability/client identity fields, nonce/timestamp shape, and the returned TokenDetails contract.
 - [Ably SSE API](https://ably.com/docs/api/sse) — exact `/sse` endpoint, `channel`, `v`, raw `accessToken`, enveloped messages, and current integer-count `rewind` contract consumed by P3-F.

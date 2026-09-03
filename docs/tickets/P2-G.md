@@ -505,6 +505,7 @@ P3-H and P3-J may begin only from the complete P2-G export/result contract. P4-J
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #12 retains the exact title `P2-G — The access library`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-G.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] `netlify/lib/access.mjs` is the only implementation path added by P2-G and has exactly the runtime exports under **Interface contract**.
 - [ ] Public JSDoc defines the exact `AccessUser`, `AccessActor`, `AccessDocument`, `AccessGrant`, `AccessInvitation`, role, capability, result, resolve-option, and three-method duck-typed store shapes without adding runtime type packages or exports.
 - [ ] Options and user validation finish before time sampling; every valid call evaluates `options.now ?? new Date().toISOString()` once, including the null-user path, and every later comparison/write uses that one value.
@@ -2474,6 +2475,44 @@ echo "PASS  P2-G fixture cleaned and repository gates passed"
 
 Expected: every command exits `0`; explicit cleanup reuses the same bounded group/reaping and guarded-deletion path, proves the retained root absent, then disables its traps. The exact 12-H2/fence oracle emits nothing, document parity ends with `PASS  every committed document is byte-identical after a rebuild`, typecheck emits no diagnostics, scrub-check ends with `PASS  no denied term and no warning.`, no unowned path is printed, and the final line is exactly `PASS  P2-G fixture cleaned and repository gates passed`. The shell-level `DOC_OWNERS` value is never changed or unset by these commands. Run the exact-base ownership proof on P2-G's isolated source branch before combining it with any other phase-2 branch; P2-G contributes only `netlify/lib/access.mjs` to the implementation diff and its own coordination ticket document.
 
+### 5. Verify publication pointer integrity
+
+Run this after the canonical document commit is pushed and issue #12's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2g-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 12 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-G — The access library";
+const expectedPath = "docs/tickets/P2-G.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-G issue #12 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-G.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-G issue #12 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 ### Handled
@@ -2554,6 +2593,7 @@ Expected: every command exits `0`; explicit cleanup reuses the same bounded grou
 - `docs/research/00-integration-plan.md` §4.7 — P2-G's exclusive file, predecessors, and downstream P3-H/P3-J/P4-J/P4-M/P4-S contracts.
 - `docs/tickets/P1-C.md` — Node/ESM/package contract and the temporary identity shape that P2-H later replaces.
 - `docs/tickets/P2-B.md` — exact strong-read, `StoreError`, `upgrade`, key validation, CAS mutation, create-only write, retry-purity, and local-test contracts consumed here.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - `docs/research/09-sharing-and-roles.md` §2–§6 and §8–§9 — full capability table, org default, storage records, invitation/owner flows, audit/privacy, and enforcement boundaries. Its ticket letters are superseded by ruling-plan §4.7.
 - [Netlify environment variables and Functions](https://docs.netlify.com/build/functions/environment-variables/) — site variables available to Functions use `process.env`; `netlify.toml` variables are not Function runtime variables; checked 2026-09-02.
 - [Netlify environment variables and Edge Functions](https://docs.netlify.com/build/edge-functions/environment-variables/) — Functions-scoped site variables are available through `Netlify.env.get`, and changes require a build/deploy; checked 2026-09-02.

@@ -262,6 +262,7 @@ Do not parallelize the waves, and do not let a downstream ticket start against a
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #7 retains the exact title `P2-B — The store helper`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-B.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] `netlify/lib/store.mjs` is the only implementation path added or changed by P2-B and exposes exactly the named exports in **Interface contract**.
 - [ ] `docState()` opens site-wide `doc-state` with store-level strong consistency and accepts no configuration from callers.
 - [ ] Every helper read explicitly requests JSON with strong consistency and preserves the opaque ETag exactly.
@@ -2018,6 +2019,44 @@ echo "PASS  P2-B fixture cleaned and repository gates passed"
 
 Expected: every command exits `0`; the exact fixture, lifecycle-evidence, and remediation-root prefixes are absent below the resolved temporary parent; `check-dist` ends with `PASS  every committed document is byte-identical after a rebuild`; typecheck emits no diagnostics; scrub-check ends with `PASS  no denied term and no warning.`; the ownership check mechanically rejects every changed path outside `docs/tickets/**` except `netlify/lib/store.mjs`; and the final line is exactly `PASS  P2-B fixture cleaned and repository gates passed`. The coordination branch may also contain `docs/tickets/P2-B.md` and other agents' separately owned ticket documents; P2-B contributes only `netlify/lib/store.mjs` to the implementation diff.
 
+### 4. Verify publication pointer integrity
+
+Run this after the canonical document commit is pushed and issue #7's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2b-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 7 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-B — The store helper";
+const expectedPath = "docs/tickets/P2-B.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-B issue #7 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-B.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-B issue #7 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 ### Handled
@@ -2079,6 +2118,7 @@ Expected: every command exits `0`; the exact fixture, lifecycle-evidence, and re
 - `docs/research/00-integration-plan.md` §4.5 and §4.7 — P3-A/P3-B/P3-E and P2-G/P4-O downstream dependencies and ownership boundaries.
 - `docs/tickets/P1-A.md`, **Interface contract** — normative `^[0-9a-f]{6}$` permanent document ID, which corrects the ruling plan's non-hex illustrative value.
 - `docs/tickets/P1-C.md`, **Root `package.json`** — exact Node/ESM runtime and `@netlify/blobs@11.0.2` predecessor contract.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - `docs/research/03-state-storage.md` §2.2–§2.6 and §5.2 — primary API investigation and the six-attempt prototype. Its shared-document blobs, history keys, domain defaults, and implicit `updatedAt` write are superseded by the ruling plan and are not copied.
 - `docs/research/04-comments-and-discussion.md` §6–§7.3 — one-blob-per-thread layout, ETag mutation rationale, and concurrent-reply behavior. Its three-attempt loop and separate store name are superseded.
 - [Netlify Blobs documentation](https://docs.netlify.com/build/data-and-storage/netlify-blobs/) — official `getStore`, strong consistency, `getWithMetadata`, conditional `setJSON`, result shapes, local development, limits, and last-write-wins behavior; checked 2026-09-02.

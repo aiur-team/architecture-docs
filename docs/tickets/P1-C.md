@@ -224,6 +224,7 @@ The following are downstream consumers, not prerequisites:
 - [ ] No file outside the three owned implementation paths changes.
 - [ ] The existing document build remains byte-identical, the builder still typechecks, and the repository scrub gate passes.
 - [ ] The authenticated member and guest checks complete against a freshly created, invite-only disposable Netlify Identity site; a missing fixture is a hard acceptance gate, not a reason to waive runtime coverage.
+- [ ] GitHub issue #3 retains the exact ticket title and exact two-paragraph canonical-document pointer; its parsed full commit SHA and path resolve through `git show` to bytes identical to `docs/tickets/P1-C.md`.
 
 ## Test plan
 
@@ -639,6 +640,40 @@ The following are downstream consumers, not prerequisites:
 
    Expected: every `test` exits `0`, and P1-C contributes exactly the three owned implementation paths. The coordination branch may also contain `docs/tickets/P1-C.md` and other agents' separately owned ticket documents; P1-C must not modify them. A pre-existing operator `.netlify` link must not be used for this procedure: the disposable link lives only in `P1C_TEST_ROOT`, so this check can require the repository path to be absent.
 
+9. After the canonical document is committed, pushed, and linked from the tracker, verify the immutable issue pointer:
+
+   ```bash
+   set -euo pipefail
+   p1c_issue_json="$(mktemp "${TMPDIR:-/tmp}/p1-c-issue.XXXXXX")"
+   p1c_linked_blob="$(mktemp "${TMPDIR:-/tmp}/p1-c-linked.XXXXXX")"
+   trap 'rm -f "$p1c_issue_json" "$p1c_linked_blob"' EXIT
+   gh issue view 3 --repo aiur-team/architecture-docs --json title,body >"$p1c_issue_json"
+   read -r p1c_commit_sha p1c_linked_path < <(
+     P1C_ISSUE_JSON="$p1c_issue_json" \
+     P1C_TICKET_PATH="docs/tickets/P1-C.md" \
+     P1C_EXPECTED_TITLE="P1-C — The identity contract" \
+       node --input-type=module <<'NODE'
+   import assert from "node:assert/strict";
+   import { readFileSync } from "node:fs";
+
+   const issue = JSON.parse(readFileSync(process.env.P1C_ISSUE_JSON, "utf8"));
+   assert.equal(issue.title, process.env.P1C_EXPECTED_TITLE, "issue title changed");
+   const match = issue.body.match(/^Implementation specification: \[`([^`\n]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40})\/([^)\n]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/);
+   assert.ok(match, "issue body is not the exact two-paragraph pointer form");
+   assert.equal(match[1], process.env.P1C_TICKET_PATH, "link label path changed");
+   assert.equal(match[3], process.env.P1C_TICKET_PATH, "link target path changed");
+   process.stdout.write(`${match[2]} ${match[3]}\n`);
+   NODE
+   )
+   git show "$p1c_commit_sha:$p1c_linked_path" >"$p1c_linked_blob"
+   cmp -s docs/tickets/P1-C.md "$p1c_linked_blob"
+   rm -f "$p1c_issue_json" "$p1c_linked_blob"
+   trap - EXIT
+   echo "PASS  P1-C issue #3 points to the byte-identical canonical document"
+   ```
+
+   Expected: exit `0` and exactly `PASS  P1-C issue #3 points to the byte-identical canonical document`. The gate fails if the title changes, the body differs from the exact two-paragraph short form in `docs/prompts/rewrite-tickets.md`, the URL does not contain one full lowercase 40-character commit SHA and the exact canonical path, or that committed blob differs by one byte from the local document.
+
 ## Failure modes
 
 ### Handled
@@ -661,7 +696,7 @@ The following are downstream consumers, not prerequisites:
 - Login, logout, password recovery, account creation, and Identity UI configuration beyond the stated runtime prerequisite.
 - CORS or trusted cross-origin mutations. No `allowedOrigins` list is supplied; the contract is same-origin only.
 - Rate limiting, audit events, storage, realtime, comments, or edits.
-- A permanent automated test file. The issue's exact commands exercise this bounded three-file contract without widening file ownership.
+- A permanent automated test file. The canonical document's exact commands exercise this bounded three-file contract without widening file ownership.
 - Provider outage without a valid JWT fallback. It is indistinguishable from no valid session and returns 401.
 
 ## Settled decisions
@@ -687,6 +722,7 @@ The following are downstream consumers, not prerequisites:
 
 ## References
 
+- `docs/prompts/rewrite-tickets.md`, **The goal**, **Method**, and **The acceptance test for your own work** — the document-only canonical source and immutable short-pointer publication contract.
 - `docs/research/00-integration-plan.md` §1.2, “The authentication model” — ruling identity accessor, temporary Phase 1 normalization, CSRF rule, Functions v2 requirement, and exclusions.
 - `docs/research/00-integration-plan.md` §2.9, “Session — the `/api/session` response” — initial six-field response, cache header, and signed-out behavior.
 - `docs/research/00-integration-plan.md` §4.3, “Phase 1” — P1-C's exclusive file surface, runtime verification, exact root `package.json`, and Node environment guidance.

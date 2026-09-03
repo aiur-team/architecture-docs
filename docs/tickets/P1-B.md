@@ -336,6 +336,7 @@ This sequencing couples downstream tickets only to stable signatures and slots. 
 - [ ] Both committed documents rebuild deterministically, contain no unresolved uppercase placeholder, and pass tag-balance checks.
 - [ ] No runtime dependency is added; Node 18 remains supported.
 - [ ] No source file outside the five owned paths is edited; compiler/build output is regenerated rather than hand-edited and does not expand source ownership.
+- [ ] GitHub issue #2 retains the exact ticket title and exact two-paragraph canonical-document pointer; its parsed full commit SHA and path resolve through `git show` to bytes identical to `docs/tickets/P1-B.md`.
 
 ## Test plan
 
@@ -480,6 +481,40 @@ Run every command from the repository root. The final P1-B integration check run
 
    Expected: the scrub exits 0 with no denied term, and `git diff --check` exits 0 with no output.
 
+9. After the canonical document is committed, pushed, and linked from the tracker, verify the immutable issue pointer:
+
+   ```bash
+   set -euo pipefail
+   p1b_issue_json="$(mktemp "${TMPDIR:-/tmp}/p1-b-issue.XXXXXX")"
+   p1b_linked_blob="$(mktemp "${TMPDIR:-/tmp}/p1-b-linked.XXXXXX")"
+   trap 'rm -f "$p1b_issue_json" "$p1b_linked_blob"' EXIT
+   gh issue view 2 --repo aiur-team/architecture-docs --json title,body >"$p1b_issue_json"
+   read -r p1b_commit_sha p1b_linked_path < <(
+     P1B_ISSUE_JSON="$p1b_issue_json" \
+     P1B_TICKET_PATH="docs/tickets/P1-B.md" \
+     P1B_EXPECTED_TITLE="P1-B — The keystone: every placeholder and hook call site" \
+       node --input-type=module <<'NODE'
+   import assert from "node:assert/strict";
+   import { readFileSync } from "node:fs";
+
+   const issue = JSON.parse(readFileSync(process.env.P1B_ISSUE_JSON, "utf8"));
+   assert.equal(issue.title, process.env.P1B_EXPECTED_TITLE, "issue title changed");
+   const match = issue.body.match(/^Implementation specification: \[`([^`\n]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40})\/([^)\n]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/);
+   assert.ok(match, "issue body is not the exact two-paragraph pointer form");
+   assert.equal(match[1], process.env.P1B_TICKET_PATH, "link label path changed");
+   assert.equal(match[3], process.env.P1B_TICKET_PATH, "link target path changed");
+   process.stdout.write(`${match[2]} ${match[3]}\n`);
+   NODE
+   )
+   git show "$p1b_commit_sha:$p1b_linked_path" >"$p1b_linked_blob"
+   cmp -s docs/tickets/P1-B.md "$p1b_linked_blob"
+   rm -f "$p1b_issue_json" "$p1b_linked_blob"
+   trap - EXIT
+   echo "PASS  P1-B issue #2 points to the byte-identical canonical document"
+   ```
+
+   Expected: exit `0` and exactly `PASS  P1-B issue #2 points to the byte-identical canonical document`. The gate fails if the title changes, the body differs from the exact two-paragraph short form in `docs/prompts/rewrite-tickets.md`, the URL does not contain one full lowercase 40-character commit SHA and the exact canonical path, or that committed blob differs by one byte from the local document.
+
 ## Failure modes
 
 ### Handled
@@ -541,6 +576,7 @@ None. If implementation shows that any stable signature, hook order, or output-d
 
 ## References
 
+- `docs/prompts/rewrite-tickets.md`, **The goal**, **Method**, and **The acceptance test for your own work** — the document-only canonical source and immutable short-pointer publication contract.
 - `HANDOFF.md`, “What done means for a ticket here” and “Decisions that are already made.”
 - `README.md`, “Checks” and “The platform.”
 - `docs/research/00-integration-plan.md` §§1.3, 3.2–3.4, 4.1–4.3, and 4.7. This is the ruling source when a numbered research document differs; the `anchor-core.ts` split resolves §3.3's incompatible Node-I/O/browser-safe responsibilities without changing its one-implementation decision.

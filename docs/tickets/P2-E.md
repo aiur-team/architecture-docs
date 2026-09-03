@@ -413,6 +413,7 @@ P1-D is an integration predecessor for anchored changelog output. It may be auth
 
 ## Acceptance criteria
 
+- [ ] GitHub issue #10 retains the exact title `P2-E — history.ts and the committed history.json`; its body is exactly the two-paragraph canonical-document pointer from `docs/prompts/rewrite-tickets.md`, and the parsed full commit SHA and `docs/tickets/P2-E.md` path resolve through `git show` to bytes identical to this local canonical document.
 - [ ] `history.ts` exports the three exact interfaces and preserves P1-B's exact public `refresh()` and `changelogSection()` signatures; all five named helper functions and both deterministic-test seam objects remain private with the specified signatures/shapes.
 - [ ] The mode boundary is exclusive and command-selected: P2-E writes only during the Mode B repository-builder workflow; P4-R writes only during the Mode A standalone connect/export workflow; neither infers mode from Git, `NETLIFY`, URL, row ID, or an invented config field, and neither invokes the other writer.
 - [ ] Complete non-shallow Git yields at most twelve newest-first first-parent rows from only sections, `doc.json`, and `extra.css`; a root commit is a null-tree creation diff.
@@ -3927,6 +3928,44 @@ Expected: typecheck and every command exit zero; both initial and repeated real 
 
 The same exact-source matrix independently proves this family's early/active/post-result/deletion/final-cleanup direct-signal windows, three first/later distinct-signal pairs, natural Bash HUP/INT/TERM/KILL mapping, ordinary status 23, timeout, resistant and parent-exit descendants, missing-handshake and overrun containment, deletion failures, and actual evidence write/chmod/rename/partial-`.new` recovery. The recursive harness signals only a retained direct wrapper with current PID=PGID proof; it never signals an inner bare PGID and retains remediation on uncertainty. The guarded Bash `finish_repeat`/`cleanup_repeat` wrapper validates the exact supplied parent/template/root and live-owner nonce, preserves prior status, and leaves deletion to the outer owner. Unproved cleanup retains the root and mode-0600 actionable evidence; the first terminal status remains authoritative, otherwise the result is 125, and neither path prints the cleanup `PASS`. Every changed path is examined; an unexpected path or explicit Git `R`/`C` status is a hard ownership failure.
 
+### Publication pointer integrity gate
+
+Run this after the canonical document commit is pushed and issue #10's pointer is published:
+
+```bash
+set -euo pipefail
+pointer_json="$(mktemp "${TMPDIR:-/tmp}/p2e-pointer.XXXXXX")"
+trap 'rm -f -- "$pointer_json"' EXIT HUP INT TERM
+chmod 600 "$pointer_json"
+gh issue view 10 --repo aiur-team/architecture-docs --json title,body >"$pointer_json"
+
+node --input-type=module - "$pointer_json" <<'NODE'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const issue = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const expectedTitle = "P2-E — history.ts and the committed history.json";
+const expectedPath = "docs/tickets/P2-E.md";
+assert.equal(issue.title, expectedTitle);
+const pointer = /^Implementation specification: \[`([^`]+)`\]\(https:\/\/github\.com\/aiur-team\/architecture-docs\/blob\/([0-9a-f]{40,64})\/([^)]+)\)\n\nThis issue tracks implementation of the linked canonical specification\.$/.exec(issue.body);
+assert.ok(pointer, "issue body must be the exact two-paragraph canonical-document pointer");
+const [, labelPath, commitSha, linkedPath] = pointer;
+assert.equal(labelPath, expectedPath);
+assert.equal(linkedPath, expectedPath);
+assert.equal(
+  issue.body,
+  `Implementation specification: [\`${expectedPath}\`](https://github.com/aiur-team/architecture-docs/blob/${commitSha}/${expectedPath})\n\nThis issue tracks implementation of the linked canonical specification.`,
+);
+const resolvedSha = execFileSync("git", ["rev-parse", "--verify", `${commitSha}^{commit}`], { encoding: "utf8" }).trim();
+assert.equal(resolvedSha, commitSha, "issue pointer must contain the full commit SHA");
+assert.deepEqual(execFileSync("git", ["show", `${commitSha}:${linkedPath}`]), readFileSync(expectedPath));
+console.log("PASS  P2-E issue #10 pointer resolves to the byte-identical canonical document");
+NODE
+```
+
+Expected: the command exits `0`, the issue title and exact two-paragraph body pass, the parsed path is exactly `docs/tickets/P2-E.md`, the object ID is the full commit SHA, and the final line is `PASS  P2-E issue #10 pointer resolves to the byte-identical canonical document`. The mode-`0600` issue JSON file is removed by the trap.
+
 ## Failure modes
 
 - A runtime `refresh()` call with a non-string or empty instance value throws the exact instance-path `BuildError` before the local/Netlify branch and before any filesystem or Git call.
@@ -3994,6 +4033,7 @@ No implementation-blocking question remains. A future request to convert Mode A 
 - `docs/tickets/P1-B.md` — creator of `history.ts`, exact public signatures, `Section.file`, `parseSection()`, `BuildError`, hook order, JSON-script escaping, and shared generated artifacts.
 - `docs/tickets/P1-D.md` — changelog anchoring stage and two-real-instance committed generated-input precedent.
 - `docs/tickets/P2-D.md` — finalized safe source-basename predicate and exact generated/read-only `history.json` sentinel behavior.
+- `docs/prompts/rewrite-tickets.md` — canonical-document publication contract and exact two-paragraph issue-pointer form.
 - Git [`git-log`](https://git-scm.com/docs/git-log) — `--max-count`, pretty formatting, and first-parent traversal.
 - Git [`git-diff-tree`](https://git-scm.com/docs/git-diff-tree) — `--root` null-tree behavior, recursive patch output, pathname quoting, and pathspec limitation.
 - Git [`git-diff`](https://git-scm.com/docs/git-diff) — deterministic patch options, disabled external/textconv/rename behavior, prefixes, context, and diff algorithm.
