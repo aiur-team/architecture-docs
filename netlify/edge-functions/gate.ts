@@ -152,8 +152,20 @@ async function cancelAndRelease(
   }
 }
 
+async function cancelBody(
+  body: ReadableStream<Uint8Array> | null | undefined,
+): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // Synthetic HEAD cleanup is best effort and cannot change the response.
+  }
+}
+
 function replayResponse(
-  downstream: Response,
+  status: number,
+  statusText: string,
+  downstreamHeaders: Headers,
   reader: ReadableStreamDefaultReader<Uint8Array>,
   retained: Uint8Array[],
 ): Response {
@@ -201,13 +213,13 @@ function replayResponse(
     },
   });
 
-  const headers = new Headers(downstream.headers);
+  const headers = new Headers(downstreamHeaders);
   headers.delete("Content-Length");
   headers.delete("Content-Encoding");
   headers.delete("Transfer-Encoding");
   return new Response(body, {
-    status: downstream.status,
-    statusText: downstream.statusText,
+    status,
+    statusText,
     headers,
   });
 }
@@ -243,21 +255,42 @@ export default async function gate(
       ? new Request(req, { method: "GET", body: null })
       : undefined;
     downstream = await context.next(nextRequest);
-    if (
-      !(downstream instanceof Response) ||
-      downstream.status === 0 ||
-      downstream.type === "opaque"
-    )
+    if (!(downstream instanceof Response))
       return plainResponse(503, ACCESS_UNAVAILABLE);
   } catch {
     return plainResponse(503, ACCESS_UNAVAILABLE);
   }
 
   let status: number;
+  let statusText: string;
+  let headers: Headers;
+  let body: ReadableStream<Uint8Array> | null = null;
+  let bodyUsed: boolean;
+  let responseType: ResponseType;
   try {
+    body = downstream.body;
     status = downstream.status;
+    statusText = downstream.statusText;
+    headers = downstream.headers;
+    bodyUsed = downstream.bodyUsed;
+    responseType = downstream.type;
   } catch {
+    if (isHead) await cancelBody(body);
     return plainResponse(503, ACCESS_UNAVAILABLE);
+  }
+  if (status === 0 || responseType === "opaque") {
+    if (isHead) await cancelBody(body);
+    return plainResponse(503, ACCESS_UNAVAILABLE);
+  }
+  if (
+    typeof status !== "number" ||
+    typeof statusText !== "string" ||
+    !(headers instanceof Headers) ||
+    typeof bodyUsed !== "boolean" ||
+    (body !== null && !(body instanceof ReadableStream))
+  ) {
+    if (isHead) await cancelBody(body);
+    return plainResponse(500, UNVERIFIED);
   }
 
   if (
@@ -267,29 +300,51 @@ export default async function gate(
     (status >= 305 && status <= 599)
   ) {
     if (!isHead) return downstream;
+    let response: Response;
     try {
-      return new Response(null, {
+      response = new Response(null, {
         status,
-        statusText: downstream.statusText,
-        headers: downstream.headers,
+        statusText,
+        headers,
       });
     } catch {
+      await cancelBody(body);
       return plainResponse(503, ACCESS_UNAVAILABLE);
     }
+    await cancelBody(body);
+    return response;
   }
-  if (status !== 200) return plainResponse(500, UNVERIFIED);
+  if (status !== 200) {
+    if (isHead) await cancelBody(body);
+    return plainResponse(500, UNVERIFIED);
+  }
 
   let reader: ReadableStreamDefaultReader<Uint8Array>;
+  let contentType: string | null;
+  let bodyLocked: boolean | undefined;
+  let getReader: (() => ReadableStreamDefaultReader<Uint8Array>) | undefined;
   try {
-    if (
-      !validContentType(downstream.headers.get("Content-Type")) ||
-      downstream.body === null ||
-      downstream.bodyUsed ||
-      downstream.body.locked
-    )
-      return plainResponse(500, UNVERIFIED);
-    reader = downstream.body.getReader();
+    contentType = headers.get("Content-Type");
+    bodyLocked = body?.locked;
+    getReader = body?.getReader;
   } catch {
+    if (isHead) await cancelBody(body);
+    return plainResponse(503, ACCESS_UNAVAILABLE);
+  }
+  if (
+    !validContentType(contentType) ||
+    body === null ||
+    bodyUsed !== false ||
+    bodyLocked !== false ||
+    typeof getReader !== "function"
+  ) {
+    if (isHead) await cancelBody(body);
+    return plainResponse(500, UNVERIFIED);
+  }
+  try {
+    reader = getReader.call(body);
+  } catch {
+    if (isHead) await cancelBody(body);
     return plainResponse(500, UNVERIFIED);
   }
 
@@ -299,7 +354,12 @@ export default async function gate(
   try {
     while (!firstLineFound) {
       const next = await reader.read();
-      if (next.done || !(next.value instanceof Uint8Array)) throw new Error();
+      if (
+        next.done ||
+        !(next.value instanceof Uint8Array) ||
+        next.value.byteLength === 0
+      )
+        throw new Error();
       retained.push(next.value);
       const inspectLength = Math.min(
         next.value.byteLength,
@@ -348,14 +408,15 @@ export default async function gate(
     }
 
     if (isHead) {
-      await cancelAndRelease(reader);
-      return new Response(null, {
-        status: downstream.status,
-        statusText: downstream.statusText,
-        headers: downstream.headers,
+      const response = new Response(null, {
+        status,
+        statusText,
+        headers,
       });
+      await cancelAndRelease(reader);
+      return response;
     }
-    return replayResponse(downstream, reader, retained);
+    return replayResponse(status, statusText, headers, reader, retained);
   } catch {
     await cancelAndRelease(reader);
     return plainResponse(500, UNVERIFIED);
