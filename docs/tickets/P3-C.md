@@ -117,7 +117,7 @@ Every retained array item is a complete P3-A version-1 record, without compatibi
 
 - The thread is a plain object with exactly the 14 keys `v`, `id`, `docId`, `kind`, `status`, `section`, `anchor`, `title`, `docVersion`, `createdAt`, `author`, `resolvedAt`, `resolvedBy`, `comments`; `v === 1`; `id` matches `^t_[a-z0-9]{1,48}_[0-9a-f]{8}$`; `docId` matches `^[0-9a-f]{6}$` and equals the trimmed document-id meta value byte-for-byte; `section` matches `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`; and `docVersion` matches `^[0-9a-f]{7}$`.
 - A timestamp matches `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$` and satisfies `new Date(value).toISOString() === value`. This exact rule applies to thread/comment `createdAt`, non-null `editedAt`, and non-null `resolvedAt`.
-- An actor is a plain object with exactly `sub`, `name`, `email`. `sub` matches `^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`; `name` is a string of at most 200 UTF-16 code units. `email` is either empty or already ASCII-trimmed/lower-case, at most 254 characters, and has exactly one `@`; its local part has 1 through 64 characters from lower-case ASCII letters, digits, or ``.!#$%&'*+=?^_`{|}~-``; its domain has at least two dot-separated labels, each 1 through 63 lower-case ASCII alphanumeric-or-hyphen characters and beginning/ending alphanumeric. Comma, colon, slash, backslash, control, whitespace, quoted-local, and Unicode-domain forms are invalid. Email is never rendered.
+- An actor is a plain object with exactly `sub`, `name`, `email`. `sub` matches `^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`; `name` is a string of at most 200 UTF-16 code units. `email` is either empty or already ASCII-trimmed/lower-case, at most 254 characters, and has exactly one `@`; its local part has 1 through 64 characters arranged as one or more dot-separated, non-empty atoms made from lower-case ASCII letters, digits, or ``!#$%&'*+/=?^_`{|}~-``; its domain has at least two dot-separated labels, each 1 through 63 lower-case ASCII alphanumeric-or-hyphen characters and beginning/ending alphanumeric. Leading, trailing, or consecutive local-part dots, comma, colon, backslash, control, whitespace, quoted-local, and Unicode-domain forms are invalid. Email is never rendered.
 - `kind` is exactly `comment` or `discussion`; `status` is exactly `open` or `resolved`. An open thread has `resolvedAt: null` and `resolvedBy: null`; a resolved thread has a valid timestamp and complete actor.
 - `comments` is a non-empty dense JSON array of at most 500 items. Every entry in a retained thread is a plain object with exactly `id`, `body`, `author`, `createdAt`, `editedAt`; `id` matches `^c_[a-z0-9]{1,48}_[0-9a-f]{8}$` and is unique in the thread; `body` is 1 through 8000 UTF-16 code units and `body.trim().length > 0`; `author` and timestamps follow the rules above; `editedAt` is `null` or a valid timestamp. The first comment's author fields and `createdAt` equal the top-level author fields and `createdAt` exactly.
 - A comment thread has `title: null` and an `anchor` plain object with exactly `block`, `exact`, `prefix`, `suffix`, `start`. `block` matches the canonical `^a[0-9a-f]{8}$`; `exact` is 1 through 1000 UTF-16 code units and equals `exact.replace(/\s+/g, " ").trim()`; `prefix` and `suffix` are 0 through 32 code units, contain only non-whitespace characters separated by single U+0020 spaces with no doubled space, and may retain one boundary space; `start` is a non-negative safe integer.
@@ -568,16 +568,32 @@ const rows = () => [
   thread(threadId(6), null),
 ];
 
-function html(withShare = true, withHead = true, docMode = "valid", withCore = true, duplicateAid = false, boundary = false) {
+function html(withShare = true, withHead = true, docMode = "valid", withCore = true, duplicateAid = false, boundary = false, preexisting = false, anchorMode = "valid", namespaceMode = "valid") {
   const head = withHead
     ? `<div class="head-top"><button type="button">Index</button>${withShare ? '<button type="button" class="share-btn">Share</button>' : ""}</div>`
     : "";
   const meta = docMode === "missing" ? "" : `<meta name="doc-id" content="${docMode === "empty" ? "" : docId}">`;
   const duplicate = duplicateAid ? '<p data-aid="a11111111">Invented duplicate aid.</p>' : "";
-  const bootstrap = boundary
+  const bootstrap = namespaceMode === "null"
+    ? `<script>window.doc=null;<\/script>`
+    : namespaceMode === "scalar"
+    ? `<script>window.doc="invalid";<\/script>`
+    : preexisting
+    ? `<script>window.__p3cExistingComments=Object.freeze({sentinel:true});window.doc={rail:null,panel:null,comments:window.__p3cExistingComments};<\/script>`
+    : boundary
     ? `<script>window.__p3cGlobalWrites=[];const state={};for(const key of ["rail","panel"])Object.defineProperty(state,key,{enumerable:true,get(){return null},set(){window.__p3cGlobalWrites.push(key);throw new Error("forbidden downstream global write: "+key)}});window.doc=state;<\/script>`
     : `<script>window.doc={rail:null,panel:null};<\/script>`;
-  return `<!doctype html><html><head><meta charset="utf-8">${meta}<link rel="icon" href="data:,"><link rel="stylesheet" href="/comments.css">${bootstrap}</head><body><header>${head}</header><main><details id="fold" open><summary>Ledger</summary><section><p data-aid="a11111111">The <em>aurora</em>\n ledger\tkeeps&nbsp;one 😀 <span hidden>blue</span> token.<script>ignored raw text</script><style>ignored raw text</style></p></section></details><section><p data-aid="a22222222">The copper entry changed.</p></section><section><p data-aid="a33333333">A silver path crosses the quiet field. A unique moved phrase rests here.</p></section><section><p data-aid="a44444444">blue token xx blue token</p></section><section><p data-aid="a55555555">Another silver path reaches the invented ridge.</p>${duplicate}</section></main>${withCore ? `<script type="module">${anchorJS}</script>` : ""}<script type="module" src="/comments.js"></script></body></html>`;
+  const anchorFailures = {
+    stub: "window.doc.anchor={BLOCK:[],norm(value){return String(value).replace(/\\s+/g,' ').trim();}};",
+    null: "window.doc.anchor=null;",
+    array: "window.doc.anchor=[];",
+    "block-missing": "window.doc.anchor={norm(value){return value;}};",
+    "block-wrong": "window.doc.anchor={BLOCK:{},norm(value){return value;}};",
+    "norm-missing": "window.doc.anchor={BLOCK:[]};",
+    "norm-wrong": "window.doc.anchor={BLOCK:[],norm:null};",
+  };
+  const anchorPoison = anchorFailures[anchorMode] === undefined ? "" : `<script type="module">${anchorFailures[anchorMode]}<\/script>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${meta}<link rel="icon" href="data:,"><link rel="stylesheet" href="/comments.css">${bootstrap}</head><body><header>${head}</header><main><details id="fold" open><summary>Ledger</summary><section><p data-aid="a11111111">The <em>aurora</em>\n ledger\tkeeps&nbsp;one 😀 <span hidden>blue</span> token.<script>"ignored raw text"</script><style>ignored raw text</style></p></section></details><section><p data-aid="a22222222">The copper entry changed.</p></section><section><p data-aid="a33333333">A silver path crosses the quiet field. A unique moved phrase rests here.</p></section><section><p data-aid="a44444444">blue token xx blue token</p></section><section><p data-aid="a55555555">Another silver path reaches the invented ridge.</p>${duplicate}</section></main>${withCore ? `<script type="module">${anchorJS}</script>` : ""}${anchorPoison}<script type="module" src="/comments.js"></script></body></html>`;
 }
 
 const server = createServer((request, response) => {
@@ -590,7 +606,7 @@ const server = createServer((request, response) => {
     response.end(commentsCSS);
   } else if (url.pathname === "/fixture") {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    response.end(html(url.searchParams.get("share") !== "0", url.searchParams.get("head") !== "0", url.searchParams.get("doc") ?? "valid", url.searchParams.get("core") !== "0", url.searchParams.get("duplicate") === "1", url.searchParams.get("boundary") === "1"));
+    response.end(html(url.searchParams.get("share") !== "0", url.searchParams.get("head") !== "0", url.searchParams.get("doc") ?? "valid", url.searchParams.get("core") !== "0", url.searchParams.get("duplicate") === "1", url.searchParams.get("boundary") === "1", url.searchParams.get("preexisting") === "1", url.searchParams.get("anchor") ?? "valid", url.searchParams.get("namespace") ?? "valid"));
   } else if (url.pathname === "/blank") {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end("<!doctype html><title>blank</title>");
@@ -607,12 +623,12 @@ assert.equal(typeof address, "object");
 const origin = `http://127.0.0.1:${address.port}`;
 const browser = await chromium.launch({ headless: true });
 
-async function openPage({ response = pageOf(rows()), share = true, head = true, doc = "valid", core = true, duplicate = false, boundary = false, init, handler } = {}) {
+async function openPage({ response = pageOf(rows()), share = true, head = true, doc = "valid", core = true, duplicate = false, boundary = false, preexisting = false, anchor = "valid", init, handler } = {}) {
   const context = await browser.newContext({ locale: "en-US", timezoneId: "UTC", viewport: { width: 1280, height: 900 }, reducedMotion: "no-preference" });
   const page = await context.newPage();
   const errors = [];
   const requests = [];
-  page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
+  page.on("console", (message) => { if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) errors.push(`console: ${message.text()}`); });
   page.on("pageerror", (error) => errors.push(`page: ${error.message}`));
   if (boundary) await page.addInitScript(() => {
     window.__p3cSinkTouches = [];
@@ -659,7 +675,7 @@ async function openPage({ response = pageOf(rows()), share = true, head = true, 
     if (handler) await handler(route, requests.length);
     else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
   });
-  await page.goto(`${origin}/fixture?share=${share ? 1 : 0}&head=${head ? 1 : 0}&doc=${doc}&core=${core ? 1 : 0}&duplicate=${duplicate ? 1 : 0}&boundary=${boundary ? 1 : 0}`);
+  await page.goto(`${origin}/fixture?share=${share ? 1 : 0}&head=${head ? 1 : 0}&doc=${doc}&core=${core ? 1 : 0}&duplicate=${duplicate ? 1 : 0}&boundary=${boundary ? 1 : 0}&preexisting=${preexisting ? 1 : 0}&anchor=${anchor}`);
   await page.waitForFunction(() => Boolean(window.doc?.comments));
   return { context, page, errors, requests };
 }
@@ -679,6 +695,19 @@ async function run(name, body) {
 }
 
 try {
+  await run("preexisting-comments-boundary", async () => {
+    const state = await openPage({ preexisting: true });
+    try {
+      assert.equal(await state.page.evaluate(() => window.doc.comments === window.__p3cExistingComments), true);
+      await activate(state.page);
+      await state.page.waitForTimeout(50);
+      assert.equal(await state.page.evaluate(() => window.doc.comments === window.__p3cExistingComments), true);
+      assert.equal(state.requests.length, 0);
+      assert.equal(await state.page.locator("#doc-comments-toggle, #doc-comments-panel, #doc-comments-rail").count(), 0);
+      assert.deepEqual(state.errors, []);
+    } finally { await state.context.close(); }
+  });
+
   await run("mapping", async () => {
     const state = await openPage({ response: pageOf([rows()[0]]) });
     try {
@@ -970,7 +999,7 @@ try {
       ["status enum", (value) => { value.status = "closed"; }],
       ["section type", (value) => { value.section = 7; }],
       ["section empty", (value) => { value.section = ""; }],
-      ["section length", (value) => { value.section = "a".repeat(64); }],
+      ["section above length", (value) => { value.section = "a".repeat(65); }],
       ["section edge hyphen", (value) => { value.section = "-section"; }],
       ["section grammar", (value) => { value.section = "Bad Section"; }],
       ["document version type", (value) => { value.docVersion = 7; }],
@@ -1017,6 +1046,9 @@ try {
       ["email missing at", (value) => { value.email = "rowan.reader.example"; }],
       ["email multiple at", (value) => { value.email = "rowan@@reader.example"; }],
       ["email empty local", (value) => { value.email = "@reader.example"; }],
+      ["email leading local dot", (value) => { value.email = ".rowan@reader.example"; }],
+      ["email trailing local dot", (value) => { value.email = "rowan.@reader.example"; }],
+      ["email consecutive local dots", (value) => { value.email = "rowan..vale@reader.example"; }],
       ["email local length", (value) => { value.email = `${"a".repeat(65)}@reader.example`; }],
       ["email domain needs dot", (value) => { value.email = "rowan@reader"; }],
       ["email leading hyphen", (value) => { value.email = "rowan@-reader.example"; }],
@@ -1057,9 +1089,9 @@ try {
       ["comment edited type", (value) => { value.comments[0].editedAt = false; }],
       ["comment edited timestamp", (value) => { value.comments[0].editedAt = "2026-01-02"; }],
       ["comment edited timestamp round trip", (value) => { value.comments[0].editedAt = "2026-02-30T03:04:05.000Z"; }],
-      ["first author sub mismatch", (value) => { value.comments[0].author.sub = "reader-8"; }],
-      ["first author name mismatch", (value) => { value.comments[0].author.name = "Mira Stone"; }],
-      ["first author email mismatch", (value) => { value.comments[0].author.email = "mira@reader.example"; }],
+      ["first author sub mismatch", (value) => { value.comments[0].author = { ...value.comments[0].author, sub: "reader-8" }; }],
+      ["first author name mismatch", (value) => { value.comments[0].author = { ...value.comments[0].author, name: "Mira Stone" }; }],
+      ["first author email mismatch", (value) => { value.comments[0].author = { ...value.comments[0].author, email: "mira@reader.example" }; }],
       ["first created mismatch", (value) => { value.comments[0].createdAt = "2026-01-02T03:04:06.000Z"; }],
     ]) invalidThread(label, mutate);
 
@@ -1116,10 +1148,10 @@ try {
         assert.equal(await state.page.locator("article").count(), 1, `${label}: prior valid model retained`);
         assert.equal(await state.page.locator("#doc-comments-status").textContent(), "Comments could not be refreshed.", `${label}: fixed failure status`);
       }
-      assert.equal(cases.length, 210, "closed validation matrix case count");
+      assert.equal(cases.length, 219, "closed validation matrix case count");
       const maximums = commentBase();
       maximums.id = `t_${"a".repeat(48)}_12345678`;
-      maximums.section = `a${"b".repeat(61)}c`;
+      maximums.section = `a${"b".repeat(62)}c`;
       maximums.author = { sub: "u".repeat(128), name: "n".repeat(200), email: `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}` };
       maximums.comments[0] = {
         ...maximums.comments[0],
@@ -1132,9 +1164,13 @@ try {
       const emptyActorScalars = commentBase();
       emptyActorScalars.author = { ...emptyActorScalars.author, name: "", email: "" };
       emptyActorScalars.comments[0].author = structuredClone(emptyActorScalars.author);
+      const compatibleSlashEmail = commentBase();
+      compatibleSlashEmail.author = { ...compatibleSlashEmail.author, email: "rowan/vale@reader.example" };
+      compatibleSlashEmail.comments[0].author = structuredClone(compatibleSlashEmail.author);
       for (const [label, value] of [
         ["exact scalar maxima", maximums],
         ["empty actor name and email", emptyActorScalars],
+        ["slash in email local part", compatibleSlashEmail],
         ["resolved coupling", resolvedBase()],
         ["discussion coupling", discussionBase()],
       ]) {
@@ -1215,11 +1251,26 @@ try {
       const replacedTops = await state.page.locator(".doc-comment-marker:visible").evaluateAll((nodes) => nodes.map((node) => Number.parseFloat(getComputedStyle(node).top)));
       assert.equal(replacedTops.every(Number.isFinite), true);
       const exactMarker = state.page.locator('.doc-comment-marker[data-thread-id="t_m8x2k1_00000001"]');
+      await state.page.evaluate(() => { window.__p3cUnrelatedCard = document.querySelector('article[data-thread-id="t_m8x2k1_00000002"]'); });
       await exactMarker.focus();
       await state.page.keyboard.press("Enter");
+      assert.equal(await state.page.evaluate(() => document.querySelector('article[data-thread-id="t_m8x2k1_00000002"]') === window.__p3cUnrelatedCard), true, "selection preserves unrelated card identity");
+      const activeCard = state.page.locator('article[data-thread-id="t_m8x2k1_00000001"]');
+      const secondCard = state.page.locator('article[data-thread-id="t_m8x2k1_00000002"]');
+      assert.equal(await activeCard.getAttribute("aria-current"), "true", "selection marks the active card");
+      assert.equal(await activeCard.evaluate((node) => node.classList.contains("doc-comments-card-active")), true, "selection applies the active card class");
       assert.equal(await state.page.locator("#doc-comments-panel").getAttribute("hidden"), null);
+      await state.page.locator('.doc-comment-marker[data-thread-id="t_m8x2k1_00000002"]').click();
+      assert.equal(await state.page.evaluate(() => document.querySelector('article[data-thread-id="t_m8x2k1_00000002"]') === window.__p3cUnrelatedCard), true, "active switching preserves card identity");
+      assert.equal(await activeCard.getAttribute("aria-current"), null, "active switching clears the previous card");
+      assert.equal(await activeCard.evaluate((node) => node.classList.contains("doc-comments-card-active")), false, "active switching clears the previous class");
+      assert.equal(await secondCard.getAttribute("aria-current"), "true", "active switching marks the next card");
+      assert.equal(await secondCard.evaluate((node) => node.classList.contains("doc-comments-card-active")), true, "active switching applies the next class");
       await state.page.keyboard.press("Escape");
-      assert.equal(await state.page.evaluate(() => document.activeElement?.getAttribute("data-thread-id")), "t_m8x2k1_00000001");
+      assert.equal(await state.page.evaluate(() => document.querySelector('article[data-thread-id="t_m8x2k1_00000002"]') === window.__p3cUnrelatedCard), true, "close preserves unrelated card identity");
+      assert.equal(await secondCard.getAttribute("aria-current"), null, "close clears aria-current");
+      assert.equal(await secondCard.evaluate((node) => node.classList.contains("doc-comments-card-active")), false, "close clears the active card class");
+      assert.equal(await state.page.evaluate(() => document.activeElement?.getAttribute("data-thread-id")), "t_m8x2k1_00000002");
       await toggle.focus();
       await state.page.keyboard.press("Enter");
       await state.page.getByRole("button", { name: "Close comments" }).click();
@@ -1282,13 +1333,17 @@ try {
     const coordinates = () => state.page.evaluate(() => window.__p3cMarkerCoordinates());
     const correct = (value) => value && Math.abs(value.actualTop - value.desiredTop) <= 1.5 && Math.abs(value.actualLeft - value.desiredLeft) <= 1.5;
     const waitForCorrectChange = async (label, before = null) => {
-      await state.page.waitForFunction(({ prior }) => {
-        const value = window.__p3cMarkerCoordinates();
-        return value
-          && Math.abs(value.actualTop - value.desiredTop) <= 1.5
-          && Math.abs(value.actualLeft - value.desiredLeft) <= 1.5
-          && (prior === null || Math.abs(value.actualTop - prior) >= 8);
-      }, { prior: before?.actualTop ?? null }, { timeout: 2000 });
+      try {
+        await state.page.waitForFunction(({ prior }) => {
+          const value = window.__p3cMarkerCoordinates();
+          return value
+            && Math.abs(value.actualTop - value.desiredTop) <= 1.5
+            && Math.abs(value.actualLeft - value.desiredLeft) <= 1.5
+            && (prior === null || Math.abs(value.actualTop - prior) >= 8);
+        }, { prior: before?.actualTop ?? null }, { timeout: 2000 });
+      } catch (error) {
+        throw new Error(`${label}: ${error.message}; before=${JSON.stringify(before)} after=${JSON.stringify(await coordinates())}`, { cause: error });
+      }
       const after = await coordinates();
       assert.equal(correct(after), true, `${label}: marker has correct range-derived coordinates`);
       if (before) assert.ok(Math.abs(after.actualTop - before.actualTop) >= 8, `${label}: marker coordinates changed`);
@@ -1329,9 +1384,17 @@ try {
       await state.page.evaluate(() => window.__p3cSettleFonts());
       prior = await waitForCorrectChange("document.fonts.ready", prior);
 
-      await state.page.locator("#fold summary").click();
+      await state.page.locator('[data-aid="a11111111"]').evaluate((node) => { node.style.display = "none"; });
+      await state.page.evaluate(() => window.dispatchEvent(new Event("resize")));
       await state.page.waitForFunction(() => !document.querySelector('.doc-comment-marker[data-thread-id="t_m8x2k1_00000001"]')?.getClientRects().length);
       await moveHost(160);
+      await state.page.locator('[data-aid="a11111111"]').evaluate((node) => { node.style.display = ""; });
+      await state.page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      prior = await waitForCorrectChange("layoutless host restored", prior);
+
+      await state.page.locator("#fold summary").click();
+      await state.page.waitForFunction(() => !document.querySelector('.doc-comment-marker[data-thread-id="t_m8x2k1_00000001"]')?.getClientRects().length);
+      await moveHost(180);
       await state.page.locator("#fold summary").click();
       await waitForCorrectChange("captured disclosure toggle", prior);
       assert.deepEqual(state.errors, []);
@@ -1650,27 +1713,50 @@ try {
       } finally { await invalid.context.close(); }
     }
 
-    for (const environment of [
-      { doc: "missing", core: true, primitive: true },
-      { doc: "empty", core: true, primitive: true },
-      { doc: "valid", core: false, primitive: true },
-      { doc: "valid", core: true, primitive: false },
-    ]) {
+    const environmentCases = [
+      ["missing doc metadata", { doc: "missing" }],
+      ["empty doc metadata", { doc: "empty" }],
+      ["null doc namespace", { core: false, namespace: "null" }],
+      ["scalar doc namespace", { core: false, namespace: "scalar" }],
+      ["missing anchor core", { core: false }],
+      ["null anchor", { anchor: "null" }],
+      ["array anchor", { anchor: "array" }],
+      ["missing anchor BLOCK", { anchor: "block-missing" }],
+      ["wrong anchor BLOCK", { anchor: "block-wrong" }],
+      ["missing anchor norm", { anchor: "norm-missing" }],
+      ["wrong anchor norm", { anchor: "norm-wrong" }],
+      ...[
+        "fetch", "AbortController", "CustomEvent", "NodeFilter-null", "NodeFilter-missing-SHOW_TEXT",
+        "NodeFilter-wrong-SHOW_TEXT", "Range", "requestAnimationFrame", "performance-null",
+        "performance-missing-now", "performance-wrong-now", "document.createTreeWalker",
+      ].map((primitive) => [`invalid ${primitive}`, { primitive, core: false, anchor: "stub" }]),
+    ];
+    for (const [label, environment] of environmentCases) {
       const context = await browser.newContext();
       const page = await context.newPage();
       const errors = [];
       let requests = 0;
-      page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+      page.on("console", (message) => { if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) errors.push(message.text()); });
       page.on("pageerror", (error) => errors.push(error.message));
-      if (!environment.primitive) await page.addInitScript(() => Object.defineProperty(window, "AbortController", { configurable: true, value: undefined }));
+      if (environment.primitive) await page.addInitScript((primitive) => {
+        const replace = (name, value) => Object.defineProperty(window, name, { configurable: true, value });
+        if (["fetch", "AbortController", "CustomEvent", "Range", "requestAnimationFrame"].includes(primitive)) replace(primitive, undefined);
+        else if (primitive === "NodeFilter-null") replace("NodeFilter", null);
+        else if (primitive === "NodeFilter-missing-SHOW_TEXT") replace("NodeFilter", {});
+        else if (primitive === "NodeFilter-wrong-SHOW_TEXT") replace("NodeFilter", { SHOW_TEXT: "4" });
+        else if (primitive === "performance-null") replace("performance", null);
+        else if (primitive === "performance-missing-now") Object.defineProperty(performance, "now", { configurable: true, value: undefined });
+        else if (primitive === "performance-wrong-now") Object.defineProperty(performance, "now", { configurable: true, value: 0 });
+        else if (primitive === "document.createTreeWalker") Object.defineProperty(document, "createTreeWalker", { configurable: true, value: undefined });
+      }, environment.primitive);
       await page.route("**/api/threads?*", (route) => { requests += 1; return route.fulfill({ status: 200, contentType: "application/json", body: '{"threads":[],"nextCursor":null}' }); });
       try {
-        await page.goto(`${origin}/fixture?doc=${environment.doc}&core=${environment.core ? 1 : 0}`);
+        await page.goto(`${origin}/fixture?doc=${environment.doc ?? "valid"}&core=${environment.core === false ? 0 : 1}&anchor=${environment.anchor ?? "valid"}&namespace=${environment.namespace ?? "valid"}`);
         await page.waitForTimeout(100);
-        assert.equal(await page.evaluate(() => window.doc?.comments), undefined);
-        assert.equal(await page.locator("#doc-comments-toggle").count(), 0);
-        assert.equal(requests, 0);
-        assert.deepEqual(errors, []);
+        assert.equal(await page.evaluate(() => window.doc?.comments), undefined, label);
+        assert.equal(await page.locator("#doc-comments-toggle, #doc-comments-panel, #doc-comments-rail").count(), 0, label);
+        assert.equal(requests, 0, label);
+        assert.deepEqual(errors, [], label);
       } finally { await context.close(); }
     }
   });
@@ -1699,7 +1785,7 @@ try {
       const page = await context.newPage();
       const errors = [];
       const requests = [];
-      page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+      page.on("console", (message) => { if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) errors.push(message.text()); });
       page.on("pageerror", (error) => errors.push(error.message));
       page.on("request", (request) => requests.push(request.url()));
       try {
@@ -1930,7 +2016,7 @@ PASS  P3-C browser fixture
 PASS  P3-C browser fixture cleaned
 ```
 
-The AST assertions run before browser startup against the complete owned module and are the structural half of AC-03/AC-13. `read-only-downstream-boundary` then executes normal activation, exact GET construction, forbidden downstream events, and a refresh error with throwing transport/storage/form/element/event/global sinks installed before module evaluation; it requires zero touches and no write UI. `p3a-v1-validation-matrix` starts from one valid committed thread and executes exactly 210 invalid page/thread/comment/actor/anchor mutations, including the same complete 25-case actor matrix in thread-author, comment-author, and resolved-author positions; every exact key/type plus each documented scalar, timestamp, status/resolution, kind/anchor/title, and first-comment coupling class is exercised. Each invalid case must return false, make one request, keep the prior card, and show only the fixed refresh-failure status; four positive records exercise maxima, empty actor strings, resolved coupling, and discussion coupling. The `pagination` line is mandatory and occurs only after Chromium has executed the ordinary two-page chain; a valid full page followed by P3-A's short comment-bounded page; complete validation and omission of the first valid thread that would cross the client's remaining total; rejection of that boundary thread when malformed; an exact 5000-comment short page with a non-null cursor that is visibly partial without another request; a valid five-page 501-thread server state; the accepted exact 500-comment P3-A boundary; rejection of a retained 501-comment protocol violation; and an exact 5000-comment retained prefix followed by adversarial-invalid ignored records. Those cases prove 1–100-thread non-null cursor acceptance, exact exclusive cursor following, deterministic prefix counts, exact visible truncation notes, no sixth-page request, no interpretation or rendering of the ignored tail, boundary validation, partial-success return behavior, failed-refresh retention, and complete-refresh replacement. `reposition-triggers` separately changes document geometry and proves correct new range-derived coordinates after initial/refresh commits, panel open, panel close, active selection, resize, hash change, controlled font readiness, and captured disclosure toggle. `whole-pass-deadline` instruments the one controller, delays page one by three seconds, stalls page two, and dynamically observes abort about five seconds after the pass began rather than five seconds per page. `panel-rail-accessibility-share` checks exact exposed headings, buttons, articles, state labels/groups, and absence of the hidden panel in Chromium's accessibility tree. `fallback-rendered-modes` executes both fallback classes, focus-visible outline, light/dark contrast, forced colours, production reduced-motion rules without a fixture override, desktop and narrow geometry, fallback print removal, and custom-highlight print transparency through rendered/computed results; it is not a stylesheet-token oracle. `lifecycle-refresh` proves the first hidden→visible edge refreshes, a second edge inside 30 seconds does not, and an edge after the window refreshes. `offline-schemes` poisons metadata and prerequisite getters and observes that none are touched on any excluded protocol. Every page/case contains invented public fixtures only. The launcher starts no npm, server, browser, or fixture worker before its exact retained direct PID is proved to be the process-group leader and durable `ready` evidence exists. HUP/INT/TERM map to 129/130/143 with first-signal precedence; the 900-second workload and 30-second deletion deadlines are finite. TERM→five-second→KILL escalation is permitted only while the retained leader is still live and a fresh PID=PGID query succeeds. Leader close includes IPC/stdout/stderr closure; after it, the numeric process-group id is never signalled again. Any surviving group, anchor/evidence failure, or deletion failure retains the mode-`0700` exact root and mode-`0600` evidence with a verify-before-signal remediation, and exits nonzero. Recursive deletion begins only after browser-group disappearance and runs below a separately retained, freshly authenticated deletion leader.
+The AST assertions run before browser startup against the complete owned module and are the structural half of AC-03/AC-13. `read-only-downstream-boundary` then executes normal activation, exact GET construction, forbidden downstream events, and a refresh error with throwing transport/storage/form/element/event/global sinks installed before module evaluation; it requires zero touches and no write UI. `p3a-v1-validation-matrix` starts from one valid committed thread and executes exactly 219 invalid page/thread/comment/actor/anchor mutations, including the same complete 28-case actor matrix in thread-author, comment-author, and resolved-author positions; every exact key/type plus each documented scalar, timestamp, status/resolution, kind/anchor/title, and first-comment coupling class is exercised. Each invalid case must return false, make one request, keep the prior card, and show only the fixed refresh-failure status; five positive records exercise maxima, empty actor strings, slash-local-part compatibility, resolved coupling, and discussion coupling. The `pagination` line is mandatory and occurs only after Chromium has executed the ordinary two-page chain; a valid full page followed by P3-A's short comment-bounded page; complete validation and omission of the first valid thread that would cross the client's remaining total; rejection of that boundary thread when malformed; an exact 5000-comment short page with a non-null cursor that is visibly partial without another request; a valid five-page 501-thread server state; the accepted exact 500-comment P3-A boundary; rejection of a retained 501-comment protocol violation; and an exact 5000-comment retained prefix followed by adversarial-invalid ignored records. Those cases prove 1–100-thread non-null cursor acceptance, exact exclusive cursor following, deterministic prefix counts, exact visible truncation notes, no sixth-page request, no interpretation or rendering of the ignored tail, boundary validation, partial-success return behavior, failed-refresh retention, and complete-refresh replacement. `reposition-triggers` separately changes document geometry and proves correct new range-derived coordinates after initial/refresh commits, panel open, panel close, active selection, resize, hash change, controlled font readiness, and captured disclosure toggle. `whole-pass-deadline` instruments the one controller, delays page one by three seconds, stalls page two, and dynamically observes abort about five seconds after the pass began rather than five seconds per page. `panel-rail-accessibility-share` checks exact exposed headings, buttons, articles, state labels/groups, and absence of the hidden panel in Chromium's accessibility tree. `fallback-rendered-modes` executes both fallback classes, focus-visible outline, light/dark contrast, forced colours, production reduced-motion rules without a fixture override, desktop and narrow geometry, fallback print removal, and custom-highlight print transparency through rendered/computed results; it is not a stylesheet-token oracle. `lifecycle-refresh` proves the first hidden→visible edge refreshes, a second edge inside 30 seconds does not, and an edge after the window refreshes. `offline-schemes` poisons metadata and prerequisite getters and observes that none are touched on any excluded protocol. Every page/case contains invented public fixtures only. The launcher starts no npm, server, browser, or fixture worker before its exact retained direct PID is proved to be the process-group leader and durable `ready` evidence exists. HUP/INT/TERM map to 129/130/143 with first-signal precedence; the 900-second workload and 30-second deletion deadlines are finite. TERM→five-second→KILL escalation is permitted only while the retained leader is still live and a fresh PID=PGID query succeeds. Leader close includes IPC/stdout/stderr closure; after it, the numeric process-group id is never signalled again. Any surviving group, anchor/evidence failure, or deletion failure retains the mode-`0700` exact root and mode-`0600` evidence with a verify-before-signal remediation, and exits nonzero. Recursive deletion begins only after browser-group disappearance and runs below a separately retained, freshly authenticated deletion leader.
 
 ### T7 — final repository and issue gates
 
@@ -1952,11 +2038,13 @@ const changed = new Set([
   ...run(["ls-files", "--others", "--exclude-standard"]),
 ]);
 const owned = ["templates/base/comments.css", "templates/base/comments.js"];
+const generated = ["example/dist/example.html", "templates/components/dist/components.html"];
 for (const path of changed) {
   if (path.startsWith("docs/tickets/")) continue;
-  assert.ok(owned.includes(path), `unexpected P3-C implementation path: ${path}`);
+  assert.ok([...owned, ...generated].includes(path), `unexpected P3-C implementation path: ${path}`);
 }
 assert.deepEqual(owned.filter((path) => changed.has(path)), owned, "both and only P3-C source assets must change");
+assert.deepEqual(generated.filter((path) => changed.has(path)), generated, "both committed documents must carry the embedded assets");
 console.log("PASS  P3-C implementation ownership");
 NODE
 node --input-type=module <<'NODE'
@@ -1990,7 +2078,7 @@ git show "${pointer_sha}:${pointer_path}" | cmp -s "$pointer_path" -
 printf '%s\n' 'PASS  P3-C issue #16 pointer integrity'
 ```
 
-Expected: after `P3C_BASE` names the exact integrated P3-A predecessor commit, the diff oracle prints `PASS  P3-C implementation ownership` only when both owned assets and no other non-ticket implementation path differ from that base. `templates/check-dist` ends with `PASS  every committed document is byte-identical after a rebuild`; TypeScript, scrub, whitespace, 12-heading, and fence checks exit `0`; scrub reports zero warnings. Issue #16 retains its exact title and exact two-paragraph canonical-document pointer, whose parsed full commit SHA and path resolve through `git show` to bytes identical to the local document; the pointer gate prints `PASS  P3-C issue #16 pointer integrity`.
+Expected: after `P3C_BASE` names the exact integrated P3-A predecessor commit, the diff oracle prints `PASS  P3-C implementation ownership` only when both owned assets, their two committed generated documents, and no other non-ticket implementation path differ from that base. `templates/check-dist` ends with `PASS  every committed document is byte-identical after a rebuild`; TypeScript, scrub, whitespace, 12-heading, and fence checks exit `0`; scrub reports zero warnings. Issue #16 retains its exact title and exact two-paragraph canonical-document pointer, whose parsed full commit SHA and path resolve through `git show` to bytes identical to the local document; the pointer gate prints `PASS  P3-C issue #16 pointer integrity`.
 
 ## Failure modes
 

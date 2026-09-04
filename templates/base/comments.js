@@ -63,7 +63,7 @@ function installComments() {
   const DOC_VERSION = /^[0-9a-f]{7}$/;
   const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   const SUB = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
-  const EMAIL_LOCAL = /^[a-z0-9.!#$%&'*+=?^_`{|}~-]{1,64}$/;
+  const EMAIL_LOCAL = /^[a-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+\/=?^_`{|}~-]+)*$/;
   const EMAIL_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
   const AID = /^a[0-9a-f]{8}$/;
 
@@ -145,7 +145,7 @@ function installComments() {
     if (at === -1 || value.indexOf("@", at + 1) !== -1) return false;
     const local = value.slice(0, at);
     const domain = value.slice(at + 1);
-    if (!EMAIL_LOCAL.test(local)) return false;
+    if (local.length > 64 || !EMAIL_LOCAL.test(local)) return false;
     const labels = domain.split(".");
     if (labels.length < 2) return false;
     for (const label of labels) if (!EMAIL_LABEL.test(label)) return false;
@@ -207,7 +207,7 @@ function installComments() {
     if (typeof value.docId !== "string" || !DOC_ID.test(value.docId) || value.docId !== docId) return false;
     if (value.kind !== "comment" && value.kind !== "discussion") return false;
     if (value.status !== "open" && value.status !== "resolved") return false;
-    if (typeof value.section !== "string" || value.section.length > 63 || !SECTION.test(value.section)) return false;
+    if (typeof value.section !== "string" || value.section.length > 64 || !SECTION.test(value.section)) return false;
     if (typeof value.docVersion !== "string" || !DOC_VERSION.test(value.docVersion)) return false;
     if (!validTimestamp(value.createdAt)) return false;
     if (!validActor(value.author)) return false;
@@ -666,9 +666,8 @@ function installComments() {
     panel.hidden = false;
     toggle.setAttribute("aria-expanded", "true");
     if (threadId !== null) {
-      activeId = threadId;
+      setActiveThread(threadId);
       paintDecoration();
-      renderList();
       focusCard(threadId);
     } else {
       title.focus();
@@ -692,9 +691,8 @@ function installComments() {
     if (panel === null || panel.hidden) return;
     panel.hidden = true;
     toggle.setAttribute("aria-expanded", "false");
-    activeId = null;
+    setActiveThread(null);
     paintDecoration();
-    renderList();
     const target = rendered(opener) ? opener : toggle;
     opener = null;
     target.focus();
@@ -702,10 +700,23 @@ function installComments() {
   }
 
   function selectThread(threadId) {
-    activeId = threadId;
+    setActiveThread(threadId);
     paintDecoration();
-    renderList();
     schedulePlacement();
+  }
+
+  function setActiveThread(threadId) {
+    const previous = cards.get(activeId);
+    const next = cards.get(threadId);
+    activeId = threadId;
+    if (previous !== undefined && previous !== next) {
+      previous.article.classList.remove("doc-comments-card-active");
+      previous.article.removeAttribute("aria-current");
+    }
+    if (next !== undefined) {
+      next.article.classList.add("doc-comments-card-active");
+      next.article.setAttribute("aria-current", "true");
+    }
   }
 
   /* --------------------------------------------------------- render */
@@ -891,7 +902,7 @@ function installComments() {
       article.appendChild(show);
     }
     item.appendChild(article);
-    cards.set(thread.id, { heading, entry });
+    cards.set(thread.id, { article, heading, entry });
     return item;
   }
 
@@ -972,27 +983,36 @@ function installComments() {
 
   function placeMarkers() {
     if (rail === null || !rail.isConnected) return;
-    const railRect = rail.getBoundingClientRect();
-    for (const { marker } of markers.values()) marker.hidden = true;
-    const scrollWidth = document.documentElement.scrollWidth;
-    const visible = [];
+    const candidates = [];
     for (const { marker, entry } of markers.values()) {
       const host = entry.location.element;
-      if (!host.isConnected || !disclosed(host) || host.getClientRects().length === 0) {
-        marker.hidden = true;
-        continue;
-      }
-      marker.hidden = false;
+      const visible = host.isConnected && disclosed(host);
+      /* A stale right-edge position can itself inflate scrollWidth after a
+         viewport narrows. Reset it in the batched write phase so the later
+         document measurement describes the page, not the prior marker. */
+      if (visible) marker.style.left = "0px";
+      marker.hidden = !visible;
+      if (visible) candidates.push({ marker, entry, host });
+    }
+
+    const railRect = rail.getBoundingClientRect();
+    const scrollWidth = document.documentElement.scrollWidth;
+    const measured = [];
+    for (const { marker, entry, host } of candidates) {
       const source = entry.location.range === null ? host : entry.location.range;
+      const hasBox = host.getClientRects().length > 0;
       const top = source.getBoundingClientRect().top - railRect.top;
       const hostRect = host.getBoundingClientRect();
-      const left = Math.min(Math.max(hostRect.right - railRect.left + 8, 4), scrollWidth - marker.offsetWidth - 4);
-      visible.push({ marker, entry, top, left });
+      const width = marker.offsetWidth;
+      const left = Math.min(Math.max(hostRect.right - railRect.left + 8, 4), scrollWidth - width - 4);
+      measured.push({ marker, entry, hasBox, top, left });
     }
+    const visible = measured.filter((item) => item.hasBox);
     visible.sort((a, b) => {
       if (a.top !== b.top) return a.top - b.top;
       return byLocation(a.entry, b.entry);
     });
+    for (const item of measured) item.marker.hidden = !item.hasBox;
     let previous = -Infinity;
     for (const item of visible) {
       const top = Math.max(item.top, previous + MARKER_STEP);
