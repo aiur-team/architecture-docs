@@ -79,7 +79,6 @@ function providerStatus(error) {
 
 function statusOf(error) {
   if (error instanceof Failure) return error.status;
-  if (error instanceof StoreError && error.code === "unavailable") return 503;
   return 500;
 }
 
@@ -158,7 +157,8 @@ function isTimestamp(value) {
 function captureDependencies(dependencies) {
   if (dependencies === null || typeof dependencies !== "object" || Array.isArray(dependencies) ||
       Object.getPrototypeOf(dependencies) !== Object.prototype ||
-      !sameSet(Reflect.ownKeys(dependencies), DEPENDENCY_KEYS)) {
+      Object.getOwnPropertySymbols(dependencies).length !== 0 ||
+      !sameSet(Object.getOwnPropertyNames(dependencies), DEPENDENCY_KEYS)) {
     throw new TypeError("Invalid pending dependencies");
   }
   const captured = {};
