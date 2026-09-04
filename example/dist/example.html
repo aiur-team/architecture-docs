@@ -481,6 +481,10 @@ nav.jump a.history-changed::after {
   overflow-wrap: anywhere;
 }
 
+.share-value {
+  unicode-bidi: isolate;
+}
+
 @media (forced-colors: active) {
   .share-btn,
   .share-pop,
@@ -1477,7 +1481,9 @@ function mountSharePanel(event) {
   host.appendChild(button);
 
   function validSession(value) {
-    if (!isRecord(value) || !/^[0-9a-f]{6}$/.test(value.doc)) return false;
+    if (!isRecord(value)
+      || typeof value.doc !== "string"
+      || !/^[0-9a-f]{6}$/.test(value.doc)) return false;
     if (value.shared !== true || value.canSeeMembers !== true) return false;
     return (value.role === "owner" && value.canShare === true)
       || (value.role === "editor" && value.canShare === false);
@@ -1677,7 +1683,7 @@ function mountSharePanel(event) {
             complete = true;
             break;
           }
-          if (!(result.value instanceof Uint8Array)) throw new Error();
+          if (!(result.value instanceof Uint8Array) || result.value.byteLength === 0) throw new Error();
           const nextCount = byteCount + result.value.byteLength;
           if (!Number.isSafeInteger(nextCount) || nextCount > 65_536) throw new Error();
           byteCount = nextCount;
@@ -1784,16 +1790,26 @@ function mountSharePanel(event) {
     return role.charAt(0).toUpperCase() + role.slice(1);
   }
 
+  function appendIsolatedFields(row, fields) {
+    fields.forEach((field, index) => {
+      if (index !== 0) row.appendChild(document.createTextNode(" — "));
+      row.appendChild(fixedElement("bdi", "share-value", field));
+    });
+  }
+
   function renderRoster(roster) {
     const memberRows = roster.members.map((member) => {
       const row = document.createElement("li");
-      const prefix = member.name === "" ? "" : `${member.name} — `;
-      row.appendChild(document.createTextNode(`${prefix}${member.email} — ${roleLabel(member.role)}`));
+      const fields = member.name === ""
+        ? [member.email, roleLabel(member.role)]
+        : [member.name, member.email, roleLabel(member.role)];
+      appendIsolatedFields(row, fields);
       return row;
     });
     const invitationRows = roster.invitations.map((invitation) => {
       const row = document.createElement("li");
-      row.appendChild(document.createTextNode(`${invitation.email} — ${roleLabel(invitation.role)} — Pending until `));
+      appendIsolatedFields(row, [invitation.email, roleLabel(invitation.role)]);
+      row.appendChild(document.createTextNode(" — Pending until "));
       const date = document.createElement("time");
       date.setAttribute("datetime", invitation.expiresAt);
       date.appendChild(document.createTextNode(invitation.expiresAt.slice(0, 10)));
