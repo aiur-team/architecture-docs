@@ -1,5 +1,7 @@
 import { identify } from "../lib/identity.mjs";
-import { assertIdentitySub, capabilitiesFor, normalizeEmail, resolveRole } from "../lib/access.mjs";
+import {
+  assertIdentitySub, capabilitiesFor, normalizeEmail, resolveRole, validateAccessRow,
+} from "../lib/access.mjs";
 import { StoreError, docState, editKey, editPrefix, read, upgrade } from "../lib/store.mjs";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 
@@ -19,12 +21,6 @@ const DEPENDENCY_KEYS = Object.freeze([
   "docState", "editPrefix", "editKey", "read", "upgrade", "manifestRoot",
 ]);
 const FUNCTION_DEPENDENCIES = Object.freeze(DEPENDENCY_KEYS.slice(0, -1));
-const ACCESS_KEYS = Object.freeze([
-  "role", "shared", "canRead", "canComment", "threadControl", "canSuggest",
-  "canEdit", "canAccept", "canShare", "canSeeMembers",
-]);
-const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
 const MANIFEST_KEYS = Object.freeze(["docId", "instance", "commit", "blocks"]);
 const ROW_KEYS = Object.freeze(["file", "section", "tag", "hash"]);
 const TAGS = Object.freeze(["p", "h2", "h3", "h4"]);
@@ -102,20 +98,6 @@ function isDataDescriptor(object, key) {
   return descriptor !== undefined &&
     Object.prototype.hasOwnProperty.call(descriptor, "value") &&
     descriptor.enumerable === true;
-}
-
-/** Ordinary object whose own keys are exactly `keys` in that order, all
- * enumerable data properties. */
-function isExactOrderedObject(value, keys) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) ||
-      Object.getPrototypeOf(value) !== Object.prototype) {
-    return false;
-  }
-  const own = Reflect.ownKeys(value);
-  if (own.length !== keys.length || !keys.every((key, index) => own[index] === key)) {
-    return false;
-  }
-  return keys.every((key) => isDataDescriptor(value, key));
 }
 
 /** Plain JSON-style object: Object.prototype (or null) prototype, no symbols,
@@ -204,20 +186,13 @@ function parseDocId(url) {
 }
 
 /** Validate the complete resolved access against the canonical capability
- * row and return the exact boolean canRead. Anything else is 500. */
+ * row and return the exact boolean canRead. Anything else is 500.
+ *
+ * The check itself is the shared one, run against the injected capability
+ * table rather than the module's own import, so a handler built by
+ * `createPendingHandler()` validates against the table it was actually given. */
 function validateAccess(access, deps) {
-  if (!isExactOrderedObject(access, ACCESS_KEYS)) throw fail(500);
-  const role = access.role;
-  if (!ROLES.includes(role) || typeof access.shared !== "boolean") throw fail(500);
-  const canonical = deps.capabilitiesFor(role);
-  if (!isExactOrderedObject(canonical, CAPABILITY_KEYS)) throw fail(500);
-  for (const key of CAPABILITY_KEYS) {
-    const expected = canonical[key];
-    if (key === "threadControl" ? typeof expected !== "string" : typeof expected !== "boolean") {
-      throw fail(500);
-    }
-    if (access[key] !== expected) throw fail(500);
-  }
+  if (!validateAccessRow(access, deps.capabilitiesFor)) throw fail(500);
   return access.canRead;
 }
 

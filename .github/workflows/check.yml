@@ -116,6 +116,11 @@ jobs:
           node scripts/test-p4-b.mjs
           node scripts/test-p4-m.mjs
           node scripts/test-p4-q.mjs
+          # The four paths #125 left holding hand copies of the access-row
+          # validator had no test of any kind before #128. This runner drives
+          # the capability matrix through each of them, so neutering the shared
+          # validator -- or any one of the four call sites -- fails here.
+          node scripts/test-access-row.mjs
 
       - name: edge gate config is fail-closed
         run: |

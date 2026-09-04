@@ -1,16 +1,11 @@
 import { identify } from "../lib/identity.mjs";
-import { assertIdentitySub, capabilitiesFor, resolveRole } from "../lib/access.mjs";
+import {
+  assertIdentitySub, capabilitiesFor, resolveRole, validateAccessRow,
+} from "../lib/access.mjs";
 import { StoreError } from "../lib/store.mjs";
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 const IDENTITY_KEYS = Object.freeze(["sub", "email", "name", "isOrg"]);
-const ACCESS_KEYS = Object.freeze([
-  "role", "shared", "canRead", "canComment", "threadControl", "canSuggest",
-  "canEdit", "canAccept", "canShare", "canSeeMembers",
-]);
-const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
-const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 const DOC_ID_PATTERN = /^[0-9a-f]{6}$/;
 
 function ownDataDescriptor(object, key) {
@@ -56,31 +51,10 @@ function validateIdentity(value) {
   return value;
 }
 
+/** The shared check, mapped onto this handler's blanket 500. */
 function validateAccess(value) {
-  if (!isExactPlainDataObject(value, ACCESS_KEYS, false)) {
+  if (!validateAccessRow(value, capabilitiesFor)) {
     throw new TypeError("Invalid access result");
-  }
-  const role = ownDataDescriptor(value, "role").value;
-  const shared = ownDataDescriptor(value, "shared").value;
-  const threadControl = ownDataDescriptor(value, "threadControl").value;
-  if (!ROLES.includes(role) || typeof shared !== "boolean" ||
-      !THREAD_CONTROLS.includes(threadControl)) {
-    throw new TypeError("Invalid access result");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    const field = ownDataDescriptor(value, key).value;
-    if (key === "threadControl" ? typeof field !== "string" : typeof field !== "boolean") {
-      throw new TypeError("Invalid access result");
-    }
-  }
-  const expected = capabilitiesFor(role);
-  if (!isExactPlainDataObject(expected, CAPABILITY_KEYS, false)) {
-    throw new TypeError("Invalid capability result");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    if (ownDataDescriptor(value, key).value !== ownDataDescriptor(expected, key).value) {
-      throw new TypeError("Inconsistent access result");
-    }
   }
   return value;
 }

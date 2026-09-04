@@ -4,6 +4,7 @@ import {
   capabilitiesFor,
   normalizeEmail,
   assertIdentitySub,
+  validateAccessRow,
   AccessError,
 } from "../lib/access.mjs";
 import {
@@ -116,20 +117,6 @@ const DEPENDENCY_FIELDS = Object.freeze([
   "randomBytesFn",
 ]);
 const IDENTITY_FIELDS = Object.freeze(["sub", "email", "name", "isOrg"]);
-const ACCESS_FIELDS = Object.freeze([
-  "role",
-  "shared",
-  "canRead",
-  "canComment",
-  "threadControl",
-  "canSuggest",
-  "canEdit",
-  "canAccept",
-  "canShare",
-  "canSeeMembers",
-]);
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
-const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 const ACCESS_BOOLEAN_FIELDS = Object.freeze([
   "shared",
   "canRead",
@@ -717,27 +704,23 @@ function assertIdentity(user) {
   };
 }
 
-/** Validate the complete P2-G `ResolvedAccess` shape without trusting it. */
+/**
+ * Validate the complete P2-G `ResolvedAccess` shape without trusting it, then
+ * project the fields this handler uses onto a fresh object it owns.
+ *
+ * The validation is `validateAccessRow()` — this function used to reimplement
+ * it under a name the acceptance grep for #125 could not see, which is exactly
+ * how it stayed a fourth copy through that ticket (#128). The projection is
+ * still local: the caller reads `access.role`, `access.threadControl` and the
+ * booleans, and gets them from a row nothing else holds a reference to.
+ */
 function assertResolvedAccess(value) {
-  assertExactKeys(value, ACCESS_FIELDS, "invalid access result");
-  if (!ROLES.includes(value.role)) {
-    throw invalid("invalid access result");
-  }
-  if (!THREAD_CONTROLS.includes(value.threadControl)) {
+  if (!validateAccessRow(value, capabilitiesFor)) {
     throw invalid("invalid access result");
   }
   const access = { role: value.role, threadControl: value.threadControl };
   for (const field of ACCESS_BOOLEAN_FIELDS) {
-    if (typeof value[field] !== "boolean") {
-      throw invalid("invalid access result");
-    }
     access[field] = value[field];
-  }
-  const expected = capabilitiesFor(value.role);
-  for (const [field, expectedValue] of Object.entries(expected)) {
-    if (value[field] !== expectedValue) {
-      throw invalid("invalid access result");
-    }
   }
   return access;
 }

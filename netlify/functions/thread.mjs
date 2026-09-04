@@ -19,8 +19,14 @@ import { notify } from "../lib/notify.mjs";
  * mutation-role enforcement (`canComment` for a reply, `threadControl` for a
  * status change, with the `"own"` author comparison inside the pure CAS
  * transform), the post-commit P3-B audit appends, and the `thread.replied`
- * fan-out. `threads.mjs` duplicates the private validators below on purpose:
- * the ticket forbids a shared third helper file.
+ * fan-out.
+ *
+ * The access-row check is *not* one of the private validators below: it is
+ * `validateAccessRow()` from `../lib/access.mjs`, shared with every other path
+ * that resolves a role. This header used to say that duplicating it here was
+ * deliberate and that a shared helper was forbidden; that was the reason the
+ * copies drifted until one of them stopped being covered at all (#125, #128).
+ * Do not reintroduce a local copy.
  */
 
 const MAX_REQUEST_BYTES = 65_536;
