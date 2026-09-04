@@ -538,10 +538,28 @@ function validateManifest(value, instance, counters) {
   return Object.freeze({ docId, instance, rows });
 }
 
+/** The inventory root itself gets the same treatment as every file under it:
+ * a symlinked or non-directory root is refused rather than traversed. */
+function validateRoot(root) {
+  if (typeof root !== "string" || root.length === 0 || root.includes("\0")) {
+    throw fail("invalid-state");
+  }
+  let normalized = root;
+  while (normalized.length > 1 && normalized.endsWith("/")) normalized = normalized.slice(0, -1);
+  let info;
+  try {
+    info = lstatSync(normalized);
+  } catch {
+    throw fail("unavailable");
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) throw fail("invalid-state");
+  return normalized;
+}
+
 function buildIndex(root) {
   const counters = { entries: 0, candidates: 0, bytes: 0, blocks: 0 };
   const candidates = [];
-  walk(root, [], 0, counters, candidates);
+  walk(validateRoot(root), [], 0, counters, candidates);
   if (candidates.length === 0) throw fail("unavailable");
   candidates.sort((a, b) => rawCompare(a.relative, b.relative));
   const index = new Map();
@@ -835,7 +853,12 @@ function anchorSectionIds(text, section) {
 }
 
 /** Split the source at its single exact body marker and scan only the bytes
- * after it, keeping every reported offset in whole-source coordinates. */
+ * after it, keeping every reported offset in whole-source coordinates.
+ *
+ * This is deliberately stricter than the builder's `parseSection()`, which
+ * takes the first marker and tolerates a section with none. A section that
+ * builds with zero or two markers is therefore buildable but not editable: the
+ * scan offset would be a guess, and this path may not guess. */
 function scanSourceBody(deps, source) {
   const at = source.indexOf(BODY_MARKER);
   if (at === -1 || source.indexOf(BODY_MARKER, at + BODY_MARKER.length) !== -1) {
@@ -898,7 +921,13 @@ function locateBlock(deps, row, aid, anchorsText, source) {
   }
   const inner = source.slice(innerStart, innerEnd);
   if (block.tag !== row.tag) throw conflict(representable(deps, inner));
-  const hash = createHash("sha256").update(inner, "utf8").digest("hex");
+  let hash;
+  try {
+    hash = deps.sha256Hex(inner);
+  } catch {
+    throw fail("invalid-state");
+  }
+  if (typeof hash !== "string" || !HASH_PATTERN.test(hash)) throw fail("invalid-state");
   if (hash !== row.hash) throw conflict(representable(deps, inner));
   return { innerStart, innerEnd };
 }
@@ -1175,14 +1204,12 @@ export function createEditHandler(dependencies) {
       try {
         result = await deps.mutate(store, key, null, (draft) => {
           if (draft === null) return structuredClone(receipt);
-          let current;
-          try {
-            current = validateReceipt(draft);
-          } catch {
-            // Unreadable state in this one slot is replaced by the edit that
-            // has already been committed to the branch.
-            return structuredClone(receipt);
-          }
+          // A receipt shape this build cannot read is neither stale nor fresh,
+          // so it is not ours to replace: a later schema's acceptance or audit
+          // fields would be destroyed silently. The precheck already validated
+          // this slot, so reaching here means it changed underneath us. Fail
+          // closed and report the commit that did land.
+          const current = validateReceipt(draft);
           if (current.baseHash !== row.hash) return structuredClone(receipt);
           if (sameReceipt(current, receipt)) return null;
           throw new ReceiptConflict(receiptText(deps, current));

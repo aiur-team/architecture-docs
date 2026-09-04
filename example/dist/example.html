@@ -1560,6 +1560,7 @@ function installEdit() {
   const CONFLICT_MESSAGE = "This block changed. Review the current text and try again.";
   const FAILED_MESSAGE = "The edit was not saved.";
   const SAVING_MESSAGE = "Saving…";
+  const BUSY_MESSAGE = "Another block is saving. Try again in a moment.";
   const EDITING_MESSAGE = "Editing. Ctrl+Enter saves, Escape cancels.";
 
   const RESERVED_FINAL_FIELDS = [
@@ -1856,14 +1857,15 @@ function installEdit() {
     };
 
     async function save() {
-      const text = element.textContent;
-      stopEditing();
+      // Another block is mid-flight. Stay in editing mode and keep what the
+      // reader typed: discarding their text and calling it a failed save
+      // would lose work this block never even tried to send.
       if (saving) {
-        restore();
-        setStatus(FAILED_MESSAGE);
-        controls.classList.add("doc-edit-failed");
+        setStatus(BUSY_MESSAGE);
         return;
       }
+      const text = element.textContent;
+      stopEditing();
       saving = true;
       button.disabled = true;
       controls.classList.add("doc-edit-saving");
@@ -1950,8 +1952,10 @@ function installEdit() {
         return;
       }
       // Enter alone stays text. Native plaintext-only already does that; the
-      // fallback would otherwise insert structural markup.
-      if (!plaintextOnly && !event.shiftKey && !event.altKey) {
+      // fallback would otherwise insert structural markup, and every modifier
+      // combination the browser treats as a newline has to be caught, not just
+      // the unmodified key.
+      if (!plaintextOnly) {
         event.preventDefault();
         document.execCommand("insertText", false, "\n");
       }
@@ -1995,7 +1999,14 @@ function installEdit() {
   document.addEventListener("session", (event) => {
     if (started) return;
     const session = validSession(event === null ? null : event.detail);
-    if (session === null) return;
+    if (session === null) {
+      // The reveal happened but this module cannot read it. Staying pending
+      // would strand P4-Q on a promise nothing will ever settle, so the pass
+      // ends here with the built text intact.
+      started = true;
+      finish([], false);
+      return;
+    }
     started = true;
     void (async () => {
       let result = { applied: [], available: false };

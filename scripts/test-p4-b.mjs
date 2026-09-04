@@ -482,8 +482,8 @@ async function serverMatrix() {
       upgrade: store.upgrade,
       StoreError: store.StoreError,
       scanBlocks: core.scanBlocks,
-      toMd: md.toMd,
-      toHtml: md.toHtml,
+      toMd: (options.converters ?? md).toMd,
+      toHtml: (options.converters ?? md).toHtml,
       fetch: (url, init) => github.fetch(url, init),
       now: () => options.now ?? NOW_MS,
       sha256Hex: sha256,
@@ -701,9 +701,12 @@ async function serverMatrix() {
     eq(body.receipt.by, { sub: SUB, name: NAME, email: EMAIL }, "the author is the server identity");
   }
   {
-    // The twin gate. Search a small alphabet for a string the converters
-    // cannot reproduce exactly, then require the handler to refuse it.
-    const alphabet = ["*", "`", "<", "&", "a"];
+    // The twin gate. The real converter pair looks total over this vocabulary
+    // -- an exhaustive search finds no string it cannot reproduce -- so the
+    // rejection branch can only be reached through the injected pair. Assert
+    // both halves: totality (so a future converter change that breaks it is
+    // caught here) and that a non-reproducing pair actually refuses the write.
+    const alphabet = ["*", "`", "<", ">", "&", "a"];
     let hostile = null;
     const walk = (prefix) => {
       if (hostile !== null) return;
@@ -718,12 +721,18 @@ async function serverMatrix() {
       for (const letter of alphabet) walk(prefix + letter);
     };
     walk("");
-    if (hostile !== null) {
-      const built = build();
-      const response = await built.handle(post({ ...valid, text: hostile }));
-      eq(response.status, 400, "a text that fails the twin round trip is refused");
-      eq(built.github.calls.length, 0, "a refused text performs no provider work");
-    }
+    eq(hostile, null, "the committed converter pair reproduces every short input");
+
+    const built = build({});
+    eq((await built.handle(post(valid))).status, 200, "the real pair admits the text");
+
+    // A pair whose first twin fails, and a pair whose second twin fails.
+    const broken = build({
+      converters: { toMd: (html) => `${md.toMd(html)} ` , toHtml: md.toHtml },
+    });
+    const first = await broken.handle(post(valid));
+    eq(first.status, 400, "a text that fails toMd(toHtml(text)) === text is refused");
+    eq(broken.github.calls.length, 0, "a refused text performs no provider work");
   }
   for (const [label, text] of [["empty", ""], ["4000 units", "x".repeat(4000)]]) {
     const built = build();
@@ -1042,20 +1051,26 @@ async function serverMatrix() {
     eq(blobs.records.get(receiptKey).value.text, NEXT_TEXT, "the stale receipt was replaced");
   }
   {
-    // The exact same edit is an idempotent no-op inside the callback and still
-    // reports the committed state.
+    // The idempotent branch. The precheck must miss and the swap must then see
+    // a byte-identical receipt, which is the only way `apply` returns null.
     const blobs = new FakeStore();
-    blobs.seed(receiptKey, freshReceipt({ baseHash: "0".repeat(64) }));
-    const built = build({ store: blobs });
-    blobs.readHook = null;
-    const first = await built.handle(post(valid));
-    eq(first.status, 200, "the first save lands");
-    const stored = blobs.records.get(receiptKey).value;
-    blobs.records.clear();
-    blobs.seed(receiptKey, stored);
-    const built2 = build({ store: blobs });
-    // The precheck now sees a fresh receipt for this base and refuses.
-    eq((await built2.handle(post(valid))).status, 409, "a repeat save reports the applied text");
+    const github = new FakeGitHub();
+    const built = build({ store: blobs, github });
+    const identical = freshReceipt({ text: NEXT_TEXT });
+    let reads = 0;
+    blobs.getWithMetadata = async () => {
+      reads += 1;
+      return reads === 1 ? null : { data: structuredClone(identical), etag: '"v7"' };
+    };
+    let wrote = false;
+    blobs.setJSON = async () => {
+      wrote = true;
+      return { modified: true, etag: '"v8"' };
+    };
+    const response = await built.handle(post(valid));
+    eq(response.status, 200, "an identical receipt still reports success");
+    eq(wrote, false, "an identical receipt performs no conditional write");
+    eq((await readJson(response)).receipt.text, NEXT_TEXT, "the projection is the stored text");
   }
   {
     // A competing writer lands a different fresh receipt between the precheck
@@ -1097,6 +1112,26 @@ async function serverMatrix() {
     blobs.seed(receiptKey, { v: 1, aid: AID, nonsense: true });
     const built = build({ store: blobs });
     eq((await built.handle(post(valid))).status, 500, "a malformed stored receipt is 500");
+  }
+  {
+    // A receipt shape this build cannot read appears only after the precheck.
+    // It is neither stale nor fresh, so the callback refuses rather than
+    // clobbering what could be a later schema's acceptance or audit state.
+    const blobs = new FakeStore();
+    const github = new FakeGitHub();
+    const built = build({ store: blobs, github });
+    let reads = 0;
+    const original = blobs.getWithMetadata.bind(blobs);
+    blobs.getWithMetadata = async (key) => {
+      reads += 1;
+      if (reads === 1) return null;
+      return { data: { v: 1, aid: AID, fromTheFuture: true }, etag: '"v9"' };
+    };
+    const response = await built.handle(post(valid));
+    eq(response.status, 500, "an unreadable receipt at the swap fails closed");
+    ok(github.committed !== null, "the commit still landed and is not rolled back");
+    eq(blobs.records.size, 0, "the unreadable slot was never overwritten");
+    blobs.getWithMetadata = original;
   }
   {
     const blobs = new FakeStore();
@@ -1159,8 +1194,12 @@ async function serverMatrix() {
    allowed to touch exists, so a module that reached for anything else would
    fail loudly here instead of passing by accident. */
 
-const ENTITIES = [["&amp;", "&"], ["&lt;", "<"], ["&gt;", ">"]];
+const ENTITIES = { "&amp;": "&", "&lt;": "<", "&gt;": ">" };
 
+/** Decode the three references this document vocabulary uses in ONE pass. A
+ * sequential split/join would decode `&amp;lt;` to `<`, where a real
+ * `textContent` yields `&lt;`, and that is exactly the input class a
+ * mark-free block feeds to the editor. */
 function stripTags(html) {
   let out = "";
   let inside = false;
@@ -1169,8 +1208,7 @@ function stripTags(html) {
     else if (character === ">") inside = false;
     else if (!inside) out += character;
   }
-  for (const [entity, literal] of ENTITIES) out = out.split(entity).join(literal);
-  return out;
+  return out.replace(/&(?:amp|lt|gt);/g, (entity) => ENTITIES[entity]);
 }
 
 function escapeText(text) {
@@ -1601,15 +1639,15 @@ async function clientMatrix() {
     eq(harness.requests.length, 0, "no session means no request");
   }
   {
+    // A reveal this module cannot read must still settle the barrier: leaving
+    // it pending would strand P4-Q on a promise nothing resolves.
     const harness = evaluateClient();
     await reveal(harness, { sub: 1 });
-    let settled = false;
-    harness.win.doc.edit.overlaysReady.then(() => {
-      settled = true;
-    });
-    await settle();
-    eq(settled, false, "a malformed session never starts the pass");
+    const result = await harness.win.doc.edit.overlaysReady;
+    eq(result, { applied: [], available: false }, "a malformed session settles empty");
     eq(harness.requests.length, 0, "a malformed session issues no request");
+    eq(harness.blocks.get(AID).innerHTML, INNER, "a malformed session keeps the built text");
+    eq(controlsFor(harness, AID), null, "a malformed session gets no control");
   }
   for (const [label, answer] of [
     ["a 401", { status: 401, body: {} }],
@@ -1939,12 +1977,20 @@ async function clientMatrix() {
     second.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     await settle();
     eq(posts, 1, "a second save is refused while one is in flight");
-    ok(controlsFor(harness, OTHER_AID).classList.contains("doc-edit-failed"),
-      "the refused save reports failure");
+    eq(second.textContent, "second changed", "the refused save keeps what the reader typed");
+    ok(second.classList.contains("doc-edit-editing"), "the refused block stays editable");
+    ok(!controlsFor(harness, OTHER_AID).classList.contains("doc-edit-failed"),
+      "the refused save is not reported as a server failure");
+    eq(statusOf(controlsFor(harness, OTHER_AID)).textContent,
+      "Another block is saving. Try again in a moment.", "the refusal explains itself");
     release();
     for (let turn = 0; turn < 12; turn += 1) await settle();
     eq(first.getAttribute("data-md"), NEXT_TEXT, "the in-flight save still lands");
-    eq(second.innerHTML, "second", "the refused save restored its block");
+    // Retrying after the queue drains now succeeds, so no work was lost.
+    second.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
+    for (let turn = 0; turn < 12; turn += 1) await settle();
+    eq(posts, 2, "the refused block can retry once the queue drains");
+    eq(second.getAttribute("data-md"), "second changed", "the retried edit lands");
   }
   {
     const responder = (url, init) => (init.method === "POST"
