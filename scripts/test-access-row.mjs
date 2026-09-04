@@ -44,7 +44,7 @@
  *   node scripts/test-access-row.mjs
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -234,26 +234,14 @@ async function main() {
   const { createEventsHandler } = await import(real("netlify/functions/events.mjs"));
   const storeLib = await import(real("netlify/lib/store.mjs"));
 
-  /* `pending.mjs` answers 503 for a deploy tree with no manifest at all, which
-     would collide with the store-failure status the other paths use as their
-     accepted control. One valid manifest for a *different* document makes the
-     accepted outcome an unambiguous 404 instead. */
-  const manifestRoot = mkdtempSync(join(tmpdir(), "access-row-manifest-"));
-  const instance = "fixture";
-  mkdirSync(join(manifestRoot, instance, "dist"), { recursive: true });
-  writeFileSync(join(manifestRoot, instance, "dist", `${instance}.edit.json`), JSON.stringify({
-    docId: "0c1d2e",
-    instance,
-    commit: "0".repeat(40),
-    blocks: {
-      a0123456f: {
-        file: "sections/orchard-index.html",
-        section: "orchard-index",
-        tag: "p",
-        hash: "b".repeat(64),
-      },
-    },
-  }), "utf8");
+  /* `pending.mjs` selects its manifest through the injected
+     `readApplyManifestFn` rather than walking a deploy tree (P4-N), so the
+     "no manifest for this document" case is the library's own 404 ApplyError.
+     Raising it directly keeps the accepted outcome an unambiguous 404, which
+     cannot collide with the store-failure status the other paths use as their
+     accepted control. */
+  const { ApplyError } = await import(real("netlify/lib/gitedit.mjs"));
+  const manifestNotFound = async () => { throw new ApplyError("not-found"); };
 
   /* Each entry drives one converted path. `run(access, table)` installs the
      resolved row and the capability table, invokes the handler, and reports
@@ -311,14 +299,15 @@ async function main() {
           editKey: storeLib.editKey,
           read: storeLib.read,
           upgrade: storeLib.upgrade,
-          manifestRoot,
+          readApplyManifestFn: manifestNotFound,
         });
         const response = await handler(request(`/api/pending?doc=${DOC_ID}`));
         return { status: response.status, storeCalls };
       },
-      /* The manifest root is empty, so an accepted `canRead` row falls through
-         to the 404 for an unknown document — a status the rejection can never
-         produce. A `none` row is denied at 403 before that lookup. */
+      /* The apply library reports no manifest for this document, so an
+         accepted `canRead` row falls through to the 404 for an unknown
+         document — a status the rejection can never produce. A `none` row is
+         denied at 403 before that lookup. */
       accepted: [
         ["an owner row", "owner", 404, 0],
         ["a role with no capabilities", "none", 403, 0],
@@ -385,8 +374,6 @@ async function main() {
       eq(storeCalls, expectedStoreCalls, `${path.name}: ${label} store calls`);
     }
   }
-
-  rmSync(manifestRoot, { recursive: true, force: true });
 
   if (failures === 0) {
     process.stdout.write("PASS  access-row matrix across the four converted paths\n");
