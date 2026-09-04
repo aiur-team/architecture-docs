@@ -724,7 +724,26 @@ async function runtimeMatrix() {
         await waitReadyUi(commenter.page);
         assert.equal(await commenter.page.locator(".doc-suggest-button").count(), 2);
         assert.equal(await commenter.page.locator(".doc-edit-button").count(), 0);
+        await commenter.page.locator("#doc-comments-toggle").click();
+        await commenter.page.locator(".doc-suggest-card").waitFor();
+        assert.equal(await commenter.page.locator(".doc-suggest-accept").count(), 0);
+        assert.equal(await commenter.page.locator(".doc-suggest-reject").count(), 0);
       } finally { await commenter.context.close(); }
+
+      const privateSubject = "u_private_subject_77";
+      const unnamedAuthor = suggestion("s_m8x2k2_4f7a9c32", NEXT_TEXT, {
+        by: { sub: privateSubject, name: "", email: "private@example.invalid" },
+      });
+      const authorPrivacy = await openFixture(browser, host, session(), [unnamedAuthor]);
+      try {
+        await waitReadyUi(authorPrivacy.page);
+        await authorPrivacy.page.locator("#doc-comments-toggle").click();
+        const panel = authorPrivacy.page.locator("#doc-comments-list");
+        await panel.locator(".doc-suggest-card").waitFor();
+        assert.equal((await panel.locator(".doc-suggest-meta").textContent()).startsWith("Reader · "), true);
+        assert.equal((await panel.textContent()).includes(privateSubject), false);
+        assert.equal((await panel.ariaSnapshot()).includes(privateSubject), false);
+      } finally { await authorPrivacy.context.close(); }
 
       const invalidSessionContext = await browser.newContext();
       await invalidSessionContext.addInitScript({ content: initScript() });
