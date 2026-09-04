@@ -30,6 +30,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { webcrypto } from "node:crypto";
 import { mkdirSync, mkdtempSync, chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -327,6 +328,7 @@ class El {
   constructor(document, tagName) {
     this.ownerDocument = document;
     this.tagName = String(tagName).toUpperCase();
+    this.localName = String(tagName).toLowerCase();
     this.attributes = new Map();
     this.childNodes = [];
     this.parentNode = null;
@@ -768,9 +770,16 @@ function makePage(options = {}) {
     const answer = await responder(url, init, requests.length);
     if (answer instanceof Error) throw answer;
     const headers = new Map([["content-type", answer.contentType ?? "application/json; charset=utf-8"]]);
+    const bytes = new TextEncoder().encode(JSON.stringify(answer.body));
+    let sent = false;
     return {
       status: answer.status,
       headers: { get: (name) => headers.get(String(name).toLowerCase()) ?? null },
+      body: { getReader: () => ({
+        read: async () => sent ? { done: true } : (sent = true, { done: false, value: bytes }),
+        cancel: async () => {},
+        releaseLock: () => {},
+      }) },
       json: async () => fromJson(answer.body),
     };
   };
@@ -819,6 +828,11 @@ function makePage(options = {}) {
       }
     },
     Range: class Range {},
+    TextEncoder,
+    TextDecoder,
+    Uint8Array,
+    ArrayBuffer,
+    crypto: webcrypto,
     // The one clock both modules read. `new Date(value)` keeps its ordinary
     // behaviour so P4-B's timestamp round-trip still works.
     Date: class extends Date {
@@ -960,8 +974,9 @@ function chipFor(page, aid) {
   return controls === null ? null : controls.querySelector("span.doc-edit-claim");
 }
 
-function clickEdit(page, aid) {
+async function clickEdit(page, aid) {
   buttonFor(page, aid).dispatchEvent(makeEvent("click"));
+  for (let turn = 0; turn < 4; turn += 1) await settle();
 }
 
 function beatFrom(page, peer, act = "reading", aid = null) {
@@ -1018,7 +1033,7 @@ async function runtimeMatrix() {
   {
     const page = await startPage();
     const before = page.published.length;
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
 
     const claims = page.published.slice(before);
     eq(claims.length, 1, "focus entry publishes exactly one event");
@@ -1048,7 +1063,7 @@ async function runtimeMatrix() {
     // Blur with a change: the release precedes the write, and the write is not
     // delayed waiting for it.
     const page = await startPage({ responder: () => ({ status: 200, body: {} }) });
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const block = page.blocks.get(AID_A);
     block.textContent = "A different sentence entirely.";
     block.dispatchEvent(makeEvent("blur"));
@@ -1063,7 +1078,7 @@ async function runtimeMatrix() {
   {
     // A blur that changed nothing is not an edit, and still releases.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const posts = page.requests.length;
     page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
     eq(publishTrail(page).slice(-1)[0], `edit.release/${AID_A}`, "unchanged blur releases the block");
@@ -1073,7 +1088,7 @@ async function runtimeMatrix() {
   {
     // Escape cancels, then the programmatic blur must not release twice.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const block = page.blocks.get(AID_A);
     block.dispatchEvent(makeEvent("keydown", { key: "Escape" }));
     block.dispatchEvent(makeEvent("blur"));
@@ -1086,7 +1101,7 @@ async function runtimeMatrix() {
   {
     // Ctrl+Enter save releases before the request starts.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const block = page.blocks.get(AID_A);
     block.textContent = "Saved through the keyboard.";
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
@@ -1099,9 +1114,9 @@ async function runtimeMatrix() {
   {
     // Straight from one editor to another, with no intervening blur.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const before = page.published.length;
-    clickEdit(page, AID_B);
+    await clickEdit(page, AID_B);
     eq(publishTrail(page).slice(before).join(","), `edit.release/${AID_A},edit.claim/${AID_B}`,
       "switching releases the old block then claims the new one");
     eq(page.editStates().map((state) => String(state.aid)).join(","), `${AID_A},null,${AID_B}`,
@@ -1115,7 +1130,7 @@ async function runtimeMatrix() {
   {
     // Pagehide: the release, then P3-G's bye, in that order.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const before = page.published.length;
     firePageHide(page);
     eq(publishTrail(page).slice(before).join(","), `edit.release/${AID_A},bye`,
@@ -1141,7 +1156,7 @@ async function runtimeMatrix() {
   for (const mode of ["false", "reject", "throw"]) {
     const page = await startPage();
     page.setPublishMode(mode);
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const block = page.blocks.get(AID_A);
     block.dispatchEvent(makeEvent("blur"));
     eq(publishTrail(page).slice(-2).join(","), `edit.claim/${AID_A},edit.release/${AID_A}`,
@@ -1153,7 +1168,7 @@ async function runtimeMatrix() {
   {
     // No transport at all: the editor is still fully usable.
     const page = await startPage({ realtime: false });
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     eq(page.published.length, 0, "an absent transport is never published to");
     const block = page.blocks.get(AID_A);
     eq(block.classList.contains("doc-edit-editing"), true, "the editor opens without transport");
@@ -1174,7 +1189,7 @@ async function runtimeMatrix() {
     eq(beats()[0].act, "reading", "the activation beat reads");
     eq(beats()[0].aid, null, "the activation beat carries no aid");
 
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     page.clock.advance(20000);
     await settle();
     const editing = beats().slice(-1)[0];
@@ -1195,7 +1210,7 @@ async function runtimeMatrix() {
     const page = await startPage({ hiddenPreference: true });
     const beats = page.published.filter((event) => event.t === "beat");
     eq(beats.length, 0, "a hidden reader publishes no beat");
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     eq(publishTrail(page).join(","), `edit.claim/${AID_A}`,
       "a hidden reader still claims, because the claim is the edge transition");
     page.clock.advance(60000);
@@ -1565,7 +1580,7 @@ async function runtimeMatrix() {
     const [avery] = PEERS;
     beatFrom(page, avery);
     beatFrom(page, SELF);
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     // What the wire actually delivers: this tab's own claim echoes back first,
     // because it published before any peer could react to it. Then a genuine
     // peer claims the same block.
@@ -1593,7 +1608,7 @@ async function runtimeMatrix() {
     // so the lease sweep would never expire the claim either.
     const page = await startPage();
     beatFrom(page, SELF);
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     claimFrom(page, SELF, AID_A);
     page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
     eq(chipFor(page, AID_A), null, "the tab's own echoed claim renders no chip");
@@ -1609,7 +1624,7 @@ async function runtimeMatrix() {
     // The retry editor is reachable, which is what the acceptance criterion
     // "focusing the retry editor publishes a new claim" actually requires.
     const before = page.published.length;
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     eq(page.published.slice(before).map((event) => event.t).join(","), "edit.claim",
       "the retry editor publishes a fresh claim");
   }
@@ -1619,7 +1634,7 @@ async function runtimeMatrix() {
     // which is the whole reentrancy defence. A listener that finishes again
     // from inside the synchronous reading/null dispatch must publish nothing.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const before = page.published.length;
     const states = page.editStates().length;
     let reentered = false;
@@ -1672,8 +1687,8 @@ async function runtimeMatrix() {
     });
     // Both editors are opened before either saves: `editing` is per block,
     // so B is still open when A's request takes the save slot.
-    clickEdit(page, AID_A);
-    clickEdit(page, AID_B);
+    await clickEdit(page, AID_A);
+    await clickEdit(page, AID_B);
     page.blocks.get(AID_A).textContent = "first edit";
     page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
 
@@ -1693,7 +1708,7 @@ async function runtimeMatrix() {
     // heartbeat would report reading while the reader is still typing, and the
     // local-active exclusion protecting the editing host would be gone.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     firePageHide(page);
     const before = page.published.length;
     firePageShow(page, true);
@@ -1721,7 +1736,7 @@ async function runtimeMatrix() {
   {
     // A normal navigation is not a restore, so nothing is re-claimed.
     const page = await startPage();
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     firePageHide(page);
     const before = page.published.length;
     firePageShow(page, false);
@@ -1834,13 +1849,13 @@ async function runtimeMatrix() {
     eq(buttonFor(page, AID_A).hasAttribute("hidden"), true, "the advisory chip hides the control");
 
     // The control is only a hint: a forced click still opens the editor.
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     const block = page.blocks.get(AID_A);
     block.textContent = "First writer wins the race.";
     block.dispatchEvent(makeEvent("blur"));
     for (let turn = 0; turn < 12; turn += 1) await settle();
 
-    clickEdit(page, AID_A);
+    await clickEdit(page, AID_A);
     block.textContent = "Second writer loses the race.";
     block.dispatchEvent(makeEvent("blur"));
     for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -1939,7 +1954,7 @@ async function renderedMatrix() {
   beatFrom(forced, avery);
   claimFrom(forced, avery, AID_A);
   eq(buttonFor(forced, AID_A).hasAttribute("hidden"), true, "the forced page shows the advisory chip");
-  clickEdit(forced, AID_A);
+  await clickEdit(forced, AID_A);
   const block = forced.blocks.get(AID_A);
   block.textContent = "A forced concurrent write.";
   block.dispatchEvent(makeEvent("blur"));

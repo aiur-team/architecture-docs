@@ -97,6 +97,7 @@ jobs:
             templates/docbuild/dist/index.test.js \
             templates/docbuild/dist/anchors.test.js
           node --test scripts/connect.test.mjs
+          node --test scripts/temp-roots.test.mjs
           node --experimental-vm-modules --test netlify/lib/identity.test.mjs
           # The permanent regression runners are standalone supervisors, not
           # `node --test` files: each one names itself, forks its own matrices
@@ -143,6 +144,7 @@ jobs:
           fi
           node scripts/test-p4-m.mjs
           node scripts/test-p4-n.mjs
+          node scripts/test-p4-p.mjs
           node scripts/test-p4-o.mjs
           node scripts/test-p4-q.mjs
           # The four paths #125 left holding hand copies of the access-row
