@@ -1,4 +1,4 @@
-import { identify } from "../lib/identity.mjs";
+import { identify, isOrgEmail } from "../lib/identity.mjs";
 import {
   assertIdentitySub, capabilitiesFor, resolveRole, validateAccessRow,
 } from "../lib/access.mjs";
@@ -45,7 +45,7 @@ function validateIdentity(value) {
   const isOrg = ownDataDescriptor(value, "isOrg").value;
   if (typeof sub !== "string" || typeof email !== "string" ||
       typeof name !== "string" || typeof isOrg !== "boolean" ||
-      isOrg !== email.endsWith("@example.com") || assertIdentitySub(sub) !== sub) {
+      isOrg !== isOrgEmail(email) || assertIdentitySub(sub) !== sub) {
     throw new TypeError("Invalid identity");
   }
   return value;
