@@ -669,13 +669,23 @@ function installComments() {
       activeId = threadId;
       paintDecoration();
       renderList();
-      const card = cards.get(threadId);
-      if (card !== undefined) card.heading.focus();
-      else title.focus();
+      focusCard(threadId);
     } else {
       title.focus();
     }
     schedulePlacement();
+  }
+
+  /* Focus a thread heading; a card hidden by the current filters cannot take
+     focus, so the panel heading is the fallback rather than the body. */
+  function focusCard(threadId) {
+    const card = cards.get(threadId);
+    if (card !== undefined) card.heading.focus();
+    if (card === undefined || document.activeElement !== card.heading) title.focus();
+  }
+
+  function rendered(element) {
+    return element !== null && element.isConnected && !element.hidden && element.getClientRects().length > 0;
   }
 
   function closePanel() {
@@ -685,7 +695,7 @@ function installComments() {
     activeId = null;
     paintDecoration();
     renderList();
-    const target = opener !== null && opener.isConnected ? opener : toggle;
+    const target = rendered(opener) ? opener : toggle;
     opener = null;
     target.focus();
     schedulePlacement();
@@ -709,9 +719,16 @@ function installComments() {
       truncationNote.textContent = `Showing a partial view: ${truncation.threads} threads and ${truncation.comments} messages loaded; additional results may be available.`;
       truncationNote.hidden = false;
     }
+    const active = document.activeElement;
+    const focusedMarker = active !== null && rail.contains(active) ? active.getAttribute("data-thread-id") : null;
     renderMarkers();
     paintDecoration();
     renderList();
+    if (focusedMarker !== null) {
+      const replacement = markers.get(focusedMarker);
+      if (replacement !== undefined) replacement.marker.focus();
+      if (replacement === undefined || document.activeElement !== replacement.marker) toggle.focus();
+    }
     schedulePlacement();
   }
 
@@ -739,8 +756,7 @@ function installComments() {
         else {
           opener = marker;
           selectThread(entry.thread.id);
-          const card = cards.get(entry.thread.id);
-          if (card !== undefined) card.heading.focus();
+          focusCard(entry.thread.id);
         }
       });
       markers.set(entry.thread.id, { marker, entry });
@@ -789,9 +805,8 @@ function installComments() {
     applyFilters();
 
     if (focusedInList) {
-      const card = focusedThread === null ? undefined : cards.get(focusedThread);
-      if (card !== undefined) card.heading.focus();
-      else title.focus();
+      if (focusedThread === null) title.focus();
+      else focusCard(focusedThread);
     }
   }
 
@@ -998,8 +1013,10 @@ function installComments() {
     refresh();
   }, { once: true });
 
+  /* Only visible edges after activation count toward the 30-second window;
+     an edge before the session reveal must not consume the first eligible one. */
   function visibilityRefresh() {
-    if (document.visibilityState !== "visible") return;
+    if (!activated || document.visibilityState !== "visible") return;
     const now = performance.now();
     if (lastVisibilityRefresh !== null && now - lastVisibilityRefresh < VISIBILITY_WINDOW_MS) return;
     lastVisibilityRefresh = now;
