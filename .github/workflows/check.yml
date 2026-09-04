@@ -121,6 +121,7 @@ jobs:
           # push build on `main` (#133).
           node scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
+          node scripts/test-p4-i.mjs
           node scripts/test-p4-j.mjs contract
           node scripts/test-p4-m.mjs
           node scripts/test-p4-q.mjs
