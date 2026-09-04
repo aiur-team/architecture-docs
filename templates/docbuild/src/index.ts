@@ -302,7 +302,13 @@ export function build(root: string, instance: string): string {
     sections.push(changelogSection(history, labels));
     // `</` inside a data script would close the element early.
     const data = JSON.stringify(history).split("</").join("<\\/");
-    historyJson = `<script type="application/json" id="doc-history">${data}</script>\n`;
+    // The head version rides on the element as an attribute so a client can
+    // read it without parsing the payload. It is the validated seven-hex
+    // `head`, so it needs no escaping. No history means no element at all,
+    // which is the documented "no version metadata" state downstream.
+    historyJson =
+      `<script type="application/json" id="doc-history" data-head="${history.head}">` +
+      `${data}</script>\n`;
   }
 
   const anchors = anchorSections(inst, sections);
