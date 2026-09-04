@@ -22,10 +22,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  guardedTempRoot,
+  installSignalCleanup,
+  removeTempRoots,
+  sweepStaleTempRoots,
+} from "./lib/temp-roots.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const HERE = dirname(SELF);
@@ -175,13 +180,7 @@ function fail(label, result) {
     if (result.stdout !== "") process.stderr.write(`      stdout: ${result.stdout.slice(0, 4000)}\n`);
     if (result.stderr !== "") process.stderr.write(`      stderr: ${result.stderr.slice(0, 4000)}\n`);
   }
-  process.exit(1);
-}
-
-function guardedRoot(prefix) {
-  const root = mkdtempSync(join(tmpdir(), prefix));
-  chmodSync(root, 0o700);
-  return root;
+  throw new Error(label);
 }
 
 async function installPlaywright(root) {
@@ -204,15 +203,17 @@ async function installPlaywright(root) {
 }
 
 async function supervise() {
-  const install = guardedRoot("p4l-install-");
+  sweepStaleTempRoots(["p4l-install-", "p4l-p3i-", "p4l-write-"]);
+  const install = guardedTempRoot("p4l-install-");
   const roots = [install];
+  const uninstallSignalCleanup = installSignalCleanup(roots, { exitAfterCleanup: false });
   try {
     await installPlaywright(install);
     for (const [flag, prefix, line] of [
       ["--p3i", "p4l-p3i-", "PASS  P3-I offline, role, lazy-fetch, inert-render, refresh, and revoke contract"],
       ["--p4l", "p4l-write-", "PASS  P4-L owner controls, session reconciliation, close, privacy, and CSS contract"],
     ]) {
-      const root = guardedRoot(prefix);
+      const root = guardedTempRoot(prefix);
       roots.push(root);
       const result = await runChild([SELF, flag], {
         deadline: WORKER_DEADLINE_MS,
@@ -231,7 +232,8 @@ async function supervise() {
       process.stdout.write(`${line}\n`);
     }
   } finally {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
+    uninstallSignalCleanup();
+    removeTempRoots(roots);
   }
   const left = roots.filter((root) => existsSync(root));
   if (left.length !== 0) fail(`P4-L left fixture state behind: ${left.join(", ")}`);
