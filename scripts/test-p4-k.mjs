@@ -265,6 +265,19 @@ function hasEscape(ts, node) {
 }
 
 /**
+ * True when `node` names a `Headers` bag: `headers`, or anything `.headers`.
+ *
+ * @param {object} ts
+ * @param {object} node
+ * @returns {boolean}
+ */
+function headersReceiver(ts, node) {
+  if (ts.isIdentifier(node)) return /headers$/i.test(node.text);
+  if (ts.isPropertyAccessExpression(node)) return /headers$/i.test(node.name.text);
+  return false;
+}
+
+/**
  * Walk one JavaScript source and report every sink this ticket forbids.
  *
  * @param {object} ts
@@ -318,6 +331,30 @@ function inspectSource(ts, source, fileName, rules = {}) {
         if (FORBIDDEN_IDENTIFIERS.has(name)) {
           problems.push(`${fileName} calls the forbidden Identity surface .${name}()`);
         }
+        /* A bare-identifier check alone is not a gate: `globalThis.fetch(...)`
+           reaches the same function through a property access. */
+        if (FORBIDDEN_CALLEES.has(name) &&
+            !(name === "fetch" && Array.isArray(rules.fetchTargets))) {
+          problems.push(`${fileName} calls ${name} through a property access`);
+        }
+        if (name === "fetch" && Array.isArray(rules.fetchTargets)) {
+          const first = node.arguments[0];
+          fetchTargets.push(
+            first !== undefined && ts.isStringLiteral(first) ? first.text : "<computed>",
+          );
+        }
+      }
+      /* `headers.set("Set-Cookie", ...)` and friends never appear in this
+         Function; the header words above already ban the literal, and this
+         catches a computed spelling reaching a Headers mutator. The receiver
+         has to be a `headers` reference: `set` is also `Uint8Array.prototype`'s
+         and flagging that spells a false gate failure on the body reader. */
+      if (rules.sessionHeaders === true && ts.isPropertyAccessExpression(callee) &&
+          (callee.name.text === "append" || callee.name.text === "set" ||
+           callee.name.text === "delete") &&
+          headersReceiver(ts, callee.expression) &&
+          node.arguments.length > 0 && !ts.isStringLiteral(node.arguments[0])) {
+        problems.push(`${fileName} mutates a header under a computed name`);
       }
     }
     if (ts.isWhileStatement(node) || ts.isForStatement(node)) {
@@ -371,7 +408,11 @@ function inspectInvitePage(source) {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="referrer" content="no-referrer">',
     "<title>Set your password</title>",
+    "<main>",
+    "<h1>Set your password</h1>",
     '<p id="invite-status" role="status" aria-live="polite"></p>',
+    '<label for="invite-password">Password</label>',
+    '<label for="invite-confirm">Confirm password</label>',
     '<form id="invite-form" hidden novalidate>',
     '<input id="invite-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>',
     '<input id="invite-confirm" name="confirm" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>',

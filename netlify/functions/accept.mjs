@@ -35,6 +35,7 @@ const TOKEN_PATTERN = /^[A-Za-z0-9._~-]{20,4096}$/;
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 
 const MAX_BODY_BYTES = 8_192;
+const MAX_BODY_READS = 1_024;
 const MIN_PASSWORD_POINTS = 12;
 const MAX_PASSWORD_POINTS = 128;
 const MIN_PASSWORD_BYTES = 12;
@@ -119,6 +120,42 @@ function passwordAllowed(value) {
   return bytes >= MIN_PASSWORD_BYTES && bytes <= MAX_PASSWORD_BYTES;
 }
 
+/**
+ * The status the provider actually answered with, or `null`.
+ *
+ * The pinned package wraps every rejection from the recovery call in
+ * `AuthError.from(error)`, and that constructor is called with an `undefined`
+ * status: the transport error carrying GoTrue's real HTTP status is put in
+ * `cause` instead. Reading only `error.status` would therefore classify every
+ * dead, expired or already-redeemed token as a provider outage, which is the
+ * one distinction this endpoint has to get right. Recognition of the error
+ * class itself is still by identity against the pinned import; this only reads
+ * the status that class was constructed with, following a bounded `cause`
+ * chain, and treats any hostile shape as no status at all.
+ *
+ * @param {unknown} error
+ * @returns {number | null}
+ */
+function providerStatus(error) {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || typeof current !== "object") return null;
+    let status;
+    try {
+      status = current.status;
+    } catch {
+      return null;
+    }
+    if (Number.isInteger(status)) return status;
+    try {
+      current = current.cause;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** True when `value` is a plain object with `Object.prototype` and no symbols. */
 function ordinaryObject(value) {
   return (
@@ -164,9 +201,22 @@ async function readBounded(req) {
 
   const chunks = [];
   let total = 0;
+  let reads = 0;
   let outcome = null;
   try {
     for (;;) {
+      /* Bytes alone do not bound this loop: a stream that yields empty chunks
+         forever never trips the byte ceiling. */
+      reads += 1;
+      if (reads > MAX_BODY_READS) {
+        outcome = { ok: false, status: 413 };
+        try {
+          await reader.cancel();
+        } catch {
+          // A stream that refuses cancellation still yields the same answer.
+        }
+        break;
+      }
       const step = await reader.read();
       if (step === null || typeof step !== "object") {
         outcome = { ok: false, status: 400 };
@@ -268,9 +318,12 @@ export function createAcceptHandler(dependencies = {}) {
   if (!ordinaryObject(dependencies)) {
     throw new TypeError("createAcceptHandler requires an ordinary dependency object");
   }
-  for (const key of Object.keys(dependencies)) {
-    if (!DEPENDENCY_KEYS.includes(key)) {
-      throw new TypeError(`createAcceptHandler received an unknown dependency: ${key}`);
+  /* `Reflect.ownKeys` sees non-enumerable and symbol keys too. `Object.keys`
+     would miss a non-enumerable `recoverPasswordFn`, which the `??` reads
+     below would then happily pick up unvalidated. */
+  for (const key of Reflect.ownKeys(dependencies)) {
+    if (typeof key !== "string" || !DEPENDENCY_KEYS.includes(key)) {
+      throw new TypeError("createAcceptHandler received an unknown dependency");
     }
     const descriptor = Object.getOwnPropertyDescriptor(dependencies, key);
     if (typeof descriptor.get === "function" || typeof descriptor.set === "function") {
@@ -293,7 +346,7 @@ export function createAcceptHandler(dependencies = {}) {
     }
 
     try {
-      requireOriginFn(req);
+      await requireOriginFn(req);
     } catch (error) {
       if (error instanceof Response) {
         error.headers.set("Cache-Control", NO_STORE);
@@ -348,8 +401,8 @@ export function createAcceptHandler(dependencies = {}) {
       // names itself `AuthError`, or carries an attacker-chosen `status`, is
       // not one, and falls through to the outage answer below.
       if (error instanceof AuthError) {
-        const status = error.status;
-        if (Number.isInteger(status) && status >= 400 && status <= 499) {
+        const status = providerStatus(error);
+        if (status !== null && status >= 400 && status <= 499) {
           return jsonError(400, INVALID);
         }
         return jsonError(503, UNAVAILABLE);

@@ -134,6 +134,7 @@
         // attribute, the URL, a global, storage or a log. It is overwritten
         // with null the moment a submission settles, whatever the outcome.
         var token = null;
+        var payload = null;
         var attempted = false;
         var active = null;
 
@@ -229,9 +230,22 @@
             controller.abort();
           }, TIMEOUT_MS);
 
-          var payload = JSON.stringify({ token: token, password: candidate });
+          payload = JSON.stringify({ token: token, password: candidate });
           candidate = "";
           repeat = "";
+
+          // One settlement path, whatever the outcome. The token and the
+          // serialized body are erased here and never retained for a retry.
+          var settle = function () {
+            clearTimeout(timer);
+            active = null;
+            payload = null;
+            token = null;
+            password.value = "";
+            confirm.value = "";
+            form.removeAttribute("aria-busy");
+            seal();
+          };
 
           fetch("/api/accept", {
             method: "POST",
@@ -253,18 +267,9 @@
             return false;
           }).then(function (ok) {
             say(ok ? DONE : FAILED);
-          }).catch(function () {
+          }, function () {
             say(FAILED);
-          }).then(function () {
-            clearTimeout(timer);
-            active = null;
-            password.value = "";
-            confirm.value = "";
-            payload = "";
-            token = null;
-            form.removeAttribute("aria-busy");
-            seal();
-          });
+          }).then(settle, settle);
         }
 
         function start() {
@@ -315,8 +320,15 @@
           if (active !== null) active.abort();
           active = null;
           token = null;
+          payload = null;
           if (password !== null) password.value = "";
           if (confirm !== null) confirm.value = "";
+          // A page restored from the back/forward cache has no token left, so
+          // it must not present a form that would silently do nothing.
+          if (form !== null && !form.hidden) {
+            seal();
+            say(UNUSABLE);
+          }
         });
 
         if (document.readyState === "loading") {
