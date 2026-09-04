@@ -45,7 +45,19 @@ drift from the CSS.
 templates/check-dist        # rebuild every document; fail if committed dist/ changed
 scripts/scrub-check.sh      # fail if private context reached this repository
 npm --prefix templates/docbuild run check   # typecheck
+node scripts/check-function-modules.mjs     # fail if a netlify/ module does not load
+node scripts/check-test-inventory.mjs       # fail if a test file is not wired into CI
 ```
+
+`.github/workflows/check.yml` is the full list; the commands above are the ones worth running by hand.
+
+`check-function-modules.mjs` imports every `netlify/functions/*.mjs` and `netlify/lib/*.mjs` without
+invoking anything. ESM links named imports before it evaluates them, so an unresolvable specifier or a
+missing export fails here — the one class of breakage that used to ship with every gate green.
+
+`check-test-inventory.mjs` is why the literal test list in `check.yml` can stay literal. It fails when a
+tracked test file exists that no run step names, so **adding a test file and forgetting to wire it up is
+now a red build rather than a silent no-op.**
 
 `check-dist` is the acceptance test that let the builder be rewritten twice — Python, then Rust, then
 TypeScript — without altering a single byte of any document's output.
