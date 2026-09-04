@@ -258,6 +258,83 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 @media print {
   [data-reader-only],[data-editor-only] { display: none!important; }
 }
+/* Comments client, read only.  Nothing here applies until comments.js has
+   committed a valid thread list and created the toggle, rail and panel; the
+   two block classes are the non-mutating fallback for engines without the CSS
+   Custom Highlight API.  Colours read the document tokens when they exist and
+   fall back to values that keep panel contrast above 4.5:1 in either scheme. */
+
+#doc-comments-panel{--doc-comments-bg:var(--surface,#FFFFFF);--doc-comments-ink:var(--ink,#15181E);--doc-comments-ink-2:var(--ink-2,#49525F);--doc-comments-border:var(--border-strong,#CBD2DA);--doc-comments-accent:var(--accent,#C0122A);--doc-comments-soft:var(--surface-2,#EEF1F4)}
+@media (prefers-color-scheme:dark){
+  #doc-comments-panel{--doc-comments-bg:var(--surface,#14181E);--doc-comments-ink:var(--ink,#E7EAEE);--doc-comments-ink-2:var(--ink-2,#A6AEBA);--doc-comments-border:var(--border-strong,#39424E);--doc-comments-accent:var(--accent,#FF7A6B);--doc-comments-soft:var(--surface-2,#1B212A)}
+}
+
+/* ---- header toggle ---- */
+#doc-comments-toggle{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono,ui-monospace,monospace);font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2,#49525F);background:var(--surface,#FFFFFF);border:1px solid var(--border-strong,#CBD2DA);border-radius:999px;padding:7px 13px;cursor:pointer}
+#doc-comments-toggle:hover{border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+
+/* ---- margin rail: absolutely positioned, takes no layout space ---- */
+#doc-comments-rail{position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:40}
+.doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
+.doc-comment-marker[hidden]{display:none}
+.doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+
+/* ---- non-mutating fallback when custom highlights are unavailable ---- */
+.doc-comment-block{border-inline-start:3px solid var(--warn,#A85B00);background-color:var(--warn-soft,#FBF0DF);padding-inline-start:8px}
+.doc-comment-block-active{outline:2px solid var(--accent,#C0122A);outline-offset:2px}
+
+/* ---- custom highlights ---- */
+::highlight(doc-comments-open){background-color:rgba(232,168,32,.35)}
+::highlight(doc-comments-active){background-color:rgba(232,88,32,.5)}
+
+/* ---- panel: complementary region, right edge on wide viewports ---- */
+#doc-comments-panel{position:fixed;top:0;right:0;bottom:0;width:min(26rem,40vw);display:flex;flex-direction:column;overflow-y:auto;box-sizing:border-box;padding:16px 20px 24px;background:var(--doc-comments-bg);color:var(--doc-comments-ink);border-inline-start:1px solid var(--doc-comments-border);font-family:var(--sans,system-ui,sans-serif);font-size:.92rem;line-height:1.5;z-index:30;transition:opacity .2s ease}
+#doc-comments-panel[hidden]{display:none}
+#doc-comments-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+#doc-comments-title{margin:0;font-size:1.15rem;color:var(--doc-comments-ink);max-width:none}
+#doc-comments-panel button{font-family:var(--mono,ui-monospace,monospace);font-size:.7rem;letter-spacing:.04em;text-transform:uppercase;color:var(--doc-comments-ink-2);background:var(--doc-comments-bg);border:1px solid var(--doc-comments-border);border-radius:999px;padding:5px 11px;cursor:pointer}
+#doc-comments-panel button[aria-pressed="true"]{color:var(--doc-comments-ink);border-color:var(--doc-comments-accent);background:var(--doc-comments-soft);text-decoration:underline}
+#doc-comments-status{min-height:1.2em;font-size:.8rem;color:var(--doc-comments-ink-2)}
+#doc-comments-truncation{margin:8px 0;padding:8px 10px;border:1px solid var(--doc-comments-border);border-radius:8px;font-size:.82rem;color:var(--doc-comments-ink)}
+#doc-comments-filters{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 12px}
+#doc-comments-filters [role="group"]{display:flex;flex-wrap:wrap;gap:6px}
+.doc-comments-group>h3{margin:14px 0 8px;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--doc-comments-ink-2)}
+.doc-comments-group>ul,.doc-comments-messages{list-style:none;margin:0;padding:0}
+.doc-comments-card{margin:0 0 12px;padding:12px 14px;border:1px solid var(--doc-comments-border);border-radius:10px;background:var(--doc-comments-bg)}
+.doc-comments-card-active{border-color:var(--doc-comments-accent);box-shadow:inset 3px 0 0 var(--doc-comments-accent)}
+.doc-comments-card h4{margin:0 0 4px;font-size:1rem;color:var(--doc-comments-ink)}
+.doc-comments-meta,.doc-comments-byline{margin:0 0 6px;font-size:.78rem;color:var(--doc-comments-ink-2);max-width:none}
+.doc-comments-state{margin:0 0 6px;font-size:.8rem;font-weight:600;color:var(--doc-comments-ink)}
+.doc-comments-card blockquote{margin:0 0 8px;padding:6px 10px;border-inline-start:3px solid var(--doc-comments-border);color:var(--doc-comments-ink-2);font-style:italic}
+.doc-comments-messages>li{margin:0 0 10px}
+.doc-comments-body{margin:0;color:var(--doc-comments-ink);white-space:pre-wrap;overflow-wrap:anywhere;max-width:none}
+.doc-comments-author{font-weight:600;color:var(--doc-comments-ink)}
+.doc-comments-edited{font-style:italic}
+.doc-comments-empty{color:var(--doc-comments-ink-2)}
+
+/* ---- keyboard focus ---- */
+#doc-comments-toggle:focus-visible,#doc-comments-panel :focus-visible,.doc-comment-marker:focus-visible{outline:2px solid var(--doc-comments-accent,var(--accent,#C0122A));outline-offset:2px}
+
+/* ---- narrow: bottom sheet, no rail ---- */
+@media (max-width:720px){
+  #doc-comments-panel{top:auto;left:0;right:0;bottom:0;width:100%;max-height:60vh;border-inline-start:none;border-top:1px solid var(--doc-comments-border)}
+  #doc-comments-rail{display:none}
+}
+
+/* ---- motion, forced colours, print ---- */
+@media (prefers-reduced-motion:reduce){
+  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card{animation-duration:0s;transition-duration:0s}
+}
+@media (forced-colors:active){
+  #doc-comments-panel{border:1px solid CanvasText}
+  .doc-comment-block{border-inline-start:3px solid CanvasText}
+  .doc-comment-block-active{outline:2px solid Highlight}
+}
+@media print{
+  #doc-comments-toggle,#doc-comments-rail,#doc-comments-panel{display:none!important}
+  .doc-comment-block,.doc-comment-block-active{border-inline-start-color:transparent;outline-color:transparent;background-color:transparent;box-shadow:none}
+  ::highlight(doc-comments-open),::highlight(doc-comments-active){background-color:transparent}
+}
 :root {
   /* Changelog client presentation: one change bar prepended to main, plus a
      bullet on each changed section label and its jump-nav link.  Three theme
@@ -371,6 +448,153 @@ nav.jump a.history-changed::after {
   section.history-changed > details.sec > summary .sec-label::before,
   nav.jump a.history-changed::after {
     display: none;
+  }
+}
+.share-btn {
+  flex: none;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: .7rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.share-btn[aria-expanded="true"] {
+  color: var(--surface, #fff);
+  background: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-btn:focus-visible,
+.share-close:focus-visible {
+  outline: 2px solid var(--accent, #c0122a);
+  outline-offset: 2px;
+}
+
+.share-pop {
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 50;
+  width: min(24rem, calc(100vw - 1rem));
+  max-width: min(24rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+  padding: 1rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .75rem;
+  box-shadow: var(--shadow, 0 8px 24px rgba(20, 24, 30, .12));
+}
+
+.share-pop[hidden] {
+  display: none;
+}
+
+.share-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.share-head h2 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.share-close {
+  flex: none;
+  padding: .35rem .6rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface-2, #eef1f4);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .4rem;
+  cursor: pointer;
+  font: 600 .75rem/1.2 var(--sans, system-ui, sans-serif);
+}
+
+.share-close:hover {
+  color: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-status,
+.share-default {
+  margin: .75rem 0 0;
+  font-size: .88rem;
+  overflow-wrap: anywhere;
+}
+
+.share-status {
+  color: var(--ink-3, #7a8492);
+}
+
+.share-members,
+.share-invitations {
+  margin-top: 1rem;
+}
+
+.share-members h3,
+.share-invitations h3 {
+  margin: 0 0 .45rem;
+  font-size: .85rem;
+  overflow-wrap: anywhere;
+}
+
+.share-list {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-list li {
+  margin: 0;
+  padding: .5rem 0;
+  border-top: 1px solid var(--border, #e2e6eb);
+  font-size: .82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.share-value {
+  unicode-bidi: isolate;
+}
+
+@media (forced-colors: active) {
+  .share-btn,
+  .share-pop,
+  .share-close {
+    border: 1px solid CanvasText;
+  }
+
+  .share-btn:focus-visible,
+  .share-close:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+@media (max-width: 640px) {
+  .share-pop {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .share-pop,
+  .share-pop * {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media print {
+  .share-btn,
+  .share-pop {
+    display: none !important;
   }
 }
 
@@ -1083,6 +1307,1058 @@ export function scanBlocks(fragment) {
 window.doc.anchor = { BLOCK, norm, scanBlocks };
 </script>
 <script type="module">
+/* Comments client, read only.
+   Waits for the one `session` reveal, then reads a bounded prefix of the
+   thread list with same-origin GETs and shows it in a private margin rail and
+   side panel.  Every anchored thread is classified as exact, drifted, moved or
+   orphaned against the current rendered blocks; the quote is resolved through
+   P1-D's published normaliser and painted with the CSS Custom Highlight API so
+   no prose node is ever wrapped or moved.  Outside HTTP(S), or without the
+   document id, the anchor core, the platform primitives or a session, the
+   module returns before touching anything and the static document is
+   unchanged.
+
+   Amendment chain: P3-C (this read path) -> P4-A (comment writes) -> P4-Q
+   (shared rail/panel publication, Suggestions filter, overlay repair).  The
+   rail and panel controllers stay in module scope until P4-Q publishes them;
+   the only public seam is `window.doc.comments.refresh()`. */
+
+const PROTOCOL = location.protocol;
+if (PROTOCOL === "http:" || PROTOCOL === "https:") installComments();
+
+function installComments() {
+  const meta = document.querySelector('meta[name="doc-id"]');
+  const content = meta === null ? null : meta.getAttribute("content");
+  const docId = typeof content === "string" ? content.trim() : "";
+  if (docId === "") return;
+
+  const doc = window.doc;
+  if (doc === null || typeof doc !== "object") return;
+  const anchor = doc.anchor;
+  if (anchor === null || typeof anchor !== "object") return;
+  if (!Array.isArray(anchor.BLOCK) || typeof anchor.norm !== "function") return;
+  const BLOCK = anchor.BLOCK;
+  const norm = anchor.norm;
+
+  if (typeof fetch !== "function"
+    || typeof AbortController !== "function"
+    || typeof CustomEvent !== "function"
+    || typeof NodeFilter === "undefined" || NodeFilter === null
+    || typeof NodeFilter.SHOW_TEXT !== "number"
+    || typeof Range !== "function"
+    || typeof requestAnimationFrame !== "function"
+    || typeof performance !== "object" || performance === null
+    || typeof performance.now !== "function"
+    || typeof document.createTreeWalker !== "function") {
+    return;
+  }
+
+  if (doc.comments !== null && doc.comments !== undefined) return;
+
+  /* ------------------------------------------------------------ constants */
+
+  const MAX_PAGES = 5;
+  const MAX_THREADS = 500;
+  const MAX_COMMENTS = 5000;
+  const MAX_THREAD_COMMENTS = 500;
+  const PASS_DEADLINE_MS = 5000;
+  const VISIBILITY_WINDOW_MS = 30000;
+  const MARKER_STEP = 24;
+
+  const THREAD_ID = /^t_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
+  const COMMENT_ID = /^c_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
+  const DOC_ID = /^[0-9a-f]{6}$/;
+  const SECTION = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+  const DOC_VERSION = /^[0-9a-f]{7}$/;
+  const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const SUB = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+  const EMAIL_LOCAL = /^[a-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+\/=?^_`{|}~-]+)*$/;
+  const EMAIL_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+  const AID = /^a[0-9a-f]{8}$/;
+
+  const THREAD_KEYS = ["v", "id", "docId", "kind", "status", "section", "anchor", "title",
+    "docVersion", "createdAt", "author", "resolvedAt", "resolvedBy", "comments"];
+  const COMMENT_KEYS = ["id", "body", "author", "createdAt", "editedAt"];
+  const ACTOR_KEYS = ["sub", "name", "email"];
+  const ANCHOR_KEYS = ["block", "exact", "prefix", "suffix", "start"];
+  const PAGE_KEYS = ["threads", "nextCursor"];
+
+  const OPEN_HIGHLIGHT = "doc-comments-open";
+  const ACTIVE_HIGHLIGHT = "doc-comments-active";
+  const BLOCK_CLASS = "doc-comment-block";
+  const BLOCK_ACTIVE_CLASS = "doc-comment-block-active";
+  const REFRESH_FAILED = "Comments could not be refreshed.";
+
+  const STATE_LABEL = Object.freeze({
+    exact: "",
+    drifted: "Text changed",
+    moved: "Moved from its original block",
+    orphaned: "Not attached any more",
+  });
+
+  /* ---------------------------------------------------------------- state */
+
+  let activated = false;
+  let batch = null;
+  let again = false;
+  let lastVisibilityRefresh = null;
+
+  /* The last good view: validated threads with their computed locations. */
+  let model = [];
+  let truncation = null;
+  let activeId = null;
+  let statusFilter = "open";
+  let kindFilter = "all";
+
+  let toggle = null;
+  let rail = null;
+  let panel = null;
+  let title = null;
+  let status = null;
+  let truncationNote = null;
+  let list = null;
+  let opener = null;
+  let placementFrame = 0;
+  const markers = new Map();
+  const cards = new Map();
+  const decoratedBlocks = new Set();
+
+  /* --------------------------------------------------------- validation */
+
+  const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+  function isPlain(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      && Object.getPrototypeOf(value) === Object.prototype;
+  }
+
+  function exactKeys(value, keys) {
+    if (!isPlain(value)) return false;
+    const own = Object.keys(value);
+    if (own.length !== keys.length) return false;
+    for (const key of keys) if (!hasOwn(value, key)) return false;
+    return true;
+  }
+
+  function validTimestamp(value) {
+    if (typeof value !== "string" || !TIMESTAMP.test(value)) return false;
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) && new Date(time).toISOString() === value;
+  }
+
+  function validEmail(value) {
+    if (typeof value !== "string") return false;
+    if (value === "") return true;
+    if (value.length > 254) return false;
+    const at = value.indexOf("@");
+    if (at === -1 || value.indexOf("@", at + 1) !== -1) return false;
+    const local = value.slice(0, at);
+    const domain = value.slice(at + 1);
+    if (local.length > 64 || !EMAIL_LOCAL.test(local)) return false;
+    const labels = domain.split(".");
+    if (labels.length < 2) return false;
+    for (const label of labels) if (!EMAIL_LABEL.test(label)) return false;
+    return true;
+  }
+
+  function validActor(value) {
+    if (!exactKeys(value, ACTOR_KEYS)) return false;
+    if (typeof value.sub !== "string" || !SUB.test(value.sub)) return false;
+    if (typeof value.name !== "string" || value.name.length > 200) return false;
+    return validEmail(value.email);
+  }
+
+  function sameActor(a, b) {
+    return a.sub === b.sub && a.name === b.name && a.email === b.email;
+  }
+
+  /* Only non-whitespace code units separated by single spaces; one boundary
+     space on either side is allowed because a context slice may end on it. */
+  function validContext(value) {
+    if (typeof value !== "string" || value.length > 32) return false;
+    let previousSpace = false;
+    for (let i = 0; i < value.length; i += 1) {
+      const unit = value[i];
+      if (norm(unit) === "") {
+        if (unit !== " " || previousSpace) return false;
+        previousSpace = true;
+      } else {
+        previousSpace = false;
+      }
+    }
+    return true;
+  }
+
+  function validAnchor(value) {
+    if (!exactKeys(value, ANCHOR_KEYS)) return false;
+    if (typeof value.block !== "string" || !AID.test(value.block)) return false;
+    if (typeof value.exact !== "string" || value.exact.length === 0 || value.exact.length > 1000) return false;
+    if (norm(value.exact) !== value.exact) return false;
+    if (!validContext(value.prefix) || !validContext(value.suffix)) return false;
+    return Number.isSafeInteger(value.start) && value.start >= 0;
+  }
+
+  function validComment(value, seen) {
+    if (!exactKeys(value, COMMENT_KEYS)) return false;
+    if (typeof value.id !== "string" || !COMMENT_ID.test(value.id) || seen.has(value.id)) return false;
+    seen.add(value.id);
+    if (typeof value.body !== "string" || value.body.length === 0 || value.body.length > 8000) return false;
+    if (value.body.trim().length === 0) return false;
+    if (!validActor(value.author)) return false;
+    if (!validTimestamp(value.createdAt)) return false;
+    return value.editedAt === null || validTimestamp(value.editedAt);
+  }
+
+  function validThread(value) {
+    if (!exactKeys(value, THREAD_KEYS)) return false;
+    if (value.v !== 1) return false;
+    if (typeof value.id !== "string" || !THREAD_ID.test(value.id)) return false;
+    if (typeof value.docId !== "string" || !DOC_ID.test(value.docId) || value.docId !== docId) return false;
+    if (value.kind !== "comment" && value.kind !== "discussion") return false;
+    if (value.status !== "open" && value.status !== "resolved") return false;
+    if (typeof value.section !== "string" || value.section.length > 64 || !SECTION.test(value.section)) return false;
+    if (typeof value.docVersion !== "string" || !DOC_VERSION.test(value.docVersion)) return false;
+    if (!validTimestamp(value.createdAt)) return false;
+    if (!validActor(value.author)) return false;
+
+    if (value.status === "open") {
+      if (value.resolvedAt !== null || value.resolvedBy !== null) return false;
+    } else if (!validTimestamp(value.resolvedAt) || !validActor(value.resolvedBy)) {
+      return false;
+    }
+
+    if (value.kind === "comment") {
+      if (value.title !== null || !validAnchor(value.anchor)) return false;
+    } else {
+      if (value.anchor !== null) return false;
+      if (typeof value.title !== "string" || value.title.length > 200 || value.title.trim().length === 0) return false;
+    }
+
+    const comments = value.comments;
+    if (!Array.isArray(comments) || comments.length === 0 || comments.length > MAX_THREAD_COMMENTS) return false;
+    const seen = new Set();
+    for (let i = 0; i < comments.length; i += 1) {
+      if (!validComment(comments[i], seen)) return false;
+    }
+    const first = comments[0];
+    if (!sameActor(first.author, value.author) || first.createdAt !== value.createdAt) return false;
+    return true;
+  }
+
+  /* ----------------------------------------------------- text mapping */
+
+  function opaque(node, root) {
+    let parent = node.parentNode;
+    while (parent !== null && parent !== root) {
+      const name = parent.localName;
+      if (name === "script" || name === "style") return true;
+      parent = parent.parentNode;
+    }
+    return false;
+  }
+
+  /* One span per UTF-16 code unit of the normalised text; a collapsed
+     whitespace run maps to the whole source run, across text nodes. */
+  function textMap(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let text = "";
+    const spans = [];
+    let started = false;
+    let pending = null;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if (opaque(node, root)) continue;
+      const data = node.data;
+      for (let offset = 0; offset < data.length; offset += 1) {
+        const unit = data[offset];
+        if (norm(unit) === "") {
+          if (!started) continue;
+          if (pending === null) pending = { startNode: node, startOffset: offset, endNode: node, endOffset: offset + 1 };
+          else {
+            pending.endNode = node;
+            pending.endOffset = offset + 1;
+          }
+          continue;
+        }
+        if (pending !== null) {
+          text += " ";
+          spans.push(pending);
+          pending = null;
+        }
+        started = true;
+        text += unit;
+        spans.push({ startNode: node, startOffset: offset, endNode: node, endOffset: offset + 1 });
+      }
+    }
+    return { text, spans };
+  }
+
+  function rangeFor(map, start, end) {
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+    if (start < 0 || start >= end || end > map.text.length) return null;
+    const first = map.spans[start];
+    const last = map.spans[end - 1];
+    if (first === undefined || last === undefined) return null;
+    try {
+      const range = new Range();
+      range.setStart(first.startNode, first.startOffset);
+      range.setEnd(last.endNode, last.endOffset);
+      return range;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /* ------------------------------------------------------ quote scoring */
+
+  function commonPrefix(a, b) {
+    const limit = Math.min(a.length, b.length);
+    let count = 0;
+    while (count < limit && a[count] === b[count]) count += 1;
+    return count;
+  }
+
+  function commonSuffix(a, b) {
+    const limit = Math.min(a.length, b.length);
+    let count = 0;
+    while (count < limit && a[a.length - 1 - count] === b[b.length - 1 - count]) count += 1;
+    return count;
+  }
+
+  function findQuote(text, quote) {
+    const exact = quote.exact;
+    if (exact.length === 0) return -1;
+    let best = -1;
+    let bestScore = -Infinity;
+    let from = 0;
+    for (;;) {
+      const i = text.indexOf(exact, from);
+      if (i === -1) break;
+      const before = text.slice(Math.max(0, i - quote.prefix.length), i);
+      const after = text.slice(i + exact.length, i + exact.length + quote.suffix.length);
+      const context = commonSuffix(before, quote.prefix) + commonPrefix(after, quote.suffix);
+      const distancePenalty = Math.min(Math.abs(i - quote.start), text.length) / (text.length + 1);
+      const score = context - distancePenalty;
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+      from = i + 1;
+    }
+    return best;
+  }
+
+  /* Every rendered block by aid; a duplicate or out-of-policy element aborts
+     the commit because choosing between candidates would misattach threads. */
+  function buildBlockIndex() {
+    const index = new Map();
+    const elements = document.querySelectorAll("[data-aid]");
+    for (let order = 0; order < elements.length; order += 1) {
+      const element = elements[order];
+      if (!BLOCK.includes(element.localName)) return null;
+      const id = element.getAttribute("data-aid");
+      if (id === null || !AID.test(id) || index.has(id)) return null;
+      index.set(id, { element, order, map: textMap(element) });
+    }
+    return index;
+  }
+
+  function locate(quote, index) {
+    const home = index.get(quote.block);
+    if (home !== undefined) {
+      const hit = findQuote(home.map.text, quote);
+      const range = hit === -1 ? null : rangeFor(home.map, hit, hit + quote.exact.length);
+      if (range === null) return { state: "drifted", element: home.element, range: null, order: home.order };
+      return { state: "exact", element: home.element, range, order: home.order };
+    }
+    let found = null;
+    let count = 0;
+    for (const entry of index.values()) {
+      const hit = findQuote(entry.map.text, quote);
+      if (hit === -1) continue;
+      count += 1;
+      if (count > 1) break;
+      found = { entry, hit };
+    }
+    if (count === 1) {
+      const range = rangeFor(found.entry.map, found.hit, found.hit + quote.exact.length);
+      if (range !== null) return { state: "moved", element: found.entry.element, range, order: found.entry.order };
+    }
+    return { state: "orphaned", element: null, range: null, order: Infinity };
+  }
+
+  /* --------------------------------------------------------- transport */
+
+  function teardown() {
+    activated = false;
+    again = false;
+    window.removeEventListener("resize", schedulePlacement);
+    window.removeEventListener("hashchange", schedulePlacement);
+    document.removeEventListener("toggle", schedulePlacement, true);
+    document.removeEventListener("visibilitychange", visibilityRefresh);
+    clearDecoration();
+    if (toggle !== null && toggle.parentNode !== null) toggle.parentNode.removeChild(toggle);
+    if (rail !== null && rail.parentNode !== null) rail.parentNode.removeChild(rail);
+    if (panel !== null && panel.parentNode !== null) panel.parentNode.removeChild(panel);
+    toggle = null;
+    rail = null;
+    panel = null;
+    title = null;
+    status = null;
+    truncationNote = null;
+    list = null;
+    opener = null;
+    markers.clear();
+    cards.clear();
+    model = [];
+    truncation = null;
+    activeId = null;
+  }
+
+  /* Consume one already-parsed page into the retained prefix.  Returns
+     `false` for a malformed used/boundary value, or the page verdict. */
+  function consumePage(page, priorCursor, retained, seenIds, totals) {
+    if (!exactKeys(page, PAGE_KEYS)) return false;
+    const threads = page.threads;
+    const nextCursor = page.nextCursor;
+    if (!Array.isArray(threads) || threads.length > 100) return false;
+    if (nextCursor !== null && (typeof nextCursor !== "string" || !THREAD_ID.test(nextCursor))) return false;
+    if (threads.length === 0) return nextCursor === null ? { next: null, stop: false } : false;
+    if (nextCursor !== null) {
+      const final = threads[threads.length - 1];
+      if (final === null || typeof final !== "object") return false;
+      if (!hasOwn(final, "id")) return false;
+      const finalId = final.id;
+      if (typeof finalId !== "string" || !THREAD_ID.test(finalId) || finalId !== nextCursor) return false;
+    }
+
+    let previous = priorCursor;
+    for (let i = 0; i < threads.length; i += 1) {
+      if (totals.comments >= MAX_COMMENTS) return { next: null, stop: true };
+      const thread = threads[i];
+      if (!validThread(thread)) return false;
+      if (previous !== null && !(thread.id > previous)) return false;
+      if (seenIds.has(thread.id)) return false;
+      previous = thread.id;
+      if (totals.comments + thread.comments.length > MAX_COMMENTS) return { next: null, stop: true };
+      seenIds.add(thread.id);
+      retained.push(thread);
+      totals.comments += thread.comments.length;
+      const more = i + 1 < threads.length || nextCursor !== null;
+      if (more && (retained.length >= MAX_THREADS || totals.comments >= MAX_COMMENTS)) {
+        return { next: null, stop: true };
+      }
+    }
+    return { next: nextCursor, stop: false };
+  }
+
+  async function runPass() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PASS_DEADLINE_MS);
+    try {
+      const retained = [];
+      const seenIds = new Set();
+      const totals = { comments: 0 };
+      let cursor = null;
+      let truncated = false;
+      for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
+        const endpoint = new URL("/api/threads", location.href);
+        endpoint.searchParams.set("doc", docId);
+        endpoint.searchParams.set("limit", "100");
+        if (cursor !== null) endpoint.searchParams.set("cursor", cursor);
+        const response = await fetch(endpoint, {
+          method: "GET",
+          mode: "same-origin",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (response.status === 401 || response.status === 403) {
+          teardown();
+          return false;
+        }
+        if (response.status !== 200) return false;
+        const page = await response.json();
+        const verdict = consumePage(page, cursor, retained, seenIds, totals);
+        if (verdict === false) return false;
+        if (verdict.stop) {
+          truncated = true;
+          break;
+        }
+        if (verdict.next === null) break;
+        cursor = verdict.next;
+        if (pageNumber === MAX_PAGES - 1) truncated = true;
+      }
+      if (!activated) return false;
+      return commit(retained, totals.comments, truncated);
+    } catch (error) {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* One pass; a failure after a prior good view keeps that view and says so. */
+  async function pass() {
+    const committed = await runPass();
+    if (!committed && activated && panel !== null) setStatus(REFRESH_FAILED);
+    return committed;
+  }
+
+  async function runBatch() {
+    let committed = await pass();
+    if (again && activated) {
+      again = false;
+      if (await pass()) committed = true;
+    }
+    return committed;
+  }
+
+  function refresh() {
+    if (!activated) return Promise.resolve(false);
+    if (batch !== null) {
+      again = true;
+      return batch;
+    }
+    batch = runBatch().then((result) => {
+      batch = null;
+      if (again) {
+        again = false;
+        queueMicrotask(() => { refresh(); });
+      }
+      return result;
+    }, () => {
+      batch = null;
+      return false;
+    });
+    return batch;
+  }
+
+  /* ---------------------------------------------------------- commit */
+
+  function commit(threads, commentCount, truncated) {
+    const index = buildBlockIndex();
+    if (index === null) return false;
+    if (panel === null && document.querySelector(".head-top") === null) return false;
+    const next = threads.map((thread) => ({
+      thread,
+      location: thread.kind === "comment" ? locate(thread.anchor, index) : null,
+    }));
+    model = next;
+    truncation = truncated ? { threads: threads.length, comments: commentCount } : null;
+    if (activeId !== null && !model.some((entry) => entry.thread.id === activeId)) activeId = null;
+    if (panel === null && !createUI()) return false;
+    render();
+    setStatus(`${threads.length} ${threads.length === 1 ? "thread" : "threads"} loaded.`);
+    return true;
+  }
+
+  /* -------------------------------------------------------- DOM helpers */
+
+  function el(name, attributes, text) {
+    const node = document.createElement(name);
+    if (attributes !== undefined) {
+      for (const key of Object.keys(attributes)) node.setAttribute(key, attributes[key]);
+    }
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function timeNode(value) {
+    return el("time", { datetime: value }, `${value.slice(0, 10)} ${value.slice(11, 16)} UTC`);
+  }
+
+  function setStatus(text) {
+    if (status !== null) status.textContent = text;
+  }
+
+  function openCount() {
+    let count = 0;
+    for (const entry of model) if (entry.thread.status === "open") count += 1;
+    return count;
+  }
+
+  function byCreated(a, b) {
+    if (a.thread.createdAt !== b.thread.createdAt) return a.thread.createdAt < b.thread.createdAt ? -1 : 1;
+    return a.thread.id < b.thread.id ? -1 : a.thread.id > b.thread.id ? 1 : 0;
+  }
+
+  function byLocation(a, b) {
+    if (a.location.order !== b.location.order) return a.location.order - b.location.order;
+    return byCreated(a, b);
+  }
+
+  const isLive = (entry) => entry.location !== null && entry.location.state !== "orphaned";
+  const isOpenLive = (entry) => isLive(entry) && entry.thread.status === "open";
+
+  /* ------------------------------------------------------------- UI */
+
+  function createUI() {
+    const head = document.querySelector(".head-top");
+    if (head === null) return false;
+
+    toggle = el("button", {
+      type: "button",
+      id: "doc-comments-toggle",
+      "aria-controls": "doc-comments-panel",
+      "aria-expanded": "false",
+    }, "Comments");
+    toggle.addEventListener("click", () => {
+      if (panel.hidden) openPanel(toggle, null);
+      else closePanel();
+    });
+    const share = head.querySelector(":scope > .share-btn");
+    if (share !== null) head.insertBefore(toggle, share);
+    else head.appendChild(toggle);
+
+    rail = el("div", { id: "doc-comments-rail", "aria-label": "Comment locations" });
+    document.body.appendChild(rail);
+
+    panel = el("aside", { id: "doc-comments-panel", "aria-labelledby": "doc-comments-title" });
+    panel.hidden = true;
+    const header = el("header");
+    title = el("h2", { id: "doc-comments-title", tabindex: "-1" }, "Comments");
+    const close = el("button", { type: "button", id: "doc-comments-close" }, "Close comments");
+    close.addEventListener("click", closePanel);
+    header.appendChild(title);
+    header.appendChild(close);
+    status = el("div", { id: "doc-comments-status", role: "status", "aria-live": "polite" });
+    truncationNote = el("p", { id: "doc-comments-truncation" });
+    truncationNote.hidden = true;
+    const filters = el("div", { id: "doc-comments-filters" });
+    filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], statusFilter, (value) => { statusFilter = value; }));
+    filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], kindFilter, (value) => { kindFilter = value; }));
+    list = el("div", { id: "doc-comments-list" });
+    panel.appendChild(header);
+    panel.appendChild(status);
+    panel.appendChild(truncationNote);
+    panel.appendChild(filters);
+    panel.appendChild(list);
+    panel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !panel.hidden) {
+        event.preventDefault();
+        closePanel();
+      }
+    });
+    document.body.appendChild(panel);
+
+    window.addEventListener("resize", schedulePlacement);
+    window.addEventListener("hashchange", schedulePlacement);
+    document.addEventListener("toggle", schedulePlacement, true);
+    const fonts = document.fonts;
+    if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
+      && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
+      fonts.ready.then(schedulePlacement, () => {});
+    }
+    return true;
+  }
+
+  function filterGroup(label, options, selected, onSelect) {
+    const group = el("div", { role: "group", "aria-label": label });
+    const buttons = [];
+    for (const [value, text] of options) {
+      const button = el("button", { type: "button", "aria-pressed": selected === value ? "true" : "false" }, text);
+      button.addEventListener("click", () => {
+        onSelect(value);
+        for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
+        applyFilters();
+      });
+      buttons.push([value, button]);
+      group.appendChild(button);
+    }
+    return group;
+  }
+
+  function openPanel(invoker, threadId) {
+    opener = invoker;
+    panel.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    if (threadId !== null) {
+      setActiveThread(threadId);
+      paintDecoration();
+      focusCard(threadId);
+    } else {
+      title.focus();
+    }
+    schedulePlacement();
+  }
+
+  /* Focus a thread heading; a card hidden by the current filters cannot take
+     focus, so the panel heading is the fallback rather than the body. */
+  function focusCard(threadId) {
+    const card = cards.get(threadId);
+    if (card !== undefined) card.heading.focus();
+    if (card === undefined || document.activeElement !== card.heading) title.focus();
+  }
+
+  function rendered(element) {
+    return element !== null && element.isConnected && !element.hidden && element.getClientRects().length > 0;
+  }
+
+  function closePanel() {
+    if (panel === null || panel.hidden) return;
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    setActiveThread(null);
+    paintDecoration();
+    const target = rendered(opener) ? opener : toggle;
+    opener = null;
+    target.focus();
+    schedulePlacement();
+  }
+
+  function selectThread(threadId) {
+    setActiveThread(threadId);
+    paintDecoration();
+    schedulePlacement();
+  }
+
+  function setActiveThread(threadId) {
+    const previous = cards.get(activeId);
+    const next = cards.get(threadId);
+    activeId = threadId;
+    if (previous !== undefined && previous !== next) {
+      previous.article.classList.remove("doc-comments-card-active");
+      previous.article.removeAttribute("aria-current");
+    }
+    if (next !== undefined) {
+      next.article.classList.add("doc-comments-card-active");
+      next.article.setAttribute("aria-current", "true");
+    }
+  }
+
+  /* --------------------------------------------------------- render */
+
+  function render() {
+    toggle.textContent = `Comments (${openCount()})`;
+    if (truncation === null) {
+      truncationNote.hidden = true;
+      truncationNote.textContent = "";
+    } else {
+      truncationNote.textContent = `Showing a partial view: ${truncation.threads} threads and ${truncation.comments} messages loaded; additional results may be available.`;
+      truncationNote.hidden = false;
+    }
+    const active = document.activeElement;
+    const focusedMarker = active !== null && rail.contains(active) ? active.getAttribute("data-thread-id") : null;
+    renderMarkers();
+    paintDecoration();
+    renderList();
+    if (focusedMarker !== null) {
+      const replacement = markers.get(focusedMarker);
+      if (replacement !== undefined) replacement.marker.focus();
+      if (replacement === undefined || document.activeElement !== replacement.marker) toggle.focus();
+    }
+    schedulePlacement();
+  }
+
+  function stateSuffix(state) {
+    if (state === "drifted") return ", text changed";
+    if (state === "moved") return ", moved from its original block";
+    return "";
+  }
+
+  function renderMarkers() {
+    markers.clear();
+    rail.replaceChildren();
+    for (const entry of model) {
+      if (!isOpenLive(entry)) continue;
+      const count = entry.thread.comments.length;
+      const marker = el("button", {
+        type: "button",
+        class: "doc-comment-marker",
+        "aria-label": `Comment by ${entry.thread.author.name}, ${count} ${count === 1 ? "message" : "messages"}${stateSuffix(entry.location.state)}`,
+      }, String(count));
+      marker.setAttribute("data-thread-id", entry.thread.id);
+      marker.hidden = true;
+      marker.addEventListener("click", () => {
+        if (panel.hidden) openPanel(marker, entry.thread.id);
+        else {
+          opener = marker;
+          selectThread(entry.thread.id);
+          focusCard(entry.thread.id);
+        }
+      });
+      markers.set(entry.thread.id, { marker, entry });
+      rail.appendChild(marker);
+    }
+  }
+
+  function passesFilters(entry) {
+    const thread = entry.thread;
+    if (statusFilter !== "all" && thread.status !== statusFilter) return false;
+    if (kindFilter === "anchored" && thread.kind !== "comment") return false;
+    if (kindFilter === "discussions" && thread.kind !== "discussion") return false;
+    return true;
+  }
+
+  function renderList() {
+    if (list === null) return;
+    let focusedThread = null;
+    let focusedInList = false;
+    const active = document.activeElement;
+    if (active !== null && list.contains(active)) {
+      focusedInList = true;
+      const article = active.closest("article");
+      if (article !== null) focusedThread = article.getAttribute("data-thread-id");
+    }
+
+    cards.clear();
+    const live = [];
+    const orphans = [];
+    const discussions = [];
+    for (const entry of model) {
+      if (entry.location === null) discussions.push(entry);
+      else if (entry.location.state === "orphaned") orphans.push(entry);
+      else live.push(entry);
+    }
+    live.sort(byLocation);
+    orphans.sort(byCreated);
+    discussions.sort(byCreated);
+
+    const fragment = document.createDocumentFragment();
+    if (live.length > 0) fragment.appendChild(group("Comments in the document", live));
+    if (orphans.length > 0) fragment.appendChild(group(STATE_LABEL.orphaned, orphans));
+    if (discussions.length > 0) fragment.appendChild(group("Discussions", discussions));
+    fragment.appendChild(el("p", { class: "doc-comments-empty" }, "No comments match the current filters."));
+    list.replaceChildren(fragment);
+    applyFilters();
+
+    if (focusedInList) {
+      if (focusedThread === null) title.focus();
+      else focusCard(focusedThread);
+    }
+  }
+
+  /* Filters hide cards in place; every retained thread keeps its card and no
+     stored thread changes. */
+  function applyFilters() {
+    if (list === null) return;
+    let shown = 0;
+    for (const section of list.querySelectorAll(".doc-comments-group")) {
+      let visible = 0;
+      for (const item of section.querySelectorAll(":scope > ul > li")) {
+        const article = item.firstElementChild;
+        const entry = article === null ? undefined : cards.get(article.getAttribute("data-thread-id"));
+        const pass = entry !== undefined && passesFilters(entry.entry);
+        item.hidden = !pass;
+        if (pass) visible += 1;
+      }
+      section.hidden = visible === 0;
+      shown += visible;
+    }
+    const empty = list.querySelector(".doc-comments-empty");
+    if (empty !== null) empty.hidden = shown > 0;
+  }
+
+  function group(heading, entries) {
+    const section = el("section", { class: "doc-comments-group" });
+    section.appendChild(el("h3", undefined, heading));
+    const items = el("ul");
+    for (const entry of entries) items.appendChild(card(entry));
+    section.appendChild(items);
+    return section;
+  }
+
+  function card(entry) {
+    const thread = entry.thread;
+    const item = el("li");
+    const article = el("article", { class: "doc-comments-card" });
+    article.setAttribute("data-thread-id", thread.id);
+    if (thread.id === activeId) {
+      article.classList.add("doc-comments-card-active");
+      article.setAttribute("aria-current", "true");
+    }
+    const heading = el("h4", { tabindex: "-1" }, thread.kind === "discussion" ? thread.title : `Comment by ${thread.author.name}`);
+    article.appendChild(heading);
+
+    const meta = el("p", { class: "doc-comments-meta" });
+    meta.appendChild(el("span", { class: "doc-comments-status-label" }, thread.status === "open" ? "Open" : "Resolved"));
+    meta.appendChild(document.createTextNode(" · "));
+    meta.appendChild(timeNode(thread.createdAt));
+    if (thread.status === "resolved") {
+      meta.appendChild(document.createTextNode(` · Resolved by ${thread.resolvedBy.name} `));
+      meta.appendChild(timeNode(thread.resolvedAt));
+    }
+    article.appendChild(meta);
+
+    if (entry.location !== null) {
+      const state = entry.location.state;
+      if (state !== "exact") article.appendChild(el("p", { class: "doc-comments-state" }, STATE_LABEL[state]));
+      if (state === "drifted" || state === "orphaned") article.appendChild(el("blockquote", undefined, thread.anchor.exact));
+    }
+
+    const messages = el("ol", { class: "doc-comments-messages" });
+    for (const comment of thread.comments) {
+      const message = el("li");
+      const line = el("p", { class: "doc-comments-byline" });
+      line.appendChild(el("span", { class: "doc-comments-author" }, comment.author.name));
+      line.appendChild(document.createTextNode(" "));
+      line.appendChild(timeNode(comment.createdAt));
+      if (comment.editedAt !== null) {
+        line.appendChild(document.createTextNode(" "));
+        line.appendChild(el("span", { class: "doc-comments-edited" }, "edited"));
+      }
+      message.appendChild(line);
+      message.appendChild(el("p", { class: "doc-comments-body" }, comment.body));
+      messages.appendChild(message);
+    }
+    article.appendChild(messages);
+
+    if (isLive(entry)) {
+      const show = el("button", { type: "button", class: "doc-comments-show" }, "Show in document");
+      show.addEventListener("click", () => showInDocument(entry));
+      article.appendChild(show);
+    }
+    item.appendChild(article);
+    cards.set(thread.id, { article, heading, entry });
+    return item;
+  }
+
+  function showInDocument(entry) {
+    const host = entry.location.element;
+    let details = host.closest("details");
+    while (details !== null) {
+      details.open = true;
+      details = details.parentElement === null ? null : details.parentElement.closest("details");
+    }
+    selectThread(entry.thread.id);
+    host.scrollIntoView({ block: "center", behavior: "auto" });
+  }
+
+  /* ----------------------------------------------------- decoration */
+
+  function highlightRegistry() {
+    if (typeof Highlight !== "function") return null;
+    const css = window.CSS;
+    if (css === null || typeof css !== "object") return null;
+    const registry = css.highlights;
+    if (registry === null || typeof registry !== "object") return null;
+    if (typeof registry.set !== "function" || typeof registry.delete !== "function") return null;
+    return registry;
+  }
+
+  function clearDecoration() {
+    const registry = highlightRegistry();
+    if (registry !== null) {
+      registry.delete(OPEN_HIGHLIGHT);
+      registry.delete(ACTIVE_HIGHLIGHT);
+    }
+    for (const block of decoratedBlocks) block.classList.remove(BLOCK_CLASS, BLOCK_ACTIVE_CLASS);
+    decoratedBlocks.clear();
+  }
+
+  function paintDecoration() {
+    clearDecoration();
+    const registry = highlightRegistry();
+    if (registry !== null) {
+      const open = [];
+      const active = [];
+      for (const entry of model) {
+        if (!isOpenLive(entry) || entry.location.range === null) continue;
+        (entry.thread.id === activeId ? active : open).push(entry.location.range);
+      }
+      registry.set(OPEN_HIGHLIGHT, new Highlight(...open));
+      registry.set(ACTIVE_HIGHLIGHT, new Highlight(...active));
+      return;
+    }
+    for (const entry of model) {
+      if (!isOpenLive(entry)) continue;
+      const block = entry.location.element;
+      block.classList.add(BLOCK_CLASS);
+      if (entry.thread.id === activeId) block.classList.add(BLOCK_ACTIVE_CLASS);
+      decoratedBlocks.add(block);
+    }
+  }
+
+  /* ------------------------------------------------------- placement */
+
+  function schedulePlacement() {
+    if (placementFrame !== 0) return;
+    placementFrame = requestAnimationFrame(() => {
+      placementFrame = 0;
+      placeMarkers();
+    });
+  }
+
+  function disclosed(element) {
+    let details = element.closest("details");
+    while (details !== null) {
+      if (!details.open) return false;
+      details = details.parentElement === null ? null : details.parentElement.closest("details");
+    }
+    return true;
+  }
+
+  function placeMarkers() {
+    if (rail === null || !rail.isConnected) return;
+    const candidates = [];
+    for (const { marker, entry } of markers.values()) {
+      const host = entry.location.element;
+      const visible = host.isConnected && disclosed(host);
+      /* A stale right-edge position can itself inflate scrollWidth after a
+         viewport narrows. Reset it in the batched write phase so the later
+         document measurement describes the page, not the prior marker. */
+      if (visible) marker.style.left = "0px";
+      marker.hidden = !visible;
+      if (visible) candidates.push({ marker, entry, host });
+    }
+
+    const railRect = rail.getBoundingClientRect();
+    const scrollWidth = document.documentElement.scrollWidth;
+    const measured = [];
+    for (const { marker, entry, host } of candidates) {
+      const source = entry.location.range === null ? host : entry.location.range;
+      const hasBox = host.getClientRects().length > 0;
+      const top = source.getBoundingClientRect().top - railRect.top;
+      const hostRect = host.getBoundingClientRect();
+      const width = marker.offsetWidth;
+      const left = Math.min(Math.max(hostRect.right - railRect.left + 8, 4), scrollWidth - width - 4);
+      measured.push({ marker, entry, hasBox, top, left });
+    }
+    const visible = measured.filter((item) => item.hasBox);
+    visible.sort((a, b) => {
+      if (a.top !== b.top) return a.top - b.top;
+      return byLocation(a.entry, b.entry);
+    });
+    for (const item of measured) item.marker.hidden = !item.hasBox;
+    let previous = -Infinity;
+    for (const item of visible) {
+      const top = Math.max(item.top, previous + MARKER_STEP);
+      item.marker.style.top = `${top}px`;
+      item.marker.style.left = `${item.left}px`;
+      item.marker.classList.toggle("doc-comment-marker-active", item.entry.thread.id === activeId);
+      previous = top;
+    }
+  }
+
+  /* ------------------------------------------------------- lifecycle */
+
+  document.addEventListener("session", (event) => {
+    const detail = event.detail;
+    if (detail === null || typeof detail !== "object") return;
+    if (activated) return;
+    activated = true;
+    refresh();
+  }, { once: true });
+
+  /* Only visible edges after activation count toward the 30-second window;
+     an edge before the session reveal must not consume the first eligible one. */
+  function visibilityRefresh() {
+    if (!activated || document.visibilityState !== "visible") return;
+    const now = performance.now();
+    if (lastVisibilityRefresh !== null && now - lastVisibilityRefresh < VISIBILITY_WINDOW_MS) return;
+    lastVisibilityRefresh = now;
+    refresh();
+  }
+
+  document.addEventListener("visibilitychange", visibilityRefresh);
+
+  doc.comments = Object.freeze({ refresh });
+}
+
+</script>
+<script type="module">
 /* Changelog client — the one browser-side consumer of #doc-history.
    Compares the baked history window with a single localStorage marker and adds
    a transient change bar plus section/nav dots for versions the reader has not
@@ -1283,6 +2559,432 @@ function buildBar(count, current, onMarkRead) {
 }
 
 runHistory();
+
+</script>
+<script type="module">
+startSharePanel();
+
+function startSharePanel() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  document.addEventListener("session", mountSharePanel, { once: true });
+}
+
+function mountSharePanel(event) {
+  const session = event.detail;
+  if (!validSession(session)) return;
+
+  const host = document.querySelector(".head-top");
+  if (!(host instanceof HTMLElement)
+    || host.ownerDocument !== document
+    || !host.isConnected) return;
+  for (const child of host.children) {
+    if (child.id === "doc-share-button" || child.classList.contains("share-btn")) return;
+  }
+
+  let docId = session.doc;
+  let sessionRole = session.role;
+  let mayShare = session.canShare;
+  let panel = null;
+  let heading = null;
+  let closeButton = null;
+  let status = null;
+  let defaultPolicy = null;
+  let memberList = null;
+  let invitationSection = null;
+  let invitationList = null;
+  let invoker = null;
+  let controller = null;
+  let generation = 0;
+  let positionFrame = 0;
+  let removed = false;
+
+  const button = document.createElement("button");
+  button.id = "doc-share-button";
+  button.className = "tt share-btn";
+  button.setAttribute("type", "button");
+  button.setAttribute("aria-haspopup", "true");
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-controls", "doc-share-panel");
+  button.appendChild(document.createTextNode("Share"));
+  button.addEventListener("click", togglePanel);
+  host.appendChild(button);
+
+  function validSession(value) {
+    if (!isRecord(value)
+      || typeof value.doc !== "string"
+      || !/^[0-9a-f]{6}$/.test(value.doc)) return false;
+    if (value.shared !== true || value.canSeeMembers !== true) return false;
+    return (value.role === "owner" && value.canShare === true)
+      || (value.role === "editor" && value.canShare === false);
+  }
+
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function fixedElement(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className !== "") element.className = className;
+    if (text !== null) element.appendChild(document.createTextNode(text));
+    return element;
+  }
+
+  function createPanel() {
+    panel = fixedElement("aside", "share-pop", null);
+    panel.id = "doc-share-panel";
+    panel.hidden = true;
+    panel.setAttribute("aria-labelledby", "doc-share-title");
+
+    const panelHeader = fixedElement("header", "share-head", null);
+    heading = fixedElement("h2", "", "Access");
+    heading.id = "doc-share-title";
+    heading.setAttribute("tabindex", "-1");
+    closeButton = fixedElement("button", "share-close", "Close access panel");
+    closeButton.setAttribute("type", "button");
+    panelHeader.append(heading, closeButton);
+
+    status = fixedElement("p", "share-status", null);
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    defaultPolicy = fixedElement("p", "share-default", null);
+
+    const memberSection = fixedElement("section", "share-members", null);
+    memberSection.setAttribute("aria-labelledby", "doc-share-members-title");
+    const memberTitle = fixedElement("h3", "", "People with access");
+    memberTitle.id = "doc-share-members-title";
+    memberList = fixedElement("ul", "share-list", null);
+    memberSection.append(memberTitle, memberList);
+
+    invitationSection = fixedElement("section", "share-invitations", null);
+    invitationSection.setAttribute("aria-labelledby", "doc-share-invitations-title");
+    const invitationTitle = fixedElement("h3", "", "Pending invitations");
+    invitationTitle.id = "doc-share-invitations-title";
+    invitationList = fixedElement("ul", "share-list", null);
+    invitationSection.append(invitationTitle, invitationList);
+
+    panel.append(panelHeader, status, defaultPolicy, memberSection, invitationSection);
+    document.body.appendChild(panel);
+    closeButton.addEventListener("click", closePanel);
+    document.addEventListener("keydown", handleKeydown);
+    document.addEventListener("pointerdown", handlePointerdown);
+    window.addEventListener("resize", handlePositionChange);
+    window.addEventListener("scroll", handlePositionChange, true);
+  }
+
+  function togglePanel() {
+    if (removed) return;
+    if (panel === null) createPanel();
+    if (!panel.hidden) {
+      closePanel();
+      return;
+    }
+    openPanel();
+  }
+
+  function openPanel() {
+    invoker = button;
+    panel.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    status.textContent = "Loading access…";
+    if (!positionPanel()) return;
+    heading.focus();
+    refreshRoster();
+  }
+
+  function closePanel() {
+    if (panel === null || panel.hidden) return;
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    generation += 1;
+    if (controller !== null) {
+      const closingController = controller;
+      controller = null;
+      closingController.abort();
+    }
+    if (positionFrame !== 0) {
+      cancelAnimationFrame(positionFrame);
+      positionFrame = 0;
+    }
+    if (invoker !== null && invoker.isConnected) invoker.focus();
+  }
+
+  function handleKeydown(event) {
+    if (panel !== null && !panel.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closePanel();
+    }
+  }
+
+  function handlePointerdown(event) {
+    if (panel === null || panel.hidden || event.button !== 0) return;
+    if (!panel.contains(event.target) && !button.contains(event.target)) closePanel();
+  }
+
+  function handlePositionChange() {
+    if (panel === null || panel.hidden || positionFrame !== 0) return;
+    positionFrame = -1;
+    const requestedFrame = requestAnimationFrame(() => {
+      positionFrame = 0;
+      positionPanel();
+    });
+    if (positionFrame === -1) positionFrame = requestedFrame;
+  }
+
+  function positionPanel() {
+    const rect = button.getBoundingClientRect();
+    const values = [
+      window.scrollX, window.scrollY, window.innerHeight,
+      panel.offsetWidth, panel.offsetHeight,
+      rect.top, rect.bottom, rect.right,
+      document.documentElement.clientWidth,
+    ];
+    if (!values.every(Number.isFinite)) {
+      closePanel();
+      return false;
+    }
+
+    const lowerTop = window.scrollY + 8;
+    const upperTop = window.scrollY + window.innerHeight - panel.offsetHeight - 8;
+    const below = window.scrollY + rect.bottom + 8;
+    const above = window.scrollY + rect.top - panel.offsetHeight - 8;
+    let top;
+    if (upperTop < lowerTop) top = lowerTop;
+    else if (below <= upperTop) top = below;
+    else top = Math.min(upperTop, Math.max(lowerTop, above));
+
+    const lowerLeft = window.scrollX + 8;
+    const upperLeft = window.scrollX + document.documentElement.clientWidth
+      - panel.offsetWidth - 8;
+    const desiredLeft = window.scrollX + rect.right - panel.offsetWidth;
+    const left = upperLeft < lowerLeft
+      ? lowerLeft
+      : Math.min(upperLeft, Math.max(lowerLeft, desiredLeft));
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.left = `${Math.round(left)}px`;
+    return true;
+  }
+
+  async function refreshRoster() {
+    const requestGeneration = generation + 1;
+    generation = requestGeneration;
+    const requestController = new AbortController();
+    controller = requestController;
+    const endpoint = new URL("/api/access", location.href);
+    endpoint.searchParams.set("doc", docId);
+    const deadline = setTimeout(() => requestController.abort(), 5_000);
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "application/json" },
+        signal: requestController.signal,
+      });
+      if (!isCurrent(requestGeneration)) return;
+      if (response.status === 401 || response.status === 403) {
+        removeFeature();
+        return;
+      }
+      if (response.status !== 200) throw new Error();
+      const contentType = response.headers.get("Content-Type");
+      if (typeof contentType !== "string"
+        || !/^[\t ]*(?:application\/json|application\/json; charset=utf-8)[\t ]*$/i.test(contentType)) {
+        throw new Error();
+      }
+      const contentLength = response.headers.get("Content-Length");
+      if (contentLength !== null) {
+        if (!/^(?:0|[1-9][0-9]{0,4})$/.test(contentLength)) throw new Error();
+        const length = Number(contentLength);
+        if (!Number.isSafeInteger(length) || length > 65_536) throw new Error();
+      }
+      const responseBody = response.body;
+      if (responseBody === null) throw new Error();
+      const reader = responseBody.getReader();
+      let complete = false;
+      const chunks = [];
+      let byteCount = 0;
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (result.done === true) {
+            complete = true;
+            break;
+          }
+          if (!(result.value instanceof Uint8Array) || result.value.byteLength === 0) throw new Error();
+          const nextCount = byteCount + result.value.byteLength;
+          if (!Number.isSafeInteger(nextCount) || nextCount > 65_536) throw new Error();
+          byteCount = nextCount;
+          chunks.push(result.value);
+        }
+      } finally {
+        if (!complete) {
+          try {
+            await reader.cancel();
+          } catch (error) {
+            // Cancellation is best-effort; the fixed refresh failure is retained.
+          }
+        }
+        reader.releaseLock();
+      }
+      if (!isCurrent(requestGeneration)) return;
+      const bytes = new Uint8Array(byteCount);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const roster = JSON.parse(decoded);
+      if (!validRoster(roster)) throw new Error();
+      if (!isCurrent(requestGeneration)) return;
+      renderRoster(roster);
+    } catch (error) {
+      if (isCurrent(requestGeneration)) status.textContent = "Access list could not be refreshed.";
+    } finally {
+      clearTimeout(deadline);
+      if (generation === requestGeneration && controller === requestController) controller = null;
+    }
+  }
+
+  function isCurrent(requestGeneration) {
+    return !removed && generation === requestGeneration && panel !== null && !panel.hidden;
+  }
+
+  function validRoster(value) {
+    if (!exactRecord(value, ["doc", "orgDefault", "members", "invitations"])) return false;
+    if (value.doc !== docId || !["commenter", "viewer", "none"].includes(value.orgDefault)) return false;
+    if (!Array.isArray(value.members) || value.members.length < 1 || value.members.length > 51) return false;
+    if (!Array.isArray(value.invitations) || value.invitations.length > 50) return false;
+    if ((value.members.length - 1) + value.invitations.length > 50) return false;
+
+    const subjects = new Set();
+    const memberEmails = new Set();
+    let previousMember = null;
+    for (let index = 0; index < value.members.length; index += 1) {
+      const member = value.members[index];
+      if (!exactRecord(member, ["sub", "email", "name", "role"])) return false;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/.test(member.sub)) return false;
+      if (!validEmail(member.email) || typeof member.name !== "string" || member.name.length > 200) return false;
+      if (subjects.has(member.sub) || memberEmails.has(member.email)) return false;
+      subjects.add(member.sub);
+      memberEmails.add(member.email);
+      if (index === 0) {
+        if (member.role !== "owner" || member.name !== "") return false;
+      } else {
+        if (!["editor", "commenter", "viewer"].includes(member.role)) return false;
+        if (previousMember !== null
+          && (member.email < previousMember.email
+            || (member.email === previousMember.email && member.sub <= previousMember.sub))) return false;
+        previousMember = member;
+      }
+    }
+
+    const invitationEmails = new Set();
+    let previousEmail = null;
+    for (const invitation of value.invitations) {
+      if (!exactRecord(invitation, ["email", "role", "expiresAt"])) return false;
+      if (!validEmail(invitation.email)
+        || !["editor", "commenter", "viewer"].includes(invitation.role)
+        || typeof invitation.expiresAt !== "string"
+        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(invitation.expiresAt)) return false;
+      if (invitationEmails.has(invitation.email)
+        || (previousEmail !== null && invitation.email <= previousEmail)) return false;
+      const expires = new Date(invitation.expiresAt);
+      if (!Number.isFinite(expires.getTime()) || expires.toISOString() !== invitation.expiresAt) return false;
+      invitationEmails.add(invitation.email);
+      previousEmail = invitation.email;
+    }
+    return true;
+  }
+
+  function exactRecord(value, keys) {
+    if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype) return false;
+    const actual = Object.keys(value);
+    return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
+  }
+
+  function validEmail(value) {
+    if (typeof value !== "string" || value.length === 0 || value.length > 254) return false;
+    if (value !== value.toLowerCase() || /[\x00-\x20\x7f,/:\\]/.test(value)) return false;
+    for (let index = 0; index < value.length; index += 1) {
+      if (value.charCodeAt(index) > 127) return false;
+    }
+    const at = value.indexOf("@");
+    return at > 0 && at === value.lastIndexOf("@") && at < value.length - 1;
+  }
+
+  function roleLabel(role) {
+    return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+
+  function appendIsolatedFields(row, fields) {
+    fields.forEach((field, index) => {
+      if (index !== 0) row.appendChild(document.createTextNode(" — "));
+      row.appendChild(fixedElement("bdi", "share-value", field));
+    });
+  }
+
+  function renderRoster(roster) {
+    const memberRows = roster.members.map((member) => {
+      const row = document.createElement("li");
+      const fields = member.name === ""
+        ? [member.email, roleLabel(member.role)]
+        : [member.name, member.email, roleLabel(member.role)];
+      appendIsolatedFields(row, fields);
+      return row;
+    });
+    const invitationRows = roster.invitations.map((invitation) => {
+      const row = document.createElement("li");
+      appendIsolatedFields(row, [invitation.email, roleLabel(invitation.role)]);
+      row.appendChild(document.createTextNode(" — Pending until "));
+      const date = document.createElement("time");
+      date.setAttribute("datetime", invitation.expiresAt);
+      date.appendChild(document.createTextNode(invitation.expiresAt.slice(0, 10)));
+      row.appendChild(date);
+      return row;
+    });
+    const defaultLabels = { commenter: "Commenter", viewer: "Viewer", none: "No access" };
+    memberList.replaceChildren(...memberRows);
+    invitationList.replaceChildren(...invitationRows);
+    defaultPolicy.textContent = `Organization default: ${defaultLabels[roster.orgDefault]}`;
+    invitationSection.hidden = invitationRows.length === 0;
+    status.textContent = "";
+    handlePositionChange();
+  }
+
+  function removeFeature() {
+    if (removed) return;
+    removed = true;
+    generation += 1;
+    if (positionFrame !== 0) {
+      cancelAnimationFrame(positionFrame);
+      positionFrame = 0;
+    }
+    if (invoker !== null && invoker.isConnected) invoker.focus();
+    button.removeEventListener("click", togglePanel);
+    if (closeButton !== null) closeButton.removeEventListener("click", closePanel);
+    document.removeEventListener("keydown", handleKeydown);
+    document.removeEventListener("pointerdown", handlePointerdown);
+    window.removeEventListener("resize", handlePositionChange);
+    window.removeEventListener("scroll", handlePositionChange, true);
+    if (memberList !== null) memberList.replaceChildren();
+    if (invitationList !== null) invitationList.replaceChildren();
+    if (defaultPolicy !== null) defaultPolicy.textContent = "";
+    button.remove();
+    if (panel !== null) panel.remove();
+    if (controller !== null) {
+      const removingController = controller;
+      controller = null;
+      removingController.abort();
+    }
+    docId = "";
+    sessionRole = "";
+    mayShare = false;
+    invoker = null;
+  }
+}
 
 </script>
 <script type="module">

@@ -20,6 +20,13 @@ jobs:
         with:
           node-version: '22'
 
+      # The deploy tree (netlify/, netlify.toml, package.json, package-lock.json)
+      # is what the P4-S connect tool (#80) copies verbatim. npm ci fails if the root
+      # lockfile is missing or out of sync with package.json, so this step
+      # keeps the committed lockfile honest without changing any dependency.
+      - name: root lockfile is in sync
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
