@@ -104,15 +104,13 @@ jobs:
           # into a temporary root -- which is the price of the write paths
           # having a gate at all. Anything that needs the TypeScript compiler
           # relies on the typecheck step above having installed it.
-          # Wiring test-p4-a.mjs in found a defect in it: its browser matrix
-          # measures the selection tooltip without asserting that it found one,
-          # which holds locally and dies with a TypeError in Actions (#124).
-          # The runner still runs in full -- dropping it, or teaching it to skip
-          # a matrix, would trade a red build for no coverage -- and the wrapper
-          # excuses that one failure, dated, out loud, and only while the
-          # unguarded measurement is still in the source. Remove the wrapper
-          # with #124. Every other runner is invoked directly.
-          node scripts/allow-known-runner-failure.mjs scripts/test-p4-a.mjs
+          # test-p4-a.mjs ran through allow-known-runner-failure.mjs until
+          # #124: its browser matrix measured the selection tooltip without
+          # asserting that it found one, which held locally and died with a
+          # TypeError in Actions. The measurement now waits for a laid-out host
+          # and names the selector when there is none, so the allowance is gone
+          # and every runner is invoked directly.
+          node scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-m.mjs
           node scripts/test-p4-q.mjs
