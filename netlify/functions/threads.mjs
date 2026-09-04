@@ -9,6 +9,8 @@ import {
   upgrade,
 } from "../lib/store.mjs";
 import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
+import { appendEvent } from "./events.mjs";
+import { notify } from "../lib/notify.mjs";
 
 /**
  * P3-A — `/api/threads`: list one page of a document's threads (`GET`) and
@@ -16,9 +18,10 @@ import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
  *
  * Every actor is projected from the verified server identity. `GET` is
  * authorized through P2-G's non-consuming `canRead` result before thread
- * storage is opened; mutation-role enforcement is deliberately absent here
- * and is added by P4-M. `thread.mjs` duplicates the private validators below
- * on purpose: the ticket forbids a shared third helper file.
+ * storage is opened. P4-M adds the matching `canComment` gate to `POST`, the
+ * post-commit `comment.create` audit append, and the `thread.created`
+ * fan-out. `thread.mjs` duplicates the private validators below on purpose:
+ * the ticket forbids a shared third helper file.
  */
 
 const MAX_REQUEST_BYTES = 65_536;
@@ -733,7 +736,7 @@ function isUnavailableRejection(error) {
   );
 }
 
-/** Validate the complete P2-G result and return its exact `canRead`. */
+/** Validate the complete P2-G result and return it unchanged. */
 function validateAccess(result) {
   if (!hasExactKeys(result, ACCESS_KEYS)) {
     throw fail("invalid-state");
@@ -766,17 +769,34 @@ function validateAccess(result) {
       throw fail("invalid-state");
     }
   }
-  return result.canRead === true;
+  return result;
 }
 
-async function requireReadAccess(docId, identity) {
+/**
+ * The single non-consuming P2-G lookup for this request. It runs after every
+ * public request gate and before any clock, randomness, or thread-store work;
+ * its own access-store reads are the authority lookup, not domain work.
+ */
+async function resolveAccess(docId, identity) {
   let result;
   try {
     result = await resolveRole(docId, identity, { consumeInvitation: false });
   } catch (error) {
     throw fail(isUnavailableRejection(error) ? "unavailable" : "invalid-state");
   }
-  if (!validateAccess(result)) {
+  return validateAccess(result);
+}
+
+async function requireReadAccess(docId, identity) {
+  const access = await resolveAccess(docId, identity);
+  if (access.canRead !== true) {
+    throw fail("forbidden");
+  }
+}
+
+async function requireCommentAccess(docId, identity) {
+  const access = await resolveAccess(docId, identity);
+  if (access.canComment !== true) {
     throw fail("forbidden");
   }
 }
@@ -962,12 +982,16 @@ async function listThreads(req) {
   return jsonResponse(200, { threads, nextCursor });
 }
 
-async function createThread(req) {
+async function createThread(req, context) {
   requireOrigin(req);
   const identity = await identify(req);
   const actor = requireActor(identity);
   const docId = parseCreateQuery(req);
   const input = parseCreateBody(await readJsonObject(req));
+
+  // P4-M: the one non-consuming P2-G lookup, after every public request gate
+  // and before the clock, the identifier randomness, and `docState()`.
+  await requireCommentAccess(docId, identity);
 
   const { operationMs, operationTime } = sampleOperationTime();
   const threadId = sampleIdentifier("t", operationMs);
@@ -1016,7 +1040,52 @@ async function createThread(req) {
   if (modified.value === false) {
     throw fail("id-collision");
   }
+
+  // The thread is durable from here on. P3-B has no transaction with the
+  // domain record, so the audit append and the fan-out are both best effort:
+  // neither may change this response, retry, roll back, or encourage a replay
+  // of a non-idempotent POST.
+  await auditThreadCreate(store, thread, actor);
+  fanOutThreadCreated(context, thread);
   return jsonResponse(201, { thread });
+}
+
+/** One canonical P3-B `comment.create` append, attempted only after the
+ * authoritative write succeeded. Every failure is absorbed here. */
+async function auditThreadCreate(store, thread, actor) {
+  try {
+    await appendEvent({
+      store,
+      docId: thread.docId,
+      actor: { sub: actor.sub, name: actor.name, email: actor.email },
+      kind: "comment.create",
+      target: { threadId: thread.id, aid: thread.anchor?.block ?? null },
+      docVersion: thread.docVersion,
+      summary: `commented on ${thread.section}`,
+    });
+  } catch {
+    // A collision, an unavailable store, and an unexpected throw are all
+    // absorbed identically: the audit row may be lost, the thread may not.
+  }
+}
+
+/** The sole P4-D/P4-H fan-out call for a durable thread creation. Its boolean
+ * result is ignored and any throw is absorbed: a notification can never turn
+ * a landed write into a failed response. */
+function fanOutThreadCreated(context, thread) {
+  try {
+    notify(context, {
+      t: "thread.created",
+      docId: thread.docId,
+      threadId: thread.id,
+      actorName: thread.author.name,
+      threadKind: thread.kind,
+      body: thread.comments[0].body,
+      quote: thread.kind === "comment" ? thread.anchor.exact : null,
+    });
+  } catch {
+    // Best effort by contract.
+  }
 }
 
 /**
@@ -1032,7 +1101,7 @@ export default async function handler(req, context) {
       return await listThreads(req);
     }
     if (req.method === "POST") {
-      return await createThread(req);
+      return await createThread(req, context);
     }
     return errorResponse("method-not-allowed", { Allow: "GET, POST" });
   } catch (error) {
