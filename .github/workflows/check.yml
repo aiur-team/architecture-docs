@@ -126,6 +126,10 @@ jobs:
           # needs operator credentials no build has, so CI runs it only far
           # enough to prove it refuses to touch a provider account without
           # them -- which is also what names the file for the inventory gate.
+          #
+          # test-p4-k.mjs has one mode and needs no credential; its sibling
+          # browser runner installs its own pinned Playwright and Chromium the
+          # same way test-p4-a.mjs does.
           node scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-i.mjs
@@ -145,6 +149,22 @@ jobs:
           # the capability matrix through each of them, so neutering the shared
           # validator -- or any one of the four call sites -- fails here.
           node scripts/test-access-row.mjs
+          node --experimental-vm-modules scripts/test-p4-k.mjs contract
+          node scripts/test-p4-k-browser.mjs
+
+      # P4-K's hosted oracle creates and deletes a real Netlify site and needs
+      # operator credentials no build has. It is named here so the test
+      # inventory gate above sees it wired, and it runs only when an operator
+      # supplies the credentials -- never on an untrusted pull request.
+      - name: P4-K hosted acceptance (operator credentials only)
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          if [ -n "${NETLIFY_AUTH_TOKEN:-}" ]; then
+            node scripts/test-p4-k-hosted.mjs
+          else
+            echo "SKIP scripts/test-p4-k-hosted.mjs (no operator credentials)"
+          fi
 
       - name: edge gate config is fail-closed
         run: |
