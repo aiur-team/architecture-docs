@@ -125,8 +125,19 @@ const MAX_PAGE_ENTRIES = 1_000;
 const MAX_KEYS = 10_000;
 const MAX_PULLS = MAX_PAGES + 1;
 
-/** Provider keys are short by construction; anything longer is not ours. */
-const MAX_KEY_BYTES = 128;
+/**
+ * The longest key our own writers can produce, matching P2-B `assertKey()`'s
+ * own ceiling. Anything longer did not come from this application.
+ *
+ * P4-F could afford a much tighter bound because `events/` keys are fixed
+ * length. P4-T lists the whole `access/` root, which also contains grant keys
+ * of the form `access/<docId>/u/<sub>.json`, and P2-B admits a 128-character
+ * identity subject — a legal grant key reaches 149 bytes. A tighter ceiling
+ * here would report a key the product itself wrote as provider unavailability
+ * and wedge the invitation sweep permanently, so this must not be narrowed
+ * below what P2-B is willing to write.
+ */
+const MAX_KEY_BYTES = 600;
 
 /** Netlify's own bound on `nowMs`: a 13-digit epoch millisecond value. */
 const MIN_NOW_MS = 1_000_000_000_000;
@@ -770,6 +781,16 @@ function compareAscii(a, b) {
  * superseded during an authorized read. This sweep only guarantees that an
  * abandoned record cannot outlive the ceiling.
  *
+ * Unlike the invitation sweep below, this one takes no lease and does no second
+ * read. That asymmetry is deliberate and it is about the writers, not the
+ * record: an invitation has a concurrent writer that can legitimately renew it
+ * back to life, so a delete decision can go stale between the read and the
+ * delete. A suggestion is immutable, and a candidate is 90 days old — the
+ * window where P4-O could be mid-acceptance on one is vanishingly small and
+ * loses only the record, never the accepted content or the decision event.
+ * Immutability prevents changed content, not concurrent use, so this is a
+ * judgement about cost rather than a proof; the spec settles it here.
+ *
  * @param {{ store: object, nowMs: number }} options
  * @returns {Promise<{ v: 1, scanned: number, candidates: number, deleted: number,
  *                     remaining: boolean, cutoff: string }>}
@@ -843,8 +864,13 @@ export async function sweepSuggestions(options) {
  * @returns {string}
  */
 function stableText(value) {
+  if (value === undefined) {
+    // Distinct from `null`: `JSON.stringify` renders both as nothing, and this
+    // comparison is the only fence between a concurrent renewal and a delete.
+    return "undefined";
+  }
   if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
+    return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map(stableText).join(",")}]`;

@@ -202,6 +202,11 @@ async function runtimeMatrix(file, source) {
   let invitationValidationCalls = 0;
   let leaseMode = "acquire";
   let beforeLeaseRun = null;
+  // The lease fake models held/released state, and the store refuses an
+  // invitation delete outside it. Without this the delete could be moved after
+  // `withAccessWriteLease` resolves and every assertion would still pass, which
+  // reintroduces exactly the renewal race the lease exists to prevent.
+  let leaseHeldFor = null;
   const validatedEvents = [];
   const storeErrorCalls = [];
   const event = (kind, i) => ({
@@ -232,6 +237,13 @@ async function runtimeMatrix(file, source) {
       })();
     },
     async delete(k) {
+      if (k.startsWith("access/")) {
+        assert.equal(
+          leaseHeldFor,
+          k.slice("access/".length, k.indexOf("/i/")),
+          "invitation delete must happen inside that document's held lease",
+        );
+      }
       if (deleteFailurePrefix && k.startsWith(deleteFailurePrefix)) {
         throw deleteFailure;
       }
@@ -344,7 +356,12 @@ async function runtimeMatrix(file, source) {
               beforeLeaseRun = null;
               await fn();
             }
-            return { acquired: true, value: await run() };
+            leaseHeldFor = doc;
+            try {
+              return { acquired: true, value: await run() };
+            } finally {
+              leaseHeldFor = null;
+            }
           });
         },
         { context },
@@ -842,6 +859,236 @@ async function runtimeMatrix(file, source) {
         error.name === "RetentionError" && error.code === "invalid-suggestion-key",
     );
     assert.deepEqual(deleted, []);
+  }
+
+  // --- a long but legal grant key does not wedge the invitation sweep -----
+  // P2-B admits a 128-character identity subject, so `access/<docId>/u/<sub>`
+  // reaches 149 bytes. That key belongs to a record class this sweep skips,
+  // but it is still listed, and treating it as an over-long foreign key would
+  // report the application's own data as provider unavailability and stop
+  // expired invitations from ever being deleted again.
+  {
+    const longSub = `u${"a".repeat(127)}`;
+    const grantKey = `access/4b7d2a/u/${longSub}.json`;
+    assert.equal(Buffer.byteLength(grantKey), 149);
+    const expiredKey = "access/4b7d2a/i/000000000000000000000000000000ab.json";
+    const expiredInvitation = {
+      v: 1,
+      docId: "4b7d2a",
+      expiresAt: new Date(now - 1).toISOString(),
+    };
+    records.clear();
+    deleted.length = 0;
+    pagesByPrefix["access/"] = [
+      [grantKey, { v: 1 }],
+      [expiredKey, expiredInvitation],
+    ];
+    records.set(expiredKey, expiredInvitation);
+    const withLongGrant = await mod.namespace.sweepInvitations({
+      store,
+      nowMs: now,
+    });
+    assert.deepEqual(
+      {
+        scanned: withLongGrant.scanned,
+        records: withLongGrant.records,
+        deleted: withLongGrant.deleted,
+      },
+      { scanned: 2, records: 1, deleted: 1 },
+    );
+    assert.deepEqual(deleted, [expiredKey]);
+  }
+
+  // --- durable kinds survive at every age, not just one -------------------
+  // The canonical fixture puts every durable event at exactly 540 days + 1 ms.
+  // The acceptance criterion is "at 540 days, 24 months, and any later age", so
+  // an age-dependent retain predicate would pass that fixture while destroying
+  // the only authorship and authority record the product has.
+  assert.ok(Object.isFrozen(mod.namespace.DURABLE_EVENT_KINDS));
+  {
+    const ages = [
+      46_656_000_000 + 1, // 540 days + 1 ms
+      63_072_000_000, // 24 months
+      315_360_000_000, // 10 years
+      631_152_000_000, // 20 years (the oldest a 13-digit event ID can express)
+    ];
+    records.clear();
+    deleted.length = 0;
+    const aged = [];
+    for (const [ageIndex, age] of ages.entries()) {
+      const ms = now - age;
+      for (const [kindIndex, kind] of durable.entries()) {
+        const id = `${ms}-${String(ageIndex * 100 + kindIndex).padStart(6, "0")}`;
+        const ts = new Date(ms).toISOString();
+        aged.push([
+          `events/4b7d2a/${ts.slice(0, 7)}/${id}.json`,
+          { ...event(kind, 1), id, ts, kind },
+        ]);
+      }
+    }
+    pagesByPrefix["events/"] = aged;
+    for (const pair of aged) records.set(...pair);
+    const survived = await mod.namespace.sweepEvents({ store, nowMs: now });
+    assert.deepEqual(
+      {
+        retained: survived.retained,
+        deleted: survived.deleted,
+        remaining: survived.remaining,
+      },
+      { retained: ages.length * durable.length, deleted: 0, remaining: false },
+    );
+    assert.deepEqual(deleted, []);
+    assert.equal(records.size, ages.length * durable.length);
+  }
+
+  // --- the event and invitation delete caps -------------------------------
+  // Only the suggestion cap had a runtime fixture. Without these, removing
+  // either cap goes green while a single invocation attempts thousands of
+  // deletes inside the platform's fixed 30-second limit.
+  {
+    records.clear();
+    deleted.length = 0;
+    const ordinary = Array.from({ length: 101 }, (_, i) => {
+      const ms = old - i;
+      const id = `${ms}-${i.toString(16).padStart(6, "0")}`;
+      const ts = new Date(ms).toISOString();
+      return [
+        `events/4b7d2a/${ts.slice(0, 7)}/${id}.json`,
+        { ...event("comment.create", 1), id, ts },
+      ];
+    });
+    pagesByPrefix["events/"] = ordinary;
+    for (const pair of ordinary) records.set(...pair);
+    const cappedEvents = await mod.namespace.sweepEvents({ store, nowMs: now });
+    assert.deepEqual(
+      { deleted: cappedEvents.deleted, remaining: cappedEvents.remaining },
+      { deleted: 100, remaining: true },
+    );
+    assert.equal(deleted.length, 100);
+    assert.equal(records.size, 1);
+  }
+
+  {
+    records.clear();
+    deleted.length = 0;
+    const manyExpired = Array.from({ length: 76 }, (_, i) => [
+      `access/4b7d2a/i/${i.toString(16).padStart(32, "0")}.json`,
+      {
+        v: 1,
+        docId: "4b7d2a",
+        expiresAt: new Date(now - 76 + i).toISOString(),
+      },
+    ]);
+    pagesByPrefix["access/"] = manyExpired;
+    for (const pair of manyExpired) records.set(...pair);
+    const cappedInvites = await mod.namespace.sweepInvitations({
+      store,
+      nowMs: now,
+    });
+    assert.deepEqual(
+      {
+        expired: cappedInvites.expired,
+        deleted: cappedInvites.deleted,
+        remaining: cappedInvites.remaining,
+      },
+      { expired: 76, deleted: 75, remaining: true },
+    );
+    assert.equal(deleted.length, 75);
+    assert.equal(records.size, 1);
+  }
+
+  // --- each invitation is leased under its own document -------------------
+  // Every other invitation fixture uses the single document `4b7d2a`, so
+  // leasing a constant document instead of each candidate's own would pass
+  // while deleting invitations in every other document entirely unfenced.
+  {
+    records.clear();
+    deleted.length = 0;
+    leasedDocs.length = 0;
+    const twoDocs = [
+      [
+        "access/9c1e40/i/000000000000000000000000000000aa.json",
+        { v: 1, docId: "9c1e40", expiresAt: new Date(now - 2).toISOString() },
+      ],
+      [
+        "access/4b7d2a/i/000000000000000000000000000000bb.json",
+        { v: 1, docId: "4b7d2a", expiresAt: new Date(now - 1).toISOString() },
+      ],
+    ];
+    pagesByPrefix["access/"] = twoDocs;
+    for (const pair of twoDocs) records.set(...pair);
+    const across = await mod.namespace.sweepInvitations({ store, nowMs: now });
+    assert.equal(across.deleted, 2);
+    // Oldest expiry first, so the second document's invitation leads.
+    assert.deepEqual(leasedDocs, ["9c1e40", "4b7d2a"]);
+    assert.deepEqual(deleted, twoDocs.map(([key]) => key));
+  }
+
+  // --- the log line is wired to the right fields --------------------------
+  // The empty-store case below cannot tell `events.deleted` from
+  // `events.retained`, `suggestions` from `invitations`, or a real `remaining`
+  // from a hardcoded `false`, because every value is zero.
+  {
+    records.clear();
+    deleted.length = 0;
+    leasedDocs.length = 0;
+    const wiredEvent = (kind, i, ms) => {
+      const id = `${ms}-${i.toString(16).padStart(6, "0")}`;
+      const ts = new Date(ms).toISOString();
+      return [
+        `events/4b7d2a/${ts.slice(0, 7)}/${id}.json`,
+        { ...event(kind, 1), id, ts, kind },
+      ];
+    };
+    // Three deleted, one retained: the two event counters cannot be swapped.
+    pagesByPrefix["events/"] = [
+      wiredEvent("comment.create", 1, old),
+      wiredEvent("comment.create", 2, old - 1),
+      wiredEvent("comment.create", 3, old - 2),
+      wiredEvent("access.invite", 4, old - 3),
+    ];
+    // Two suggestions and one invitation: the two counters cannot be swapped.
+    const wiredSuggestions = [0, 1].map((i) => {
+      const ms = now - 7_776_000_000 - 1 - i;
+      const id = `s_${ms.toString(36)}_${i.toString(16).padStart(8, "0")}`;
+      return [
+        `suggest/4b7d2a/a3f19c2b7/${id}.json`,
+        {
+          v: 1,
+          id,
+          docId: "4b7d2a",
+          aid: "a3f19c2b7",
+          at: new Date(ms).toISOString(),
+        },
+      ];
+    });
+    pagesByPrefix["suggest/"] = wiredSuggestions;
+    // Two expired invitations but a busy lease, so `remaining` is genuinely
+    // true and a hardcoded `false` is visible.
+    pagesByPrefix["access/"] = [
+      [
+        "access/4b7d2a/i/000000000000000000000000000000cc.json",
+        { v: 1, docId: "4b7d2a", expiresAt: new Date(now - 1).toISOString() },
+      ],
+    ];
+    for (const prefix of ["events/", "suggest/", "access/"]) {
+      for (const pair of pagesByPrefix[prefix]) records.set(...pair);
+    }
+    leaseMode = "busy";
+    const wiredLog = [];
+    const wiredRun = mod.namespace.createRetentionHandler({
+      storeFn: () => store,
+      nowFn: () => now,
+      logFn: (line) => wiredLog.push(line),
+    });
+    assert.equal(
+      await wiredRun(new Request("https://fixture.invalid/ignored")),
+      undefined,
+    );
+    assert.deepEqual(wiredLog, [
+      "retention: events=3/1 suggestions=2 invitations=0 remaining=true",
+    ]);
+    leaseMode = "acquire";
   }
 
   // --- the one success log ------------------------------------------------
