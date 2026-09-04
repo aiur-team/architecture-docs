@@ -1104,6 +1104,38 @@ async function serverMatrix() {
     eq((await built.handle(post(valid))).status, 500, "a non-integer clock is 500");
   }
 
+  /* ---- the locator against real build output --------------------------- */
+
+  {
+    // The invented fixture proves the rules; this proves the rules describe the
+    // documents this repository actually builds. Every editable block in the
+    // committed example manifest must be reachable by the same anchors-index
+    // plus body-marker join the handler uses, and must hash to the manifest.
+    const manifestPath = join(ROOT, "example/dist/example.edit.json");
+    const anchorsPath = join(ROOT, "example/anchors.json");
+    if (existsSync(manifestPath) && existsSync(anchorsPath)) {
+      const built = JSON.parse(readFileSync(manifestPath, "utf8"));
+      const anchors = JSON.parse(readFileSync(anchorsPath, "utf8"));
+      let reached = 0;
+      for (const [aid, row] of Object.entries(built.blocks)) {
+        const source = readFileSync(join(ROOT, "example", row.file), "utf8");
+        const at = source.indexOf("<!-- body -->");
+        ok(at !== -1 && source.indexOf("<!-- body -->", at + 13) === -1,
+          `${row.file} has exactly one body marker`);
+        const start = at + "<!-- body -->".length;
+        const scanned = core.scanBlocks(source.slice(start));
+        const index = anchors[row.section].ids.indexOf(aid);
+        const block = scanned[index];
+        ok(block !== undefined, `${aid} is reachable at its anchor index`);
+        eq(block.tag, row.tag, `${aid} keeps its manifest tag`);
+        const inner = source.slice(start + block.innerStart, start + block.innerEnd);
+        eq(sha256(inner), row.hash, `${aid} hashes to its manifest entry`);
+        reached += 1;
+      }
+      ok(reached > 0, "the committed example manifest has editable blocks");
+    }
+  }
+
   /* ---- leak audit ------------------------------------------------------ */
 
   {
