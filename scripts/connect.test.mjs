@@ -303,7 +303,7 @@ async function runHosted(connectModule, {
       commit: "abc1234",
       blocks: { [hostedAid]: { file: "sections/hosted.html", section: "hosted", tag: "p", hash: createHash("sha256").update(hostedInner).digest("hex") } },
     };
-    const hostedHtml = `<meta name="doc-id" content="${hostedDocId}">\n<!doctype html><html><body><p data-editable data-aid="${hostedAid}">${hostedInner}</p><script type="application/json" id="doc-history">${JSON.stringify(hostedHistory).replaceAll("</", "<\\/")}</script></body></html>\n`;
+    const hostedHtml = `<meta name="doc-id" content="${hostedDocId}">\n<!doctype html><html><body><p data-editable data-aid="${hostedAid}">${hostedInner}</p><script type="application/json" id="doc-history" data-head="${hostedHistory.head}">${JSON.stringify(hostedHistory).replaceAll("</", "<\\/")}</script></body></html>\n`;
     writeFileSync(join(inputRoot, "page.html"), hostedHtml);
     writeFileSync(join(inputRoot, "edit.json"), `${JSON.stringify(hostedManifest, null, 2)}\n`);
     writeFileSync(join(inputRoot, "history.json"), `${JSON.stringify(hostedHistory, null, 2)}\n`);
@@ -533,7 +533,7 @@ const manifest = {
   },
 };
 const embeddedHistoryScript =
-  `<script type="application/json" id="doc-history">${JSON.stringify(history).replaceAll("</", "<\\/")}</script>`;
+  `<script type="application/json" id="doc-history" data-head="${history.head}">${JSON.stringify(history).replaceAll("</", "<\\/")}</script>`;
 const html =
   `<meta name="doc-id" content="${docId}">\n` +
   `<!doctype html><html><body><p data-editable data-aid="${aid}">${inner}</p>` +
