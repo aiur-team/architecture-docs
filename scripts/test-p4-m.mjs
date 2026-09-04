@@ -12,8 +12,8 @@
  * deadline, caps captured output, forwards HUP/INT/TERM, escalates TERM to
  * KILL, reaps the child, proves the child's process group is gone, and removes
  * the guarded root before it can report success. Cleanup it cannot prove exits
- * 125, prints no PASS line, and retains the mode-0700 root plus a mode-0600
- * locator.
+ * 125, prints no PASS line, and retains a distinctly named mode-0700 evidence
+ * root plus a mode-0600 locator. Only the three newest evidence roots are kept.
  *
  * The runtime matrix drives the *real* `netlify/functions/threads.mjs`,
  * `thread.mjs`, and `edit.mjs`. The two thread modules import their
@@ -41,18 +41,21 @@
 
 import { spawn } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { registerHooks } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  guardedTempRoot,
+  installSignalCleanup,
+  retainEvidenceRoot,
+  sweepStaleTempRoots,
+} from "./lib/temp-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -188,10 +191,8 @@ function waitForReady(directory) {
  * that cannot be proved is never reported as success. */
 function unproven(root, detail) {
   try {
-    const locator = join(tmpdir(), `p4m-unresolved-${process.pid}.txt`);
-    writeFileSync(locator, `${detail}\n${root}\n`, { mode: 0o600 });
-    chmodSync(locator, 0o600);
-    process.stderr.write(`UNPROVEN ${detail}\n  retained ${root}\n  locator  ${locator}\n`);
+    const retained = retainEvidenceRoot(root, detail, { prefix: "p4m-evidence-", maxCount: 3 });
+    process.stderr.write(`UNPROVEN ${detail}\n  retained ${retained.root}\n  locator  ${retained.locator}\n`);
   } catch (error) {
     process.stderr.write(`UNPROVEN ${detail} (locator failed: ${String(error)})\n`);
   }
@@ -199,8 +200,9 @@ function unproven(root, detail) {
 }
 
 async function supervise(hosted) {
-  const root = mkdtempSync(join(tmpdir(), "p4m-"));
-  chmodSync(root, 0o700);
+  sweepStaleTempRoots(["p4m-"], { excludePrefixes: ["p4m-evidence-"] });
+  const root = guardedTempRoot("p4m-run-");
+  const uninstallSignalCleanup = installSignalCleanup([root], { exitAfterCleanup: false });
 
   try {
     // 1. Signals. Each probe installs its own handler and exits 128 + signum.
@@ -267,10 +269,12 @@ async function supervise(hosted) {
       process.stdout.write("PASS  P4-M hosted enforcement audit and fan-out\n");
     }
   } catch (error) {
+    uninstallSignalCleanup();
     rmSync(root, { recursive: true, force: true });
     throw error;
   }
 
+  uninstallSignalCleanup();
   rmSync(root, { recursive: true, force: true });
   if (existsSync(root)) {
     unproven(root, "guarded fixture root survived removal");
@@ -1131,39 +1135,36 @@ async function runtimeMatrix() {
   /* ---- edit.mjs: the closed factory seam and the direct-edit gate ------- */
 
   {
-    const storeModule = storeLib;
-    const core = await import(url("templates/docbuild/dist/anchor-core.js"));
-    const md = await import(url("templates/docbuild/dist/inline_md.js"));
-
+    // P4-N narrowed this factory to ten dependencies: the manifest, source,
+    // repository and receipt work moved behind `readEffectiveBase`/`applyText`
+    // in `gitedit.mjs`. What P4-M established must survive that move — the
+    // access seam is still injected here, and it is still closed.
     const editKeys = [
-      "requireOrigin", "identify", "docState", "editKey", "read", "mutate", "upgrade",
-      "StoreError", "scanBlocks", "toMd", "toHtml", "fetch", "now", "sha256Hex", "getEnv",
-      "resolveRole", "capabilitiesFor",
+      "requireOrigin", "identify", "resolveRole", "capabilitiesFor",
+      "readEffectiveBase", "applyText", "notify", "toMd", "toHtml", "sha256Hex",
     ];
+    // The vendored deploy-tree copy, not `templates/docbuild/dist/`: it is the
+    // exact module `edit.mjs` imports in production (#129).
+    const md = await import(url("netlify/lib/inline-md.mjs"));
     const completeDeps = () => ({
       requireOrigin: () => {},
       identify: async () => null,
-      docState: () => ({}),
-      editKey: storeModule.editKey,
-      read: storeModule.read,
-      mutate: storeModule.mutate,
-      upgrade: storeModule.upgrade,
-      StoreError: storeModule.StoreError,
-      scanBlocks: core.scanBlocks,
-      toMd: md.toMd,
-      toHtml: md.toHtml,
-      fetch: () => {},
-      now: () => 0,
-      sha256Hex: () => "",
-      getEnv: () => undefined,
       resolveRole: async () => ({}),
       capabilitiesFor: () => ({}),
+      readEffectiveBase: async () => ({}),
+      applyText: async () => ({}),
+      notify: () => true,
+      toMd: md.toMd,
+      toHtml: md.toHtml,
+      sha256Hex: () => "",
     });
 
     eq(Object.keys(completeDeps()).sort().join(","), [...editKeys].sort().join(","),
-      "the post-M edit factory takes exactly the predecessor keys plus two");
+      "the post-N edit factory takes exactly the narrowed key set");
+    ok(editKeys.includes("resolveRole") && editKeys.includes("capabilitiesFor"),
+      "the post-M access seam is still injected into the edit factory");
     ok(typeof createEditHandler(completeDeps()) === "function",
-      "the post-M factory returns a handler");
+      "the post-N factory returns a handler");
     for (const key of ["resolveRole", "capabilitiesFor"]) {
       const partial = completeDeps();
       delete partial[key];
@@ -1193,33 +1194,22 @@ async function runtimeMatrix() {
   }
 
   {
-    // The direct-edit gate itself. The apply path beyond it is P4-B's matrix,
-    // so this fixture stops at the first step after authorization: a document
-    // the manifest does not know. An authorized caller reaches that 404; an
-    // unauthorized one is refused before the manifest is consulted at all.
-    const storeModule = storeLib;
-    const core = await import(url("templates/docbuild/dist/anchor-core.js"));
-    const md = await import(url("templates/docbuild/dist/inline_md.js"));
+    // The direct-edit gate itself. The apply path beyond it is P4-N's matrix,
+    // so this fixture stops at the first step after authorization: the one
+    // apply path reports a document it does not know. An authorized caller
+    // reaches that 404; an unauthorized one is refused before `gitedit.mjs`
+    // is consulted at all.
+    // The vendored deploy-tree copy, not `templates/docbuild/dist/`: it is the
+    // exact module `edit.mjs` imports in production (#129).
+    const md = await import(url("netlify/lib/inline-md.mjs"));
+    const gitedit = await import(url("netlify/lib/gitedit.mjs"));
 
     function buildEdit(options = {}) {
-      const counters = { resolveRole: 0, docState: 0, fetch: 0 };
+      const counters = { resolveRole: 0, readEffectiveBase: 0, applyText: 0, notify: 0 };
       const seen = [];
       const deps = {
         requireOrigin: () => {},
         identify: async () => (options.identity === undefined ? { ...WRITER, isOrg: false } : options.identity),
-        docState: () => { counters.docState += 1; return new FakeStore(); },
-        editKey: storeModule.editKey,
-        read: storeModule.read,
-        mutate: storeModule.mutate,
-        upgrade: storeModule.upgrade,
-        StoreError: storeModule.StoreError,
-        scanBlocks: core.scanBlocks,
-        toMd: md.toMd,
-        toHtml: md.toHtml,
-        fetch: () => { counters.fetch += 1; throw new Error("no provider work expected"); },
-        now: () => Date.parse("2026-09-03T17:04:11.201Z"),
-        sha256Hex: () => "0".repeat(64),
-        getEnv: () => "unset",
         resolveRole: async (docId, user, opts) => {
           counters.resolveRole += 1;
           seen.push({ docId, user, options: opts });
@@ -1228,18 +1218,31 @@ async function runtimeMatrix() {
           return resolvedFor(options.role ?? "owner");
         },
         capabilitiesFor: options.capabilitiesFor ?? accessLib.capabilitiesFor,
+        readEffectiveBase: async () => {
+          counters.readEffectiveBase += 1;
+          throw new gitedit.ApplyError("not-found");
+        },
+        applyText: async () => {
+          counters.applyText += 1;
+          throw new Error("no apply work expected past the gate");
+        },
+        notify: () => { counters.notify += 1; return true; },
+        toMd: md.toMd,
+        toHtml: md.toHtml,
+        sha256Hex: () => "0".repeat(64),
       };
       return { handle: createEditHandler(deps), counters, seen };
     }
 
     const editBody = { docId: DOC_ID, aid: AID, text: "A revised espalier row." };
     const editRequest = () => jsonRequest("https://docs.example.invalid/api/edit", "POST", editBody);
+    const editContext = () => ({});
 
     for (const role of ROLES) {
       const row = accessLib.capabilitiesFor(role);
       const allowed = row.canSuggest === true && row.canEdit === true;
       const built = buildEdit({ role });
-      const response = await built.handle(editRequest());
+      const response = await built.handle(editRequest(), editContext());
       eq(built.counters.resolveRole, 1, `a direct edit as ${role} resolves the role exactly once`);
       eq(built.seen[0].options, { consumeInvitation: false },
         `a direct edit as ${role} never consumes an invitation`);
@@ -1247,13 +1250,15 @@ async function runtimeMatrix() {
       if (allowed) {
         // Past the gate; the invented document is not in any manifest.
         eq(response.status, 404, `a direct edit as ${role} passes the gate`);
+        eq(built.counters.readEffectiveBase, 1, `a direct edit as ${role} reaches the apply path`);
       } else {
         eq(response.status, 403, `a direct edit as ${role} is 403`);
         eq(await readJson(response),
           { error: { code: "forbidden", message: "Document edit denied" } },
           `a direct edit as ${role} returns the predecessor 403 body`);
-        eq(built.counters.docState, 0, `a direct edit as ${role} performs no store work`);
-        eq(built.counters.fetch, 0, `a direct edit as ${role} performs no provider work`);
+        eq(built.counters.readEffectiveBase, 0, `a direct edit as ${role} performs no apply work`);
+        eq(built.counters.applyText, 0, `a direct edit as ${role} writes nothing`);
+        eq(built.counters.notify, 0, `a direct edit as ${role} notifies nobody`);
       }
     }
     {
@@ -1264,21 +1269,25 @@ async function runtimeMatrix() {
       eq(row.canSuggest, true, "a commenter can suggest");
       eq(row.canEdit, false, "a commenter cannot directly edit");
       const built = buildEdit({ role: "commenter" });
-      eq((await built.handle(editRequest())).status, 403, "a commenter is refused a direct edit");
+      eq((await built.handle(editRequest(), editContext())).status, 403,
+        "a commenter is refused a direct edit");
     }
     {
       // `isOrg` no longer decides anything: the document role does.
       const built = buildEdit({ identity: { ...WRITER, isOrg: false }, role: "editor" });
-      eq((await built.handle(editRequest())).status, 404, "isOrg false no longer refuses an editor");
+      eq((await built.handle(editRequest(), editContext())).status, 404,
+        "isOrg false no longer refuses an editor");
       const denied = buildEdit({ identity: { ...WRITER, isOrg: true }, role: "viewer" });
-      eq((await denied.handle(editRequest())).status, 403, "isOrg true no longer admits a viewer");
+      eq((await denied.handle(editRequest(), editContext())).status, 403,
+        "isOrg true no longer admits a viewer");
     }
     {
       const built = buildEdit({ role: "none" });
       const response = await built.handle(
         jsonRequest("https://docs.example.invalid/api/edit", "POST", { ...editBody, docId: OTHER_DOC }),
+        editContext(),
       );
-      eq(response.status, 403, "a denied direct edit is 403 rather than the manifest's 404");
+      eq(response.status, 403, "a denied direct edit is 403 rather than the apply path's 404");
     }
     for (const [label, body] of [
       ["an unknown key", { ...editBody, role: "owner" }],
@@ -1288,6 +1297,7 @@ async function runtimeMatrix() {
       const built = buildEdit();
       const response = await built.handle(
         jsonRequest("https://docs.example.invalid/api/edit", "POST", body),
+        editContext(),
       );
       eq(response.status, 400, `a direct edit with ${label} is 400`);
       eq(built.counters.resolveRole, 0, `a direct edit with ${label} never resolves a role`);
@@ -1300,26 +1310,27 @@ async function runtimeMatrix() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(editBody),
         }),
+        editContext(),
       );
       eq(response.status, 400, "a query parameter is still refused before the lookup");
       eq(built.counters.resolveRole, 0, "a refused query never resolves a role");
     }
     for (const [label, access] of brokenAccess) {
       const built = buildEdit({ access });
-      const response = await built.handle(editRequest());
+      const response = await built.handle(editRequest(), editContext());
       eq(response.status, 500, `a direct edit with ${label} is 500`);
-      eq(built.counters.docState, 0, `a direct edit with ${label} performs no store work`);
+      eq(built.counters.readEffectiveBase, 0, `a direct edit with ${label} performs no apply work`);
     }
     {
       const built = buildEdit({ capabilitiesFor: () => { throw new Error("no row"); } });
-      eq((await built.handle(editRequest())).status, 500,
+      eq((await built.handle(editRequest(), editContext())).status, 500,
         "a direct edit with an unusable capability table is 500");
     }
     {
       const built = buildEdit({
         accessThrows: new storeLib.StoreError("unavailable", 503, "Access store unavailable"),
       });
-      const response = await built.handle(editRequest());
+      const response = await built.handle(editRequest(), editContext());
       eq(response.status, 503, "a direct edit with the exact unavailable shape is 503");
       eq((await readJson(response)).error.code, "unavailable", "the direct-edit 503 code");
     }
@@ -1329,7 +1340,7 @@ async function runtimeMatrix() {
       ["a different store code", new storeLib.StoreError("conflict", 409, "Concurrent write")],
     ]) {
       const built = buildEdit({ accessThrows: thrown });
-      eq((await built.handle(editRequest())).status, 500,
+      eq((await built.handle(editRequest(), editContext())).status, 500,
         `a direct edit whose access fails with ${label} is 500, never 503`);
     }
   }

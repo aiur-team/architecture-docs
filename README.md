@@ -107,4 +107,18 @@ that moves, inline suggestions and edits, per-document roles, document history, 
 presence. `docs/research/00-integration-plan.md` is the ruling document — where it and a numbered
 research document disagree, the plan is correct.
 
-None of it is implemented yet. The tickets are in this repository's issues.
+The Netlify implementation is configured with site environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `ORG_EMAIL_DOMAIN` | Organisation email suffix, including the leading `@` (for example, `@example.com`). Matching is case-insensitive. If it is unset, empty, or malformed, nobody receives organisation membership. |
+| `DOC_OWNERS` | Comma-separated document-owner seeds in `<document>:<email>` form. |
+| `ABLY_API_KEY` | Optional Ably API key for realtime presence and events. |
+| `SLACK_WEBHOOK_URL` | Optional Slack webhook for notifications. |
+| `DOCS_REPO` | Source repository in `<owner>/<repository>` form for repository-backed edits. |
+| `DOCS_BASE_BRANCH` | Source branch for repository-backed edits; defaults to `main`. |
+| `DOCS_GITHUB_TOKEN` | Fine-grained GitHub token used for repository-backed edits. |
+| `DOCS_BOT_EMAIL` | Committer email used for repository-backed edits. |
+
+Keep secrets scoped to Functions rather than Builds. The implementation never sends configuration
+values to callers or writes them to logs.
