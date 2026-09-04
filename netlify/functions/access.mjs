@@ -22,7 +22,7 @@
 
 import { admin, requestPasswordRecovery } from "@netlify/identity";
 import { randomBytes } from "node:crypto";
-import { identify, requireOrigin } from "../lib/identity.mjs";
+import { identify, isOrgEmail, requireOrigin } from "../lib/identity.mjs";
 import {
   AccessError,
   accessDocumentKey,
@@ -371,7 +371,7 @@ function validateIdentity(value) {
   const isOrg = ownDataDescriptor(value, "isOrg").value;
   if (typeof sub !== "string" || typeof email !== "string" ||
       typeof name !== "string" || typeof isOrg !== "boolean" ||
-      isOrg !== email.endsWith("@example.com") || assertIdentitySub(sub) !== sub) {
+      isOrg !== isOrgEmail(email) || assertIdentitySub(sub) !== sub) {
     throw new TypeError("Invalid identity");
   }
   return value;

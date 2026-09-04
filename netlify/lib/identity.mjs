@@ -1,12 +1,40 @@
 import { getUser, verifyRequestOrigin } from "@netlify/identity";
 
+const DOMAIN_LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+const ORG_EMAIL_DOMAIN_PATTERN = new RegExp(`^@${DOMAIN_LABEL}(?:\\.${DOMAIN_LABEL})+$`, "i");
+
+/** Read the site setting through the runtime-native narrow environment API. */
+function runtimeOrgEmailDomain() {
+  try {
+    const env = globalThis.Netlify?.env;
+    if (env !== undefined && env !== null && typeof env.get === "function") {
+      return env.get("ORG_EMAIL_DOMAIN");
+    }
+    return globalThis.process?.env?.ORG_EMAIL_DOMAIN;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * The reserved organization domain suffix from the ruling plan. Identity
- * classifies whether the normalized email carries this suffix; it never
- * grants document authority. P2-G's resolveRole() is the final document role
- * and capability decision.
+ * Classify an email against the configured organization-domain suffix.
+ * Invalid or unavailable configuration returns false without exposing the
+ * setting. P2-G's resolveRole() remains the final capability decision.
+ *
+ * @param {unknown} email
+ * @returns {boolean}
  */
-const ORG_DOMAIN = "@example.com";
+export function isOrgEmail(email) {
+  const configured = runtimeOrgEmailDomain();
+  if (
+    typeof configured !== "string" ||
+    configured.length > 254 ||
+    !ORG_EMAIL_DOMAIN_PATTERN.test(configured)
+  ) {
+    return false;
+  }
+  return typeof email === "string" && email.toLowerCase().endsWith(configured.toLowerCase());
+}
 
 /**
  * @param {Request} req
@@ -25,7 +53,7 @@ export async function identify(req) {
 
   const email = (user.email ?? "").toLowerCase();
   const name = user.name ?? email.split("@")[0];
-  const isOrg = email.endsWith(ORG_DOMAIN);
+  const isOrg = isOrgEmail(email);
 
   return { sub: user.id, email, name, isOrg };
 }

@@ -29,10 +29,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  guardedTempRoot,
+  installSignalCleanup,
+  removeTempRoots,
+  sweepStaleTempRoots,
+} from "./lib/temp-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -593,7 +598,7 @@ function fail(label, result) {
     if (result.stdout !== "") process.stderr.write(`      stdout: ${result.stdout.slice(0, 4000)}\n`);
     if (result.stderr !== "") process.stderr.write(`      stderr: ${result.stderr.slice(0, 4000)}\n`);
   }
-  process.exit(1);
+  throw new Error(label);
 }
 
 async function proveSupervision(self) {
@@ -635,12 +640,6 @@ async function proveSupervision(self) {
   if (forwarded.orphaned) fail("P4-Q forwarding probe left its process group behind", forwarded);
 }
 
-function guardedRoot(prefix) {
-  const root = mkdtempSync(join(tmpdir(), prefix));
-  chmodSync(root, 0o700);
-  return root;
-}
-
 async function installPlaywright(root) {
   writeFileSync(join(root, "package.json"), `${JSON.stringify({
     name: "p4q-fixture",
@@ -669,16 +668,17 @@ async function supervise(self) {
   await proveSupervision(self);
   process.stdout.write("PASS  P4-Q supervisor signals and deadline\n");
 
-  const install = guardedRoot("p4q-install-");
+  sweepStaleTempRoots(["p4q-install-", "p4q-runtime-", "p4q-browser-"]);
+  const install = guardedTempRoot("p4q-install-");
   const roots = [install];
-  let ok = false;
+  const uninstallSignalCleanup = installSignalCleanup(roots, { exitAfterCleanup: false });
   try {
     await installPlaywright(install);
     for (const [flag, prefix, line] of [
       ["--runtime", "p4q-runtime-", "PASS  P4-Q rail, panel, barrier, and overlay matrix"],
       ["--browser", "p4q-browser-", "PASS  P4-Q rendered shared surface and overlay ordering"],
     ]) {
-      const root = guardedRoot(prefix);
+      const root = guardedTempRoot(prefix);
       roots.push(root);
       const result = await runChild([self, flag], {
         deadline: WORKER_DEADLINE_MS,
@@ -701,14 +701,14 @@ async function supervise(self) {
       if (result.stdout !== "") fail(`P4-Q worker ${flag} wrote to stdout`, result);
       process.stdout.write(`${line}\n`);
     }
-    ok = true;
   } finally {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
+    uninstallSignalCleanup();
+    removeTempRoots(roots);
   }
   /* Printing the line is not the evidence; the roots being gone is. */
   const left = roots.filter((root) => existsSync(root));
   if (left.length !== 0) fail(`P4-Q left fixture state behind: ${left.join(", ")}`);
-  if (ok) process.stdout.write("PASS  P4-Q fixture cleaned\n");
+  process.stdout.write("PASS  P4-Q fixture cleaned\n");
 }
 
 function probeSignal() {

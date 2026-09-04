@@ -29,9 +29,9 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { guardedTempRoot, installSignalCleanup, sweepStaleTempRoots } from "./lib/temp-roots.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const ROOT = resolve(dirname(SELF), "..");
@@ -59,7 +59,9 @@ function die(message) {
 
 async function parent(mode) {
   const nonce = randomBytes(32).toString("hex");
-  const tempRoot = await mkdtemp(join(tmpdir(), "p4k-root-"));
+  sweepStaleTempRoots(["p4k-root-"]);
+  const tempRoot = guardedTempRoot("p4k-root-");
+  const uninstallSignalCleanup = installSignalCleanup([tempRoot], { exitAfterCleanup: false });
 
   let child;
   let timer = null;
@@ -69,104 +71,119 @@ async function parent(mode) {
   const sizes = { stdout: 0, stderr: 0 };
   const forwarded = ["SIGHUP", "SIGINT", "SIGTERM"];
   const forwarders = new Map();
+  let supervisionStopped = false;
+  let stdout = "";
+  let problems = [];
 
-  const finished = await new Promise((resolveRun) => {
-    child = spawn(
-      process.execPath,
-      ["--experimental-vm-modules", "--no-warnings", SELF, "--worker", mode],
-      {
-        cwd: ROOT,
-        detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, P4K_NONCE: nonce, P4K_TEMP_ROOT: tempRoot },
-      },
-    );
+  function stopSupervision() {
+    if (supervisionStopped) return;
+    supervisionStopped = true;
+    if (timer !== null) clearTimeout(timer);
+    if (killTimer !== null) clearTimeout(killTimer);
+    for (const [signal, handler] of forwarders) process.off(signal, handler);
+  }
 
-    for (const name of ["stdout", "stderr"]) {
-      child[name].on("data", (chunk) => {
-        if (sizes[name] >= MAX_STREAM_BYTES) return;
-        sizes[name] += chunk.length;
-        chunks[name].push(chunk);
-      });
-    }
+  try {
+    const finished = await new Promise((resolveRun) => {
+      child = spawn(
+        process.execPath,
+        ["--experimental-vm-modules", "--no-warnings", SELF, "--worker", mode],
+        {
+          cwd: ROOT,
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, P4K_NONCE: nonce, P4K_TEMP_ROOT: tempRoot },
+        },
+      );
 
-    function stopGroup() {
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        // Already gone.
+      for (const name of ["stdout", "stderr"]) {
+        child[name].on("data", (chunk) => {
+          if (sizes[name] >= MAX_STREAM_BYTES) return;
+          sizes[name] += chunk.length;
+          chunks[name].push(chunk);
+        });
       }
-      if (killTimer === null) {
-        killTimer = setTimeout(() => {
-          try {
-            process.kill(-child.pid, "SIGKILL");
-          } catch {
-            // Already gone.
-          }
-        }, TERM_GRACE_MS);
-        killTimer.unref();
-      }
-    }
 
-    for (const signal of forwarded) {
-      const handler = () => {
+      function stopGroup() {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          // Already gone.
+        }
+        if (killTimer === null) {
+          killTimer = setTimeout(() => {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+            } catch {
+              // Already gone.
+            }
+          }, TERM_GRACE_MS);
+          killTimer.unref();
+        }
+      }
+
+      for (const signal of forwarded) {
+        const handler = () => {
+          timedOut = true;
+          stopGroup();
+        };
+        forwarders.set(signal, handler);
+        process.on(signal, handler);
+      }
+
+      timer = setTimeout(() => {
         timedOut = true;
         stopGroup();
-      };
-      forwarders.set(signal, handler);
-      process.on(signal, handler);
+      }, DEADLINE_MS);
+
+      child.on("close", (code, signal) => resolveRun({ code, signal }));
+    });
+
+    stopSupervision();
+
+    stdout = Buffer.concat(chunks.stdout).toString("utf8");
+    const stderr = Buffer.concat(chunks.stderr).toString("utf8");
+
+    let groupGone = false;
+    for (let attempt = 0; attempt < 20 && !groupGone; attempt += 1) {
+      try {
+        process.kill(-child.pid, 0);
+        await new Promise((r) => setTimeout(r, 50));
+      } catch {
+        groupGone = true;
+      }
     }
 
-    timer = setTimeout(() => {
-      timedOut = true;
-      stopGroup();
-    }, DEADLINE_MS);
-
-    child.on("close", (code, signal) => resolveRun({ code, signal }));
-  });
-
-  if (timer !== null) clearTimeout(timer);
-  if (killTimer !== null) clearTimeout(killTimer);
-  for (const [signal, handler] of forwarders) process.off(signal, handler);
-
-  const stdout = Buffer.concat(chunks.stdout).toString("utf8");
-  const stderr = Buffer.concat(chunks.stderr).toString("utf8");
-
-  let groupGone = false;
-  for (let attempt = 0; attempt < 20 && !groupGone; attempt += 1) {
+    let residue = [];
     try {
-      process.kill(-child.pid, 0);
-      await new Promise((r) => setTimeout(r, 50));
+      residue = await readdir(tempRoot);
     } catch {
-      groupGone = true;
+      residue = [];
     }
-  }
+    problems = [];
+    if (timedOut) problems.push(`worker exceeded the ${DEADLINE_MS} ms deadline`);
+    if (finished.code !== 0) {
+      problems.push(`worker exited with code ${finished.code} signal ${finished.signal}`);
+    }
+    if (stderr !== "") problems.push(`worker stderr was not empty:\n${stderr}`);
+    if (stdout !== EXPECTED_STDOUT) {
+      problems.push(`worker stdout did not match the expected transcript:\n${stdout}`);
+    }
+    if (residue.length !== 0) {
+      problems.push(`temporary fixture state was left behind: ${residue.join(", ")}`);
+    }
+    if (!groupGone) problems.push("the worker process group did not disappear");
 
-  let residue = [];
-  try {
-    residue = await readdir(tempRoot);
-  } catch {
-    residue = [];
+  } finally {
+    stopSupervision();
+    uninstallSignalCleanup();
+    await rm(tempRoot, { recursive: true, force: true });
   }
-  await rm(tempRoot, { recursive: true, force: true });
-
-  const problems = [];
-  if (timedOut) problems.push(`worker exceeded the ${DEADLINE_MS} ms deadline`);
-  if (finished.code !== 0) {
-    problems.push(`worker exited with code ${finished.code} signal ${finished.signal}`);
-  }
-  if (stderr !== "") problems.push(`worker stderr was not empty:\n${stderr}`);
-  if (stdout !== EXPECTED_STDOUT) {
-    problems.push(`worker stdout did not match the expected transcript:\n${stdout}`);
-  }
-  if (residue.length !== 0) {
-    problems.push(`temporary fixture state was left behind: ${residue.join(", ")}`);
-  }
-  if (!groupGone) problems.push("the worker process group did not disappear");
 
   if (problems.length !== 0) {
     for (const problem of problems) process.stderr.write(`${problem}\n`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   process.stdout.write(stdout);
 }
