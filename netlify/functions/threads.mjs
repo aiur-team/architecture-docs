@@ -8,7 +8,7 @@ import {
   threadPrefix,
   upgrade,
 } from "../lib/store.mjs";
-import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
+import { capabilitiesFor, resolveRole, validateAccessRow } from "../lib/access.mjs";
 import { appendEvent } from "./events.mjs";
 import { notify } from "../lib/notify.mjs";
 
@@ -92,21 +92,6 @@ const CREATE_KEYS = Object.freeze([
   "name",
 ]);
 const LIST_QUERY_KEYS = Object.freeze(["doc", "limit", "cursor"]);
-const ACCESS_KEYS = Object.freeze([
-  "role",
-  "shared",
-  "canRead",
-  "canComment",
-  "threadControl",
-  "canSuggest",
-  "canEdit",
-  "canAccept",
-  "canShare",
-  "canSeeMembers",
-]);
-const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
-const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 
 const NO_STORE = "private, no-store";
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
@@ -736,42 +721,6 @@ function isUnavailableRejection(error) {
   );
 }
 
-/** Validate the complete P2-G result and return it unchanged. */
-function validateAccess(result) {
-  if (!hasExactKeys(result, ACCESS_KEYS)) {
-    throw fail("invalid-state");
-  }
-  const role = result.role;
-  if (!ROLES.includes(role) || typeof result.shared !== "boolean") {
-    throw fail("invalid-state");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    const value = result[key];
-    if (key === "threadControl") {
-      if (!THREAD_CONTROLS.includes(value)) {
-        throw fail("invalid-state");
-      }
-    } else if (typeof value !== "boolean") {
-      throw fail("invalid-state");
-    }
-  }
-  let row;
-  try {
-    row = capabilitiesFor(role);
-  } catch {
-    throw fail("invalid-state");
-  }
-  if (row === null || typeof row !== "object") {
-    throw fail("invalid-state");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    if (row[key] !== result[key]) {
-      throw fail("invalid-state");
-    }
-  }
-  return result;
-}
-
 /**
  * The single non-consuming P2-G lookup for this request. It runs after every
  * public request gate and before any clock, randomness, or thread-store work;
@@ -784,7 +733,10 @@ async function resolveAccess(docId, identity) {
   } catch (error) {
     throw fail(isUnavailableRejection(error) ? "unavailable" : "invalid-state");
   }
-  return validateAccess(result);
+  if (!validateAccessRow(result, capabilitiesFor)) {
+    throw fail("invalid-state");
+  }
+  return result;
 }
 
 async function requireReadAccess(docId, identity) {

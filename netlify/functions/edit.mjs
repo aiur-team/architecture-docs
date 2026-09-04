@@ -1,5 +1,5 @@
 import { identify, requireOrigin } from "../lib/identity.mjs";
-import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
+import { capabilitiesFor, resolveRole, validateAccessRow } from "../lib/access.mjs";
 import { StoreError, docState, editKey, mutate, read, upgrade } from "../lib/store.mjs";
 import { scanBlocks } from "../lib/anchor-core.mjs";
 import { toHtml, toMd } from "../lib/inline-md.mjs";
@@ -44,13 +44,6 @@ const BODY_KEYS = Object.freeze(["docId", "aid", "text"]);
 const IGNORED_BODY_KEYS = Object.freeze(["author", "email", "name"]);
 
 const IDENTITY_KEYS = Object.freeze(["sub", "email", "name", "isOrg"]);
-const ACCESS_KEYS = Object.freeze([
-  "role", "shared", "canRead", "canComment", "threadControl",
-  "canSuggest", "canEdit", "canAccept", "canShare", "canSeeMembers",
-]);
-const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
-const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 const MANIFEST_KEYS = Object.freeze(["docId", "instance", "commit", "blocks"]);
 const ROW_KEYS = Object.freeze(["file", "section", "tag", "hash"]);
 const ANCHOR_SECTION_KEYS = Object.freeze(["ids", "texts"]);
@@ -1111,35 +1104,6 @@ function isAccessUnavailable(error) {
   );
 }
 
-/** Validate the complete P2-G result and return it unchanged. A partial,
- * extended, accessor-backed, or internally inconsistent object is an
- * `invalid-state`, never a falsy capability. */
-function validateAccess(deps, result) {
-  if (!isExactRecord(result, ACCESS_KEYS)) throw fail("invalid-state");
-  if (!ROLES.includes(result.role) || typeof result.shared !== "boolean") {
-    throw fail("invalid-state");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    const value = result[key];
-    if (key === "threadControl") {
-      if (!THREAD_CONTROLS.includes(value)) throw fail("invalid-state");
-    } else if (typeof value !== "boolean") {
-      throw fail("invalid-state");
-    }
-  }
-  let row;
-  try {
-    row = deps.capabilitiesFor(result.role);
-  } catch {
-    throw fail("invalid-state");
-  }
-  if (row === null || typeof row !== "object") throw fail("invalid-state");
-  for (const key of CAPABILITY_KEYS) {
-    if (row[key] !== result[key]) throw fail("invalid-state");
-  }
-  return result;
-}
-
 /** The single non-consuming P2-G lookup for this request. */
 async function resolveAccess(deps, docId, identity) {
   let result;
@@ -1148,7 +1112,10 @@ async function resolveAccess(deps, docId, identity) {
   } catch (error) {
     throw fail(isAccessUnavailable(error) ? "unavailable" : "invalid-state");
   }
-  return validateAccess(deps, result);
+  if (!validateAccessRow(result, (role) => deps.capabilitiesFor(role))) {
+    throw fail("invalid-state");
+  }
+  return result;
 }
 
 /**

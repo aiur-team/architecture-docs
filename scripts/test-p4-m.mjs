@@ -420,6 +420,8 @@ function bindThreadModules(stubRoot) {
       export function identify(req) { return control().identity.identify(req); }
     `)],
     ["../lib/access.mjs", stub("access.mjs", `
+      import { validateAccessRow } from ${JSON.stringify(real("netlify/lib/access.mjs"))};
+      export { validateAccessRow };
       const control = () => globalThis.__P4M__;
       export function capabilitiesFor(role) { return control().access.capabilitiesFor(role); }
       export function resolveRole(docId, user, options) {
@@ -562,6 +564,7 @@ async function runtimeMatrix() {
     waitUntil: () => {},
     params: { doc: docId, id: threadId },
   });
+  const threadUrl = (threadId) => `https://docs.example.invalid/api/threads/${DOC_ID}/${threadId}`;
   const readJson = async (response) => JSON.parse(await response.text());
 
   /** Create one durable thread with an unobserved owner, so a later matrix row
@@ -639,6 +642,10 @@ async function runtimeMatrix() {
     ["an accessor-backed capability", Object.defineProperties({ ...complete }, {
       canComment: { get: () => true, enumerable: true, configurable: true },
     })],
+    ["a non-enumerable capability", Object.defineProperty({ ...complete }, "canComment", {
+      value: true, enumerable: false, writable: true, configurable: true,
+    })],
+    ["a symbol-keyed extra", Object.assign({ ...complete }, { [Symbol("canPublish")]: true })],
   ];
   for (const [label, access] of brokenAccess) {
     const run = scenario({ access });
@@ -804,7 +811,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs, role });
     const response = await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${seed.thread.id}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(seed.thread.id), "POST", { body: REPLY }),
       threadContext(seed.thread.id),
     );
     eq(response.status, allowed ? 200 : 403, `reply as ${role} is ${allowed ? 200 : 403}`);
@@ -821,7 +828,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs, role: "commenter" });
     const response = await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${seed.thread.id}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(seed.thread.id), "POST", { body: REPLY }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 200, "an authorized reply is 200");
@@ -852,7 +859,7 @@ async function runtimeMatrix() {
     const seed = await seedThread(discussionBody);
     const run = scenario({ store: seed.blobs });
     await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${seed.thread.id}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(seed.thread.id), "POST", { body: REPLY }),
       threadContext(seed.thread.id),
     );
     eq(run.blobs.events()[0].target.aid, null, "a discussion reply audits a null anchor");
@@ -866,7 +873,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs, ...options });
     const response = await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${seed.thread.id}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(seed.thread.id), "POST", { body: REPLY }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 200, `a reply append failing with ${label} preserves the 200`);
@@ -879,7 +886,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs, notifyThrows: new TypeError("no sink") });
     const response = await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${seed.thread.id}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(seed.thread.id), "POST", { body: REPLY }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 200, "a throwing reply notification preserves the 200");
@@ -889,7 +896,7 @@ async function runtimeMatrix() {
     const run = scenario();
     const missing = "t_zzzz_00000000";
     const response = await thread(
-      jsonRequest(`https://docs.example.invalid/api/threads/${DOC_ID}/${missing}`, "POST", { body: REPLY }),
+      jsonRequest(threadUrl(missing), "POST", { body: REPLY }),
       threadContext(missing),
     );
     eq(response.status, 404, "replying to a missing thread is 404");
@@ -897,9 +904,53 @@ async function runtimeMatrix() {
     eq(run.calls.notify.length, 0, "a missing thread notifies nobody");
   }
 
-  /* ---- thread.mjs: status authorization -------------------------------- */
+  /* ---- thread.mjs: complete access validation --------------------------- */
 
-  const statusUrl = (id) => `https://docs.example.invalid/api/threads/${DOC_ID}/${id}`;
+  // Both of thread.mjs's write paths validate the resolved row before they
+  // touch anything. Running the same matrix here is what makes weakening that
+  // validation fail: while only threads.mjs and edit.mjs were covered, the copy
+  // this module used could be reduced to a no-op with the suite still green
+  // (#125). It is one shared validator now, and this is the gate on it.
+  const threadWrites = Object.freeze([
+    ["a reply", "POST", { body: REPLY }],
+    ["a status change", "PATCH", { status: "resolved" }],
+  ]);
+  for (const [what, method, requestBody] of threadWrites) {
+    for (const [label, access] of brokenAccess) {
+      const seed = await seedThread();
+      const run = scenario({ store: seed.blobs, access });
+      const response = await thread(
+        jsonRequest(threadUrl(seed.thread.id), method, requestBody),
+        threadContext(seed.thread.id),
+      );
+      eq(response.status, 500, `${what} with ${label} is 500`);
+      eq((await readJson(response)).error.code, "invalid-state",
+        `${what} with ${label} is invalid-state`);
+      eq(run.log, ["resolveRole"], `${what} with ${label} touches nothing after the lookup`);
+    }
+    // A capability table is unusable whether it throws or answers with
+    // something that is not an ordinary row; both are `invalid-state`, never a
+    // falsy capability. The callable row is the case that pins the shape check:
+    // a table answering `null` fails anyway when the row is read, but a
+    // function carrying the right properties would validate without it.
+    for (const [tableLabel, capabilitiesFor] of [
+      ["an unusable capability table", () => { throw new Error("no row"); }],
+      ["a capability table that answers with a callable", (role) =>
+        Object.assign(() => {}, accessLib.capabilitiesFor(role))],
+    ]) {
+      const seed = await seedThread();
+      const run = scenario({ store: seed.blobs, capabilitiesFor });
+      const response = await thread(
+        jsonRequest(threadUrl(seed.thread.id), method, requestBody),
+        threadContext(seed.thread.id),
+      );
+      eq(response.status, 500, `${what} with ${tableLabel} is 500`);
+      eq(run.log, ["resolveRole"],
+        `${what} with ${tableLabel} touches nothing after the lookup`);
+    }
+  }
+
+  /* ---- thread.mjs: status authorization -------------------------------- */
 
   for (const role of ROLES) {
     const control = accessLib.capabilitiesFor(role).threadControl;
@@ -909,7 +960,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs, role });
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, allowed ? 200 : 403,
@@ -926,7 +977,7 @@ async function runtimeMatrix() {
     const seed = await seedThread(commentBody, OTHER);
     const run = scenario({ store: seed.blobs, role: "commenter" });
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 403, "threadControl own against another author's thread is 403");
@@ -968,7 +1019,7 @@ async function runtimeMatrix() {
       return writes === 1 ? { modified: false } : undefined;
     };
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     ok(reads >= 2, "the raced status change re-read the record");
@@ -979,7 +1030,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs });
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 200, "resolving an open thread is 200");
@@ -995,7 +1046,7 @@ async function runtimeMatrix() {
     // The repeat is a no-op: P2-B reports `changed: false` and nothing follows.
     const repeat = scenario({ store: seed.blobs });
     const again = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(again.status, 200, "a repeated resolve is still 200");
@@ -1005,7 +1056,7 @@ async function runtimeMatrix() {
 
     const reopen = scenario({ store: seed.blobs });
     const reopened = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "open" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "open" }),
       threadContext(seed.thread.id),
     );
     eq(reopened.status, 200, "reopening a resolved thread is 200");
@@ -1029,7 +1080,7 @@ async function runtimeMatrix() {
     seed.blobs.writeHook = (writeKey) =>
       (writeKey.startsWith("threads/") ? { modified: false } : undefined);
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 409, "an exhausted CAS is the predecessor 409");
@@ -1049,7 +1100,7 @@ async function runtimeMatrix() {
       return attempts <= 2 ? { modified: false } : undefined;
     };
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "resolved" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "resolved" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 200, "a CAS race that resolves still commits");
@@ -1061,7 +1112,7 @@ async function runtimeMatrix() {
     const seed = await seedThread();
     const run = scenario({ store: seed.blobs });
     const response = await thread(
-      jsonRequest(statusUrl(seed.thread.id), "PATCH", { status: "archived" }),
+      jsonRequest(threadUrl(seed.thread.id), "PATCH", { status: "archived" }),
       threadContext(seed.thread.id),
     );
     eq(response.status, 400, "an unsupported status is 400");
@@ -1070,7 +1121,7 @@ async function runtimeMatrix() {
   for (const method of ["GET", "PUT", "DELETE"]) {
     const run = scenario();
     const response = await thread(
-      new Request(statusUrl("t_x_00000000"), { method }),
+      new Request(threadUrl("t_x_00000000"), { method }),
       threadContext("t_x_00000000"),
     );
     eq(response.status, 405, `${method} on a thread is 405`);

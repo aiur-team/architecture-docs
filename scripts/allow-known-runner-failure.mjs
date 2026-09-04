@@ -47,39 +47,32 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /**
- * The one known failure this repository currently carries, keyed by the runner
- * that reports it.
+ * The known failures this repository currently carries, keyed by the runner
+ * that reports them.
  *
- * `scripts/test-p4-a.mjs`'s `--browser` worker measures the selection tooltip
- * with `[...document.body.children].filter(...).pop()` and calls
+ * **This table is empty, and empty is the state to keep it in.** Every runner
+ * named in `.github/workflows/check.yml` is invoked directly; nothing goes
+ * through this wrapper today, and an entry here is a hole in a gate that someone
+ * has to close. The mechanism is kept because the situation it exists for
+ * recurs: wiring a runner in finds a defect in already-merged code, and landing
+ * the wiring should not have to wait for the fix.
+ *
+ * The one entry this table has held so far was `scripts/test-p4-a.mjs`, whose
+ * `--browser` worker measured the selection tooltip with
+ * `[...document.body.children].filter(...).pop()` and called
  * `getBoundingClientRect()` on the result without asserting that it found one.
- * In Actions the element is not there when it is measured, so the worker dies
- * with a `TypeError` instead of a named assertion. Playwright installs and the
- * page evaluates, so this is a portability defect in the suite's own layout
- * assumptions, in code that was merged on the strength of a local pass. The fix
- * is owned by #124 and deliberately not made here.
+ * It was granted on 2026-09-04 by #107 (PR #116) and removed by #124, which made
+ * the measurement wait for a laid-out host and report the selector when there is
+ * none. That is the intended lifetime of an entry here.
+ *
+ * A new entry needs all six keys the code below reads: `since`, `issue`,
+ * `worker`, `whileSourceMatches` (a pattern over the runner's *source*, so the
+ * entry goes stale the moment the fix lands rather than when a run happens to
+ * pass), `failureLine`, and `excusesErrorMatching`. All six are required: an
+ * entry missing one throws where it is read, which fails the build rather than
+ * excusing anything, but the message is generic -- so write all six.
  */
-const ALLOWED_RUNNER_FAILURES = new Map([
-  [
-    "scripts/test-p4-a.mjs",
-    {
-      since: "2026-09-04",
-      issue: 124,
-      worker: "--browser",
-      /* The unguarded measurement itself. #124's acceptance is that a missing
-         element fails with the selector rather than a `TypeError`, which cannot
-         be satisfied without putting an assertion between these two statements
-         -- so the fix necessarily makes this entry stale. */
-      whileSourceMatches: /\.pop\(\);\n\s*const rect = host\.getBoundingClientRect\(\);/,
-      /* The supervisor stops at its first failing worker, so an excused run has
-         exactly one `FAIL` line and it is this one. Anything else the runner
-         reports -- a second worker, a signal probe, the fixture install -- is
-         outside the allowance and still fails. */
-      failureLine: /^FAIL\s+P4-A worker --browser$/,
-      excusesErrorMatching: /Cannot read properties of undefined \(reading 'getBoundingClientRect'\)/,
-    },
-  ],
-]);
+const ALLOWED_RUNNER_FAILURES = new Map([]);
 
 /** One-line failure in the same vocabulary as the other gates in CI. */
 function refuse(message) {
