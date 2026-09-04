@@ -27,6 +27,19 @@ jobs:
       - name: root lockfile is in sync
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # Nothing else in this workflow imports netlify/, so until this step
+      # existed a function could name an import that does not resolve, or
+      # destructure an export its dependency does not emit, and every gate
+      # stayed green (#107). Linking is the gate: ESM resolves named imports
+      # before it evaluates anything. Modules are loaded, never invoked.
+      #
+      # The position of this step is load-bearing: it runs before anything
+      # compiles or installs a workspace, because a deploy carries only
+      # netlify/, netlify.toml and the root lockfile. Moving it after a build
+      # would make it pass by arranging a condition production never provides.
+      - name: every deploy module loads
+        run: node scripts/check-function-modules.mjs
+
       # notify() runs after the authoritative write, so a body it rejects that
       # the store accepted is a 500 for a comment that already landed. The two
       # grammars are only kept in step by being asserted against each other.
@@ -46,6 +59,13 @@ jobs:
       # still matches some other test file would go green with this one
       # silently dropped. A literal path that stops being emitted fails loudly.
       # Add new test files to this list.
+      #
+      # "Add new test files to this list" was missed three times running, so the
+      # list is now enforced rather than remembered: this step fails when a
+      # tracked test file exists that no run step below names (#107).
+      - name: every test file is wired into CI
+        run: node scripts/check-test-inventory.mjs
+
       - name: unit tests
         run: |
           npm --prefix templates/docbuild run build
@@ -53,16 +73,22 @@ jobs:
             templates/docbuild/dist/index.test.js \
             templates/docbuild/dist/anchors.test.js
           node --test scripts/connect.test.mjs
-
-      # The P4-A write path's only automated guard. It is a standalone
-      # supervisor rather than a `node --test` file, so it is invoked directly,
-      # and it installs a pinned Playwright and Chromium into a temporary root
-      # of its own — the price of the write path having a gate at all. #107 /
-      # PR #116 wires this and its P4-B sibling up as part of a wider CI audit;
-      # this step exists so the browser-matrix fix in #124 is actually proved
-      # in Actions rather than only on a developer machine.
-      - name: P4-A write path
-        run: node scripts/test-p4-a.mjs
+          # The permanent regression runners are standalone supervisors, not
+          # `node --test` files: each one names itself, forks its own matrices
+          # and prints its own PASS lines. They are heavier than the docbuild
+          # tests -- test-p4-a.mjs installs a pinned Playwright and Chromium
+          # into a temporary root -- which is the price of the write paths
+          # having a gate at all. Anything that needs the TypeScript compiler
+          # relies on the typecheck step above having installed it.
+          # test-p4-a.mjs ran through allow-known-runner-failure.mjs until
+          # #124: its browser matrix measured the selection tooltip without
+          # asserting that it found one, which held locally and died with a
+          # TypeError in Actions. The measurement now waits for a laid-out host
+          # and names the selector when there is none, so the allowance is gone
+          # and every runner is invoked directly.
+          node scripts/test-p4-a.mjs
+          node scripts/test-p4-b.mjs
+          node scripts/test-p4-m.mjs
 
       - name: edge gate config is fail-closed
         run: |
