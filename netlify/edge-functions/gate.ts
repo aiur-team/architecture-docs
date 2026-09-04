@@ -345,7 +345,7 @@ export default async function gate(
     reader = getReader.call(body);
   } catch {
     if (isHead) await cancelBody(body);
-    return plainResponse(500, UNVERIFIED);
+    return plainResponse(503, ACCESS_UNAVAILABLE);
   }
 
   const retained: Uint8Array[] = [];
