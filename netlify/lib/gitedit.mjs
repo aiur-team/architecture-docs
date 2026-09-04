@@ -1,7 +1,7 @@
 import { StoreError, assertDocId, docState, editKey, mutate, read, upgrade } from "./store.mjs";
 import { appendEvent } from "../functions/events.mjs";
-import { scanBlocks } from "../../templates/docbuild/dist/anchor-core.js";
-import { toHtml, toMd } from "../../templates/docbuild/dist/inline_md.js";
+import { scanBlocks } from "./anchor-core.mjs";
+import { toHtml, toMd } from "./inline-md.mjs";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { isAbsolute } from "node:path";

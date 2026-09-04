@@ -1139,7 +1139,9 @@ async function runtimeMatrix() {
       "requireOrigin", "identify", "resolveRole", "capabilitiesFor",
       "readEffectiveBase", "applyText", "notify", "toMd", "toHtml", "sha256Hex",
     ];
-    const md = await import(url("templates/docbuild/dist/inline_md.js"));
+    // The vendored deploy-tree copy, not `templates/docbuild/dist/`: it is the
+    // exact module `edit.mjs` imports in production (#129).
+    const md = await import(url("netlify/lib/inline-md.mjs"));
     const completeDeps = () => ({
       requireOrigin: () => {},
       identify: async () => null,
@@ -1193,7 +1195,9 @@ async function runtimeMatrix() {
     // apply path reports a document it does not know. An authorized caller
     // reaches that 404; an unauthorized one is refused before `gitedit.mjs`
     // is consulted at all.
-    const md = await import(url("templates/docbuild/dist/inline_md.js"));
+    // The vendored deploy-tree copy, not `templates/docbuild/dist/`: it is the
+    // exact module `edit.mjs` imports in production (#129).
+    const md = await import(url("netlify/lib/inline-md.mjs"));
     const gitedit = await import(url("netlify/lib/gitedit.mjs"));
 
     function buildEdit(options = {}) {

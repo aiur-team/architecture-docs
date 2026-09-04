@@ -603,7 +603,9 @@ async function runtimeMatrix() {
   const pendingModule = await load("netlify/functions/pending.mjs");
   const storeLib = await load("netlify/lib/store.mjs");
   const access = await load("netlify/lib/access.mjs");
-  const md = await load("templates/docbuild/dist/inline_md.js");
+  // The vendored deploy-tree copy, not `templates/docbuild/dist/`: it is the
+  // exact module `gitedit.mjs` and `edit.mjs` import in production (#129).
+  const md = await load("netlify/lib/inline-md.mjs");
 
   const { ApplyError, assertApplyManifest, assertApplyReceipt, createGitEditService } = gitedit;
 
