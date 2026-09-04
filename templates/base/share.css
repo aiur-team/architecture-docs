@@ -110,16 +110,134 @@
   unicode-bidi: isolate;
 }
 
+/* P4-L — owner write controls.  Every rule stays inside P3-I's `.share-*`
+   scope, inherits the panel's own colours, and distinguishes disabled, busy
+   and confirmation states by more than colour alone. */
+.share-default-form,
+.share-invite,
+.share-row-controls,
+.share-transfer-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .4rem;
+  margin-top: .5rem;
+  color: inherit;
+}
+
+.share-default-form,
+.share-invite {
+  margin-top: .75rem;
+}
+
+.share-invite {
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border, #e2e6eb);
+}
+
+.share-op-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 8rem;
+  min-width: 0;
+  gap: .2rem;
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.share-op {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 1.9rem;
+  padding: .3rem .45rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .4rem;
+  font: 500 .78rem/1.2 var(--sans, system-ui, sans-serif);
+}
+
+button.share-op {
+  flex: none;
+  background: var(--surface-2, #eef1f4);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.share-op:hover:enabled {
+  color: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-op:focus-visible {
+  outline: 2px solid var(--accent, #c0122a);
+  outline-offset: 2px;
+}
+
+/* Disabled is announced by opacity, a dashed border and the not-allowed
+   cursor together, so a forced or monochrome palette still reads it. */
+.share-op:disabled {
+  opacity: .55;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.share-pop[aria-busy="true"] .share-list li,
+.share-pop[aria-busy="true"] .share-default-form,
+.share-pop[aria-busy="true"] .share-invite {
+  opacity: .8;
+}
+
+.share-transfer-confirm {
+  flex-direction: column;
+  align-items: stretch;
+  padding: .5rem;
+  border: 2px dashed var(--border-strong, #cbd2da);
+  border-radius: .5rem;
+}
+
+.share-transfer-confirm p {
+  margin: 0 0 .4rem;
+  font-size: .78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.share-transfer-confirm button.share-op {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 24rem) {
+  .share-op-label {
+    flex-basis: 100%;
+  }
+
+  .share-row-controls button.share-op,
+  .share-invite button.share-op,
+  .share-default-form button.share-op {
+    flex: 1 1 100%;
+  }
+}
+
 @media (forced-colors: active) {
   .share-btn,
   .share-pop,
-  .share-close {
+  .share-close,
+  .share-op,
+  .share-transfer-confirm {
     border: 1px solid CanvasText;
   }
 
   .share-btn:focus-visible,
-  .share-close:focus-visible {
+  .share-close:focus-visible,
+  .share-op:focus-visible {
     outline: 2px solid Highlight;
+  }
+
+  .share-op:disabled {
+    border-style: dashed;
+    opacity: 1;
+    color: GrayText;
   }
 }
 
@@ -132,7 +250,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .share-pop,
-  .share-pop * {
+  .share-pop *,
+  .share-op {
     animation: none !important;
     scroll-behavior: auto !important;
     transition: none !important;

@@ -119,10 +119,23 @@ jobs:
           # commits that satisfy the gate live on the ticket branch and do not
           # survive the squash merge, so a `P4J_BASE` set here would abort every
           # push build on `main` (#133).
+          #
+          # test-p4-l.mjs takes the same shape: `contract` is the hermetic
+          # matrix pair, and the rendered oracle is its own entry point because
+          # it measures laid-out geometry rather than state. The hosted oracle
+          # needs operator credentials no build has, so CI runs it only far
+          # enough to prove it refuses to touch a provider account without
+          # them -- which is also what names the file for the inventory gate.
           node scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-i.mjs
           node scripts/test-p4-j.mjs contract
+          node scripts/test-p4-l.mjs contract
+          node scripts/test-p4-l-browser.mjs
+          if node scripts/test-p4-l-hosted.mjs; then
+            echo "scripts/test-p4-l-hosted.mjs ran without operator credentials" >&2
+            exit 1
+          fi
           node scripts/test-p4-m.mjs
           node scripts/test-p4-q.mjs
           # The four paths #125 left holding hand copies of the access-row
