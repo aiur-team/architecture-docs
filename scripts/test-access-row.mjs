@@ -85,6 +85,7 @@ const USER = Object.freeze({
 /** The control surface both stubs and both factories read. */
 const control = {
   identify: () => ({ ...USER }),
+  isOrgEmail: (email) => email === USER.email,
   resolveRole: null,
   capabilitiesFor: null,
   storeCalls: 0,
@@ -115,6 +116,7 @@ function bindStaticModules() {
     ["../lib/identity.mjs", stub("identity.mjs", `
       export * from ${JSON.stringify(real("netlify/lib/identity.mjs"))};
       export function identify(req) { return globalThis.__ACCESSROW__.identify(req); }
+      export function isOrgEmail(email) { return globalThis.__ACCESSROW__.isOrgEmail(email); }
     `)],
     /* Everything except the two controlled collaborators is the real export.
        `validateAccessRow` above all: substituting it would make this file
