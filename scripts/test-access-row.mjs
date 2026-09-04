@@ -104,24 +104,23 @@ function bindStaticModules() {
     return pathToFileURL(file).href;
   };
 
+  /* Each stub re-exports its real module wholesale with `export *` and then
+     declares only the collaborators this file controls; an explicit local
+     export shadows the same name arriving through the star. Naming the
+     pass-through exports individually instead would make every stub a second
+     copy of its module's import list, and each time a handler grew a
+     dependency the stub would fail to resolve rather than exercise the
+     handler — which is how this runner broke when P4-J (#120) landed. */
   const stubs = new Map([
     ["../lib/identity.mjs", stub("identity.mjs", `
+      export * from ${JSON.stringify(real("netlify/lib/identity.mjs"))};
       export function identify(req) { return globalThis.__ACCESSROW__.identify(req); }
     `)],
     /* Everything except the two controlled collaborators is the real export.
        `validateAccessRow` above all: substituting it would make this file
        assert against a double of the very function it exists to cover. */
     ["../lib/access.mjs", stub("access.mjs", `
-      import {
-        accessDocumentKey, accessGrantKey, accessGrantPrefix, accessInvitationPrefix,
-        assertAccessDocument, assertAccessGrant, assertAccessInvitationAtKey,
-        assertIdentitySub, validateAccessRow,
-      } from ${JSON.stringify(real("netlify/lib/access.mjs"))};
-      export {
-        accessDocumentKey, accessGrantKey, accessGrantPrefix, accessInvitationPrefix,
-        assertAccessDocument, assertAccessGrant, assertAccessInvitationAtKey,
-        assertIdentitySub, validateAccessRow,
-      };
+      export * from ${JSON.stringify(real("netlify/lib/access.mjs"))};
       export function capabilitiesFor(role) {
         return globalThis.__ACCESSROW__.capabilitiesFor(role);
       }
@@ -130,8 +129,8 @@ function bindStaticModules() {
       }
     `)],
     ["../lib/store.mjs", stub("store.mjs", `
-      import { StoreError, read } from ${JSON.stringify(real("netlify/lib/store.mjs"))};
-      export { StoreError, read };
+      import { StoreError } from ${JSON.stringify(real("netlify/lib/store.mjs"))};
+      export * from ${JSON.stringify(real("netlify/lib/store.mjs"))};
       export function docState() {
         globalThis.__ACCESSROW__.storeCalls += 1;
         throw new StoreError("unavailable", 503, "Access store unavailable");
