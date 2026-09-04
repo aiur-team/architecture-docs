@@ -905,10 +905,11 @@ function stableText(value) {
  * — P4-J renewing one and P2-G consuming one — so nothing is deleted on the
  * strength of the initial read. Each expired candidate is re-read inside P4-J's
  * own per-document maintenance lease and validated again, and only a record
- * that is still expired and still byte-identical to the first validated
- * snapshot is deleted while that lease is held. A record that vanished was
- * consumed, one with a live expiry was renewed, and either way retention does
- * nothing: it deletes invitations, it never converts, extends or grants them.
+ * whose expiry still parses, which is still expired, and which is still
+ * byte-identical to the first validated snapshot is deleted while that lease is
+ * held. A record that vanished was consumed, one with a live expiry was
+ * renewed, and either way retention does nothing: it deletes invitations, it
+ * never converts, extends or grants them.
  *
  * @param {{ store: object, nowMs: number }} options
  * @returns {Promise<{ v: 1, scanned: number, records: number, expired: number,
@@ -991,7 +992,18 @@ export async function sweepInvitations(options) {
           candidate.docId,
           candidate.key,
         );
-        if (Date.parse(invitation.expiresAt) > nowMs) {
+        const reReadExpiresMs = Date.parse(invitation.expiresAt);
+        if (!Number.isSafeInteger(reReadExpiresMs)) {
+          // The same fence the first pass applies, applied again where it
+          // actually guards a delete. `NaN > nowMs` is false, so without this
+          // an unparseable expiry reads as expired and falls through to the
+          // snapshot comparison — and that comparison is not a substitute,
+          // because it compares a rendering rather than the parse. Nothing
+          // reaching here today can be unparseable, but that is a property of
+          // the validator above, not of this comparison.
+          throw new RetentionError("invalid-invitation-key");
+        }
+        if (reReadExpiresMs > nowMs) {
           return "renewed";
         }
         if (stableText(invitation) !== candidate.text) {

@@ -568,6 +568,33 @@ async function runtimeMatrix(file, source) {
   );
   assert.deepEqual(deleted, []);
 
+  // An expiry that stops parsing between the two reads must be refused, not
+  // deleted. The leased re-read compares `Date.parse(expiresAt)` against the
+  // clock, and `NaN > nowMs` is false, so an unparseable expiry reads as
+  // expired. The snapshot comparison is not a substitute for a parse check:
+  // it compares a rendering, and two different values can render alike.
+  installRace();
+  beforeLeaseRun = () =>
+    records.set(raceKey, { ...expiredRace, expiresAt: "not-a-date" });
+  await assert.rejects(
+    () => mod.namespace.sweepInvitations({ store, nowMs: now }),
+    (e) => e.name === "RetentionError" && e.code === "invalid-invitation-key",
+  );
+  assert.deepEqual(deleted, []);
+
+  // The same fence where the snapshot comparison cannot help at all. Both
+  // renderings are `{}`, so the bytes match while only the first value parses —
+  // without the parse check the record is deleted on a `NaN` expiry. A JSON
+  // provider cannot hand back a `Date`, which is the point: the delete must be
+  // fenced by this check directly, not by what the record happens to be.
+  installRace({ ...expiredRace, expiresAt: new Date(now - 1) });
+  beforeLeaseRun = () => records.set(raceKey, { ...expiredRace, expiresAt: {} });
+  await assert.rejects(
+    () => mod.namespace.sweepInvitations({ store, nowMs: now }),
+    (e) => e.name === "RetentionError" && e.code === "invalid-invitation-key",
+  );
+  assert.deepEqual(deleted, []);
+
   installRace();
   beforeLeaseRun = () => records.delete(raceKey);
   const consumed = await mod.namespace.sweepInvitations({ store, nowMs: now });
