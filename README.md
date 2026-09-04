@@ -45,10 +45,48 @@ drift from the CSS.
 templates/check-dist        # rebuild every document; fail if committed dist/ changed
 scripts/scrub-check.sh      # fail if private context reached this repository
 npm --prefix templates/docbuild run check   # typecheck
+node scripts/check-function-modules.mjs     # fail if a netlify/ module does not load
+node scripts/check-test-inventory.mjs       # fail if a test file is not wired into CI
+node scripts/vendor-netlify-lib.mjs         # fail if the deploy tree is not self-contained
 ```
+
+`.github/workflows/check.yml` is the full list; the commands above are the ones worth running by hand.
+
+`check-function-modules.mjs` imports every `netlify/functions/*.mjs` and `netlify/lib/*.mjs` without
+invoking anything. ESM links named imports before it evaluates them, so an unresolvable specifier or a
+missing export fails here — the one class of breakage that used to ship with every gate green. Run it on a
+plain checkout: a deploy carries only `netlify/`, `netlify.toml` and the root lockfile, so a module that
+links only once some other tree has been built does not link in production. Its `ALLOWED_LOAD_FAILURES`
+table is the visible, dated list of known-broken modules, each naming the issue that deletes it; the gate
+fails when an entry stops describing the code it was granted for.
+
+`allow-known-runner-failure.mjs` is the other half of that bargain. Wiring the runners in found real
+defects in already-merged code, and a runner that is dropped or taught to skip a matrix protects nothing, so
+each known failure is written down instead: named, dated, linked to the issue that deletes it, printed as an
+`ALLOW` line on every run, and scoped so tightly that a second failure in the same worker still fails CI.
+Each entry stops applying the moment its defect leaves the source, and the wrapper then fails until the
+entry is removed. **Its table is currently empty and every runner is invoked directly** — its one entry,
+`test-p4-a.mjs`'s browser matrix, was granted by #107 (PR #116) and removed by #124, which is the lifetime
+an entry here is meant to have.
+
+`check-test-inventory.mjs` is why the literal test list in `check.yml` can stay literal. It fails when a
+tracked test file exists that no run step names, so **adding a test file and forgetting to wire it up is
+now a red build rather than a silent no-op.**
 
 `check-dist` is the acceptance test that let the builder be rewritten twice — Python, then Rust, then
 TypeScript — without altering a single byte of any document's output.
+
+`vendor-netlify-lib.mjs` guards the deploy tree. The edit endpoint needs the block scanner and the
+inline converter, but a Netlify function cannot import `templates/docbuild/dist/` — it is gitignored, and
+only `netlify/`, `netlify.toml`, `package.json` and `package-lock.json` are copied into a connected site.
+Both modules are therefore compiled into `netlify/lib/` and committed. They are generated, so after
+changing `templates/docbuild/src/anchor-core.ts` or `templates/docbuild/src/inline_md.ts`, run
+`npm --prefix templates/docbuild run build && node scripts/vendor-netlify-lib.mjs --write` and commit the
+result with the source.
+
+The same gate holds the rule those copies exist to satisfy: **no relative import anywhere under
+`netlify/` may resolve outside `netlify/`.** Bare npm specifiers and `node:` builtins are fine — they
+travel with `package.json`. A relative path is the only kind that can reach code a deploy does not carry.
 
 `scrub-check.sh` exists because this repository was extracted from a private one. The documents here were
 written about real internal systems before being generalised, and prose survives a rename. The gate is
@@ -69,4 +107,18 @@ that moves, inline suggestions and edits, per-document roles, document history, 
 presence. `docs/research/00-integration-plan.md` is the ruling document — where it and a numbered
 research document disagree, the plan is correct.
 
-None of it is implemented yet. The tickets are in this repository's issues.
+The Netlify implementation is configured with site environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `ORG_EMAIL_DOMAIN` | Organisation email suffix, including the leading `@` (for example, `@example.com`). Matching is case-insensitive. If it is unset, empty, or malformed, nobody receives organisation membership. |
+| `DOC_OWNERS` | Comma-separated document-owner seeds in `<document>:<email>` form. |
+| `ABLY_API_KEY` | Optional Ably API key for realtime presence and events. |
+| `SLACK_WEBHOOK_URL` | Optional Slack webhook for notifications. |
+| `DOCS_REPO` | Source repository in `<owner>/<repository>` form for repository-backed edits. |
+| `DOCS_BASE_BRANCH` | Source branch for repository-backed edits; defaults to `main`. |
+| `DOCS_GITHUB_TOKEN` | Fine-grained GitHub token used for repository-backed edits. |
+| `DOCS_BOT_EMAIL` | Committer email used for repository-backed edits. |
+
+Keep secrets scoped to Functions rather than Builds. The implementation never sends configuration
+values to callers or writes them to logs.

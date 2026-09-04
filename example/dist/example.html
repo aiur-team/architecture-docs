@@ -278,6 +278,13 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 .doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
 .doc-comment-marker[hidden]{display:none}
 .doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+/* P4-Q: the rail carries two kinds.  A suggestion marker keeps the comment
+   marker's box, border weight and accessible name and differs only in colour,
+   so forced colours and print see one shape and one label either way. */
+.doc-rail-suggestion{border-color:var(--info,#2A5DB0);background:var(--info-soft,#E7EEFA);color:var(--info,#2A5DB0)}
+@media (prefers-color-scheme:dark){
+  .doc-rail-suggestion{border-color:var(--info,#7FA8F0);background:var(--info-soft,#1A2333);color:var(--info,#7FA8F0)}
+}
 
 /* ---- non-mutating fallback when custom highlights are unavailable ---- */
 .doc-comment-block{border-inline-start:3px solid var(--warn,#A85B00);background-color:var(--warn-soft,#FBF0DF);padding-inline-start:8px}
@@ -311,6 +318,12 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 .doc-comments-author{font-weight:600;color:var(--doc-comments-ink)}
 .doc-comments-edited{font-style:italic}
 .doc-comments-empty{color:var(--doc-comments-ink-2)}
+/* P4-Q: the one section a second client may render into.  It inherits the
+   panel's width, wrapping and overflow rules; everything inside it is styled
+   by whoever registered the renderer. */
+.doc-panel-extension{display:block;margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}
+.doc-panel-extension:empty{display:none}
+.doc-panel-extension-empty{margin:14px 0 0;color:var(--doc-comments-ink-2)}
 
 /* ---- keyboard focus ---- */
 #doc-comments-toggle:focus-visible,#doc-comments-panel :focus-visible,.doc-comment-marker:focus-visible{outline:2px solid var(--doc-comments-accent,var(--accent,#C0122A));outline-offset:2px}
@@ -323,10 +336,12 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 
 /* ---- motion, forced colours, print ---- */
 @media (prefers-reduced-motion:reduce){
-  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card{animation-duration:0s;transition-duration:0s}
+  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card,.doc-panel-extension{animation-duration:0s;transition-duration:0s}
 }
 @media (forced-colors:active){
   #doc-comments-panel{border:1px solid CanvasText}
+  .doc-comment-marker{border:1px solid CanvasText;background:Canvas;color:CanvasText}
+  .doc-comment-marker-active{border:2px solid Highlight}
   .doc-comment-block{border-inline-start:3px solid CanvasText}
   .doc-comment-block-active{outline:2px solid Highlight}
 }
@@ -884,16 +899,134 @@ nav.jump a.history-changed::after {
   unicode-bidi: isolate;
 }
 
+/* P4-L — owner write controls.  Every rule stays inside P3-I's `.share-*`
+   scope, inherits the panel's own colours, and distinguishes disabled, busy
+   and confirmation states by more than colour alone. */
+.share-default-form,
+.share-invite,
+.share-row-controls,
+.share-transfer-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .4rem;
+  margin-top: .5rem;
+  color: inherit;
+}
+
+.share-default-form,
+.share-invite {
+  margin-top: .75rem;
+}
+
+.share-invite {
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border, #e2e6eb);
+}
+
+.share-op-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 8rem;
+  min-width: 0;
+  gap: .2rem;
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.share-op {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 1.9rem;
+  padding: .3rem .45rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .4rem;
+  font: 500 .78rem/1.2 var(--sans, system-ui, sans-serif);
+}
+
+button.share-op {
+  flex: none;
+  background: var(--surface-2, #eef1f4);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.share-op:hover:enabled {
+  color: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-op:focus-visible {
+  outline: 2px solid var(--accent, #c0122a);
+  outline-offset: 2px;
+}
+
+/* Disabled is announced by opacity, a dashed border and the not-allowed
+   cursor together, so a forced or monochrome palette still reads it. */
+.share-op:disabled {
+  opacity: .55;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.share-pop[aria-busy="true"] .share-list li,
+.share-pop[aria-busy="true"] .share-default-form,
+.share-pop[aria-busy="true"] .share-invite {
+  opacity: .8;
+}
+
+.share-transfer-confirm {
+  flex-direction: column;
+  align-items: stretch;
+  padding: .5rem;
+  border: 2px dashed var(--border-strong, #cbd2da);
+  border-radius: .5rem;
+}
+
+.share-transfer-confirm p {
+  margin: 0 0 .4rem;
+  font-size: .78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.share-transfer-confirm button.share-op {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 24rem) {
+  .share-op-label {
+    flex-basis: 100%;
+  }
+
+  .share-row-controls button.share-op,
+  .share-invite button.share-op,
+  .share-default-form button.share-op {
+    flex: 1 1 100%;
+  }
+}
+
 @media (forced-colors: active) {
   .share-btn,
   .share-pop,
-  .share-close {
+  .share-close,
+  .share-op,
+  .share-transfer-confirm {
     border: 1px solid CanvasText;
   }
 
   .share-btn:focus-visible,
-  .share-close:focus-visible {
+  .share-close:focus-visible,
+  .share-op:focus-visible {
     outline: 2px solid Highlight;
+  }
+
+  .share-op:disabled {
+    border-style: dashed;
+    opacity: 1;
+    color: GrayText;
   }
 }
 
@@ -906,7 +1039,8 @@ nav.jump a.history-changed::after {
 
 @media (prefers-reduced-motion: reduce) {
   .share-pop,
-  .share-pop * {
+  .share-pop *,
+  .share-op {
     animation: none !important;
     scroll-behavior: auto !important;
     transition: none !important;
@@ -1645,6 +1779,11 @@ window.doc.anchor = { BLOCK, norm, scanBlocks };
    owner already filled, the module installs nothing and the static document is
    unchanged.
 
+   P4-I adds one advisory layer on top: entering the direct editor announces a
+   frozen local `doc:edit-state` and publishes one `edit.claim` through P3-F,
+   and every way out of the editor publishes one matching `edit.release`. It is
+   a hint for peers, never a lock -- the block hash still decides.
+
    Amendment chain: P4-B (this initial overlay/direct-edit client) -> P4-I ->
    P4-P. The four converter declarations below are byte-compatible with P2-D's
    `inline_md` twin on purpose; P4-C extracts them and runs the parity gate. */
@@ -1994,6 +2133,116 @@ function installEdit() {
     return { applied, available: true };
   }
 
+  /* ------------------------------------------------------------ the soft lock */
+
+  /* P4-I's advisory editing claim. It is presentation state for peers and
+     nothing else: the server's block hash stays the only write authority, so
+     a lost, delayed, duplicated or reordered claim can never change what a
+     save is allowed to do. At most one local block is claimed at a time.
+
+     P1-B loads this module before realtime, so the transport surface cannot
+     be captured here. It is proved at publish time instead, by exactly the
+     shape P3-F promises: a frozen object whose only own property is a
+     non-writable, non-configurable, enumerable `publish` function. */
+
+  let claimedAid = null;
+
+  /* The block whose editor is currently open, and how to re-announce it. A
+     `pagehide` releases the claim without closing the editor, so a BFCache
+     restore comes back to a live `contenteditable` whose claim is gone: the
+     heartbeat would say `reading` while the reader is still typing, and a peer
+     claim on that block would no longer be excluded from the editing host.
+     Re-running the claim edge on restore is what keeps the two in step. */
+  let activeEditor = null;
+
+  function ignore() {}
+
+  function realtimeSurface() {
+    try {
+      const surface = window.doc.realtime;
+      if (surface === null || typeof surface !== "object") return null;
+      if (!Object.isFrozen(surface)) return null;
+      if (Object.getOwnPropertySymbols(surface).length !== 0) return null;
+      const names = Object.getOwnPropertyNames(surface);
+      if (names.length !== 1 || names[0] !== "publish") return null;
+      const descriptor = Object.getOwnPropertyDescriptor(surface, "publish");
+      if (descriptor === undefined || !hasOwn(descriptor, "value")) return null;
+      if (typeof descriptor.value !== "function") return null;
+      if (descriptor.enumerable !== true) return null;
+      if (descriptor.writable !== false || descriptor.configurable !== false) return null;
+      return surface;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /* Exactly one attempt, never awaited and never retried. An absent surface,
+     a synchronous throw, a rejection and a resolved false are the same
+     non-event: the editor keeps working, it is simply undecorated for peers.
+     Nothing here creates a timer, and no save ever waits on it. */
+  function publishClaim(event) {
+    const surface = realtimeSurface();
+    if (surface === null) return;
+    try {
+      Promise.resolve(surface.publish(event)).then(ignore, ignore);
+    } catch (error) {
+      // A transport failure is silence, not a broken editor.
+    }
+  }
+
+  /** The one local signal P3-G listens for. Freshly created and frozen each
+     time, so a listener can trust the shape without copying it. */
+  function announceEditState(aid) {
+    document.dispatchEvent(new CustomEvent("doc:edit-state", {
+      detail: Object.freeze({ aid }),
+    }));
+  }
+
+  function claimBlock(aid) {
+    // Moving straight from one editor to another releases the old block
+    // first, so peers never see this tab holding two claims at once.
+    if (claimedAid !== null) releaseBlock(null);
+    claimedAid = aid;
+    announceEditState(aid);
+    publishClaim({ t: "edit.claim", aid });
+  }
+
+  /* Idempotent. `expected` names the block that is finishing, or `null` to
+     release whatever is active, which is what the page-lifecycle path needs.
+     The aid is captured and cleared before either side effect, so an
+     overlapping finish — a blur that follows Escape, or a pagehide during a
+     save — publishes nothing a second time. A block whose claim has already
+     been taken over by another editor releases nothing. */
+  function releaseBlock(expected) {
+    if (claimedAid === null) return;
+    if (expected !== null && claimedAid !== expected) return;
+    const captured = claimedAid;
+    claimedAid = null;
+    announceEditState(null);
+    publishClaim({ t: "edit.release", aid: captured });
+  }
+
+  // Registered during module evaluation. P1-B loads edit before presence, so
+  // this runs ahead of P3-G's own `pagehide` listener and peers see the
+  // release before the bye. No `unload` or `beforeunload` listener is added.
+  try {
+    window.addEventListener("pagehide", () => releaseBlock(null));
+    // The mirror of that release. Only a genuine BFCache restore re-claims: a
+    // normal navigation builds a fresh page whose editors are all closed.
+    window.addEventListener("pageshow", (event) => {
+      let persisted = false;
+      try {
+        persisted = event.persisted === true;
+      } catch (error) {
+        return;
+      }
+      if (!persisted || activeEditor === null || claimedAid !== null) return;
+      claimBlock(activeEditor);
+    });
+  } catch (error) {
+    // A host without the page lifecycle simply never fires it.
+  }
+
   /* -------------------------------------------------------------- the editor */
 
   let saving = false;
@@ -2056,6 +2305,10 @@ function installEdit() {
     };
 
     const stopEditing = () => {
+      // Before the save request, the restore, or the programmatic blur: peers
+      // learn this block is free ahead of any write or navigation work.
+      releaseBlock(aid);
+      if (activeEditor === aid) activeEditor = null;
       editing = false;
       element.removeAttribute("contenteditable");
       element.classList.remove(EDITING_CLASS);
@@ -2083,6 +2336,10 @@ function installEdit() {
       // reader typed: discarding their text and calling it a failed save
       // would lose work this block never even tried to send.
       if (saving) {
+        // The reader has already left this editor, so peers must not keep
+        // seeing it claimed while another block finishes its request. The
+        // text stays put; focusing the retry editor publishes a fresh claim.
+        releaseBlock(aid);
         setStatus(BUSY_MESSAGE);
         return;
       }
@@ -2164,7 +2421,20 @@ function installEdit() {
       if (event.key === "Escape") {
         event.preventDefault();
         cancel();
-        button.focus();
+        // `cancel()` releases synchronously, so a peer claim that presence was
+        // holding back for this block can appear and hide this very button
+        // before the focus call. Focusing a hidden element silently does
+        // nothing and strands the reader on `body`, so fall back to the
+        // controls wrapper, which is always still there.
+        try {
+          if (!button.hasAttribute("hidden")) button.focus();
+          else {
+            controls.setAttribute("tabindex", "-1");
+            controls.focus();
+          }
+        } catch (error) {
+          // A host without focus management leaves the caret where it was.
+        }
         return;
       }
       if (event.key !== "Enter") return;
@@ -2194,6 +2464,8 @@ function installEdit() {
       element.classList.add(EDITING_CLASS);
       controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
       editing = true;
+      activeEditor = aid;
+      claimBlock(aid);
       element.addEventListener("keydown", onKeyDown);
       element.addEventListener("paste", onPaste);
       element.addEventListener("blur", onBlur);
@@ -2269,10 +2541,20 @@ function installEdit() {
    what is *shown*; every mutation is still authorised by the server, and one
    401 or 403 retires this page's write controls for good.
 
+   P4-Q publishes the two bounded surfaces a second client may use without
+   owning any of this: `window.doc.rail` places one marker per block per kind,
+   and `window.doc.panel` rents one empty section inside the existing panel.
+   Neither carries a suggestion record, an identity, or any authority -- they
+   coordinate presentation and nothing else, and comments.js remains the only
+   owner of the rail, the panel, the anchor locator and the highlight
+   registries.  P4-Q also orders the first anchor resolution behind P4-B's
+   optional overlay barrier and repairs anchors when a later `doc:overlay`
+   replaces the contents of a named block.
+
    Amendment chain: P3-C (this read path) -> P4-A (comment writes) -> P4-Q
    (shared rail/panel publication, Suggestions filter, overlay repair).  The
-   rail and panel controllers stay in module scope until P4-Q publishes them;
-   the only public seam is `window.doc.comments.refresh()`. */
+   public seams are `window.doc.comments.refresh()`, `window.doc.rail` and
+   `window.doc.panel`. */
 
 const PROTOCOL = location.protocol;
 if (PROTOCOL === "http:" || PROTOCOL === "https:") installComments();
@@ -2306,6 +2588,11 @@ function installComments() {
 
   if (doc.comments !== null && doc.comments !== undefined) return;
 
+  /* P1-B initialises both shared fields to exactly null.  Anything else means
+     another owner already published them, and this module returns before any
+     UI, listener or request rather than replacing a live surface. */
+  if (doc.rail !== null || doc.panel !== null) return;
+
   /* ------------------------------------------------------------ constants */
 
   const MAX_PAGES = 5;
@@ -2322,6 +2609,9 @@ function installComments() {
   const CONTEXT_LIMIT = 32;
   const VISIBILITY_WINDOW_MS = 30000;
   const MARKER_STEP = 24;
+  const BARRIER_DEADLINE_MS = 5500;
+  const OVERLAY_MAX = 50;
+  const MAX_RAIL_LABEL = 160;
 
   const THREAD_ID = /^t_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
   const COMMENT_ID = /^c_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
@@ -2357,6 +2647,10 @@ function installComments() {
   const WRITE_PENDING = "Saving the comment change.";
   const WRITE_SAVED = "The comment change was saved.";
   const MULTI_BLOCK = "Select inside one paragraph";
+  const NO_SUGGESTIONS = "Suggestions are unavailable.";
+  const MARKER_CLASS = "doc-comment-marker";
+  const RAIL_CLASS = Object.freeze({ comment: "doc-rail-comment", suggestion: "doc-rail-suggestion" });
+  const EXTENSION_CLASS = "doc-panel-extension";
 
   const STATE_LABEL = Object.freeze({
     exact: "",
@@ -2378,6 +2672,12 @@ function installComments() {
   let activeId = null;
   let statusFilter = "open";
   let kindFilter = "all";
+  /* The block filter is private to `window.doc.panel.open()`: a validated aid
+     or null.  Any kind-filter click clears it. */
+  let blockFilter = null;
+  /* The block index the last commit resolved against, kept so an overlay can
+     recompute `textMap()` for the named blocks only. */
+  let blockIndex = null;
 
   /* Write state.  `writesDenied` is deliberately page-lifetime: a server
      denial is never cleared in place, only by a fresh navigation. */
@@ -2402,6 +2702,28 @@ function installComments() {
   const markers = new Map();
   const cards = new Map();
   const decoratedBlocks = new Set();
+
+  /* The one placement registry.  Comment markers are entered here by this
+     module; suggestion markers by whoever holds `window.doc.rail`.  The key is
+     the opaque token handed back to the caller, so a foreign value can never
+     name someone else's entry. */
+  const railEntries = new Map();
+  let railSeq = 0;
+
+  /* The single registered panel extension renderer, and the section it last
+     rendered into.  `rendering` is true only while the renderer is on the
+     stack, so a repaint it asks for from inside itself is refused rather than
+     recursed. */
+  let extensionRenderer = null;
+  let extension = null;
+  let rendering = false;
+
+  /* The initial-read barrier and the overlay reconciliation queue. */
+  let readiness = null;
+  let overlayBatch = null;
+  let overlayNext = null;
+  let overlayScheduled = false;
+  let selectKind = null;
 
   /* --------------------------------------------------------- validation */
 
@@ -2628,8 +2950,13 @@ function installComments() {
   }
 
   /* Every rendered block by aid; a duplicate or out-of-policy element aborts
-     the commit because choosing between candidates would misattach threads. */
-  function buildBlockIndex() {
+     the commit because choosing between candidates would misattach threads.
+
+     `previous` and `named` are the overlay path: an accepted `doc:overlay`
+     replaced the children of the named blocks only, so every other block that
+     is still the same element keeps the text map it already had and only the
+     named ones are walked again. */
+  function buildBlockIndex(previous, named) {
     const index = new Map();
     const elements = document.querySelectorAll("[data-aid]");
     for (let order = 0; order < elements.length; order += 1) {
@@ -2637,7 +2964,12 @@ function installComments() {
       if (!BLOCK.includes(element.localName)) return null;
       const id = element.getAttribute("data-aid");
       if (id === null || !AID.test(id) || index.has(id)) return null;
-      index.set(id, { element, order, map: textMap(element) });
+      let map = null;
+      if (previous !== undefined && previous !== null && !named.has(id)) {
+        const before = previous.get(id);
+        if (before !== undefined && before.element === element) map = before.map;
+      }
+      index.set(id, { element, order, map: map === null ? textMap(element) : map });
     }
     return index;
   }
@@ -2680,6 +3012,7 @@ function installComments() {
     document.removeEventListener("selectionchange", selectionChanged);
     document.removeEventListener("keydown", writeKeydown, true);
     document.removeEventListener("scroll", removeTooltip, true);
+    document.removeEventListener("doc:overlay", onOverlay);
     clearSelectionTimer();
     removeTooltip();
     detachDraft();
@@ -2697,8 +3030,17 @@ function installComments() {
     actions = null;
     list = null;
     opener = null;
+    /* Every token this controller ever issued dies with the rail, including
+       the ones a suggestion client is still holding. */
+    railEntries.clear();
     markers.clear();
     cards.clear();
+    extension = null;
+    selectKind = null;
+    blockFilter = null;
+    blockIndex = null;
+    overlayBatch = null;
+    overlayNext = null;
     model = [];
     truncation = null;
     activeId = null;
@@ -2805,7 +3147,16 @@ function installComments() {
     return committed;
   }
 
+  /* The public seam.  Before the initial overlay barrier settles every caller
+     joins the same readiness Promise instead of resolving anchors against
+     text that is about to be replaced. */
   function refresh() {
+    if (!activated) return Promise.resolve(false);
+    if (readiness !== null) return readiness;
+    return startRefresh();
+  }
+
+  function startRefresh() {
     if (!activated) return Promise.resolve(false);
     if (batch !== null) {
       again = true;
@@ -2831,6 +3182,7 @@ function installComments() {
     const index = buildBlockIndex();
     if (index === null) return false;
     if (panel === null && document.querySelector(".head-top") === null) return false;
+    blockIndex = index;
     const next = threads.map((thread) => ({
       thread,
       location: thread.kind === "comment" ? locate(thread.anchor, index) : null,
@@ -2906,7 +3258,9 @@ function installComments() {
     if (share !== null) head.insertBefore(toggle, share);
     else head.appendChild(toggle);
 
-    rail = el("div", { id: "doc-comments-rail", "aria-label": "Comment locations" });
+    /* P4-Q: the rail carries both kinds now, so the group a screen reader
+       lands in has to say so. */
+    rail = el("div", { id: "doc-comments-rail", "aria-label": "Comment and suggestion locations" });
     document.body.appendChild(rail);
 
     panel = el("aside", { id: "doc-comments-panel", "aria-labelledby": "doc-comments-title" });
@@ -2922,8 +3276,16 @@ function installComments() {
     truncationNote.hidden = true;
     actions = el("div", { id: "doc-comments-actions" });
     const filters = el("div", { id: "doc-comments-filters" });
-    filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], statusFilter, (value) => { statusFilter = value; }));
-    filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], kindFilter, (value) => { kindFilter = value; }));
+    filters.appendChild(filterGroup("Status",
+      [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]],
+      statusFilter, (value) => { statusFilter = value; }, null).group);
+    /* Choosing a kind is the reader taking the panel back from whatever
+       `open(aid)` narrowed it to, so the block filter clears with it. */
+    const kindGroup = filterGroup("Kind",
+      [["anchored", "Anchored"], ["discussions", "Discussions"], ["suggestions", "Suggestions"], ["all", "All"]],
+      kindFilter, (value) => { kindFilter = value; blockFilter = null; }, renderExtension);
+    filters.appendChild(kindGroup.group);
+    selectKind = kindGroup.select;
     list = el("div", { id: "doc-comments-list" });
     panel.appendChild(header);
     panel.appendChild(status);
@@ -2947,6 +3309,7 @@ function installComments() {
     document.addEventListener("selectionchange", selectionChanged);
     document.addEventListener("keydown", writeKeydown, true);
     document.addEventListener("scroll", removeTooltip, true);
+    document.addEventListener("doc:overlay", onOverlay);
     const fonts = document.fonts;
     if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
       && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
@@ -2955,20 +3318,27 @@ function installComments() {
     return true;
   }
 
-  function filterGroup(label, options, selected, onSelect) {
+  /* `select` sets the pressed state without running `onSelect`, so a
+     programmatic view change such as `window.doc.panel.open()` shows the same
+     controls a click would have. */
+  function filterGroup(label, options, selected, onSelect, after) {
     const group = el("div", { role: "group", "aria-label": label });
     const buttons = [];
+    const select = (value) => {
+      for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
+    };
     for (const [value, text] of options) {
       const button = el("button", { type: "button", "aria-pressed": selected === value ? "true" : "false" }, text);
       button.addEventListener("click", () => {
         onSelect(value);
-        for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
+        select(value);
         applyFilters();
+        if (after !== null) after();
       });
       buttons.push([value, button]);
       group.appendChild(button);
     }
-    return group;
+    return { group, select };
   }
 
   function openPanel(invoker, threadId) {
@@ -3047,9 +3417,9 @@ function installComments() {
     paintDecoration();
     renderList();
     if (focusedMarker !== null) {
-      const replacement = markers.get(focusedMarker);
-      if (replacement !== undefined) replacement.marker.focus();
-      if (replacement === undefined || document.activeElement !== replacement.marker) toggle.focus();
+      const replacement = markerButton(focusedMarker);
+      if (replacement !== null) replacement.focus();
+      if (replacement === null || document.activeElement !== replacement) toggle.focus();
     }
     schedulePlacement();
   }
@@ -3060,20 +3430,20 @@ function installComments() {
     return "";
   }
 
+  /* Comment markers go through the same private registry a suggestion client
+     reaches over `window.doc.rail`, so one placement pass declutters both
+     kinds.  A repaint replaces only this module's own entries; a suggestion
+     marker survives a comment refresh untouched. */
   function renderMarkers() {
+    for (const token of markers.values()) railDrop(token);
     markers.clear();
-    rail.replaceChildren();
     for (const entry of model) {
       if (!isOpenLive(entry)) continue;
       const count = entry.thread.comments.length;
-      const marker = el("button", {
-        type: "button",
-        class: "doc-comment-marker",
-        "aria-label": `Comment by ${entry.thread.author.name}, ${count} ${count === 1 ? "message" : "messages"}${stateSuffix(entry.location.state)}`,
-      }, String(count));
-      marker.setAttribute("data-thread-id", entry.thread.id);
-      marker.hidden = true;
-      marker.addEventListener("click", () => {
+      const label = `Comment by ${entry.thread.author.name}, ${count} ${count === 1 ? "message" : "messages"}${stateSuffix(entry.location.state)}`;
+      let marker = null;
+      const token = railRegister("comment", entryAid(entry), String(count), label, () => {
+        if (marker === null) return;
         if (panel.hidden) openPanel(marker, entry.thread.id);
         else {
           opener = marker;
@@ -3081,13 +3451,36 @@ function installComments() {
           focusCard(entry.thread.id);
         }
       });
-      markers.set(entry.thread.id, { marker, entry });
-      rail.appendChild(marker);
+      if (token === null) continue;
+      const record = railEntries.get(token);
+      marker = record.button;
+      record.entry = entry;
+      marker.setAttribute("data-thread-id", entry.thread.id);
+      markers.set(entry.thread.id, token);
     }
+  }
+
+  /* The rail focus restore in `render()` wants the button, not the token. */
+  function markerButton(threadId) {
+    const token = markers.get(threadId);
+    if (token === undefined) return null;
+    const record = railEntries.get(token);
+    return record === undefined ? null : record.button;
+  }
+
+  /* Where a thread currently sits, which is where its marker is drawn.  A
+     moved thread belongs to the block it landed in, not the one it was
+     written against, so `open(aid)` shows exactly what that block's markers
+     promised. */
+  function entryAid(entry) {
+    if (entry.location === null || entry.location.element === null) return null;
+    return entry.location.element.getAttribute("data-aid");
   }
 
   function passesFilters(entry) {
     const thread = entry.thread;
+    if (kindFilter === "suggestions") return false;
+    if (blockFilter !== null && entryAid(entry) !== blockFilter) return false;
     if (statusFilter !== "all" && thread.status !== statusFilter) return false;
     if (kindFilter === "anchored" && thread.kind !== "comment") return false;
     if (kindFilter === "discussions" && thread.kind !== "discussion") return false;
@@ -3125,6 +3518,7 @@ function installComments() {
     fragment.appendChild(el("p", { class: "doc-comments-empty" }, "No comments match the current filters."));
     list.replaceChildren(fragment);
     applyFilters();
+    renderExtension();
 
     if (focusedInList) {
       if (focusedThread === null) title.focus();
@@ -3149,8 +3543,10 @@ function installComments() {
       section.hidden = visible === 0;
       shown += visible;
     }
+    /* The Suggestions view is not a filtered comment list, so it does not
+       claim that no comment matched. */
     const empty = list.querySelector(".doc-comments-empty");
-    if (empty !== null) empty.hidden = shown > 0;
+    if (empty !== null) empty.hidden = shown > 0 || kindFilter === "suggestions";
   }
 
   function group(heading, entries) {
@@ -3294,36 +3690,85 @@ function installComments() {
     return true;
   }
 
+  /* Every currently rendered block by aid, elements only.  A suggestion marker
+     names a block it does not own, so the aid has to resolve to exactly one
+     connected block at placement time or the marker is simply not drawn. */
+  function blockElements() {
+    const found = new Map();
+    const elements = document.querySelectorAll("[data-aid]");
+    for (let order = 0; order < elements.length; order += 1) {
+      const element = elements[order];
+      const id = element.getAttribute("data-aid");
+      if (id === null || !AID.test(id)) continue;
+      if (found.has(id)) found.set(id, null);
+      else found.set(id, { element, order });
+    }
+    return found;
+  }
+
+  /* One entry's host block and the box the marker lines up with.  A comment
+     uses the location P3-C resolved, including a range inside a block it moved
+     to; a suggestion is whole-block by definition. */
+  function railAnchorOf(record, blocks) {
+    /* A comment marker this module made carries the entry P3-C resolved.  One
+       a *caller* made through the public `add("comment", ...)` carries only an
+       aid, so it is placed whole-block exactly like a suggestion rather than
+       being hidden forever for want of an entry. */
+    if (record.kind === "comment" && record.entry !== null) {
+      const location = record.entry.location;
+      if (location === null || location.element === null) return null;
+      return { host: location.element, source: location.range === null ? location.element : location.range, order: location.order };
+    }
+    const found = blocks.get(record.aid);
+    if (found === undefined || found === null || !found.element.isConnected) return null;
+    return { host: found.element, source: found.element, order: found.order };
+  }
+
+  /* Ties are broken the same way whichever kinds collide: document order,
+     then comments before suggestions, then P3-C's thread order, then the
+     order the markers were registered in. */
+  function byRail(a, b) {
+    if (a.order !== b.order) return a.order - b.order;
+    if (a.record.kind !== b.record.kind) return a.record.kind === "comment" ? -1 : 1;
+    if (a.record.entry !== null && b.record.entry !== null) return byCreated(a.record.entry, b.record.entry);
+    return a.record.seq - b.record.seq;
+  }
+
   function placeMarkers() {
     if (rail === null || !rail.isConnected) return;
+    let needsBlocks = false;
+    for (const record of railEntries.values()) if (record.kind === "suggestion" || record.entry === null) needsBlocks = true;
+    const blocks = needsBlocks ? blockElements() : new Map();
+
     const candidates = [];
-    for (const { marker, entry } of markers.values()) {
-      const host = entry.location.element;
-      const visible = host.isConnected && disclosed(host);
+    for (const record of railEntries.values()) {
+      const marker = record.button;
+      const placement = railAnchorOf(record, blocks);
+      const visible = placement !== null && placement.host.isConnected && disclosed(placement.host);
       /* A stale right-edge position can itself inflate scrollWidth after a
          viewport narrows. Reset it in the batched write phase so the later
          document measurement describes the page, not the prior marker. */
       if (visible) marker.style.left = "0px";
       marker.hidden = !visible;
-      if (visible) candidates.push({ marker, entry, host });
+      if (visible) candidates.push({ marker, record, placement });
     }
 
     const railRect = rail.getBoundingClientRect();
     const scrollWidth = document.documentElement.scrollWidth;
     const measured = [];
-    for (const { marker, entry, host } of candidates) {
-      const source = entry.location.range === null ? host : entry.location.range;
+    for (const { marker, record, placement } of candidates) {
+      const host = placement.host;
       const hasBox = host.getClientRects().length > 0;
-      const top = source.getBoundingClientRect().top - railRect.top;
+      const top = placement.source.getBoundingClientRect().top - railRect.top;
       const hostRect = host.getBoundingClientRect();
       const width = marker.offsetWidth;
       const left = Math.min(Math.max(hostRect.right - railRect.left + 8, 4), scrollWidth - width - 4);
-      measured.push({ marker, entry, hasBox, top, left });
+      measured.push({ marker, record, order: placement.order, hasBox, top, left });
     }
     const visible = measured.filter((item) => item.hasBox);
     visible.sort((a, b) => {
       if (a.top !== b.top) return a.top - b.top;
-      return byLocation(a.entry, b.entry);
+      return byRail(a, b);
     });
     for (const item of measured) item.marker.hidden = !item.hasBox;
     let previous = -Infinity;
@@ -3331,9 +3776,369 @@ function installComments() {
       const top = Math.max(item.top, previous + MARKER_STEP);
       item.marker.style.top = `${top}px`;
       item.marker.style.left = `${item.left}px`;
-      item.marker.classList.toggle("doc-comment-marker-active", item.entry.thread.id === activeId);
+      item.marker.classList.toggle("doc-comment-marker-active",
+        item.record.entry !== null && item.record.entry.thread.id === activeId);
       previous = top;
     }
+  }
+
+  /* ==================================================== shared surfaces */
+
+  const isThenable = (value) => value !== null
+    && (typeof value === "object" || typeof value === "function")
+    && typeof value.then === "function";
+
+  /* 1 to 160 Unicode scalar values, no C0, no C1, no lone surrogate.  A label
+     is drawn as text and read aloud, so anything that could carry a control
+     sequence into either is refused rather than sanitised. */
+  function validRailLabel(value) {
+    if (typeof value !== "string" || value === "") return false;
+    let scalars = 0;
+    for (const unit of value) {
+      const code = unit.codePointAt(0);
+      if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) return false;
+      if (code >= 0xd800 && code <= 0xdfff) return false;
+      scalars += 1;
+      if (scalars > MAX_RAIL_LABEL) return false;
+    }
+    return true;
+  }
+
+  /* The visible glyph inside a marker circle.  The contract fixes a
+     suggestion label as `<N> suggestions`, so the count is the label's own
+     leading digits; any other label draws an empty circle and keeps its
+     complete accessible name. */
+  function leadingCount(label) {
+    const match = /^[0-9]+(?= )/.exec(label);
+    return match === null ? "" : match[0];
+  }
+
+  /* Every marker on the rail is one entry here, whoever asked for it.  The key
+     is the token handed back: `Object.freeze(Object.create(null))` has no
+     data, no string form, no id and no authority, so holding one proves only
+     that this controller created it. */
+  function railRegister(kind, aid, text, label, onClick) {
+    if (rail === null) return null;
+    const button = el("button", {
+      type: "button",
+      class: `${MARKER_CLASS} ${RAIL_CLASS[kind]}`,
+      "aria-label": label,
+    }, text);
+    button.hidden = true;
+    railSeq += 1;
+    const record = { kind, aid, button, onClick, entry: null, seq: railSeq };
+    button.addEventListener("click", () => { fire(record); });
+    const token = Object.freeze(Object.create(null));
+    railEntries.set(token, record);
+    rail.appendChild(button);
+    return token;
+  }
+
+  /* A marker callback is private code collaboration, not a boundary this
+     module trusts.  A throw or a rejection is contained here with no log and
+     no retry, and the placement it would have scheduled still happens. */
+  function fire(record) {
+    try {
+      const result = record.onClick();
+      if (isThenable(result)) Promise.resolve(result).catch(() => {});
+    } catch (error) {
+      // Contained on purpose: a broken caller must not break the rail.
+    }
+    schedulePlacement();
+  }
+
+  function railDrop(token) {
+    const record = railEntries.get(token);
+    if (record === undefined) return false;
+    railEntries.delete(token);
+    if (record.button.parentNode !== null) record.button.parentNode.removeChild(record.button);
+    return true;
+  }
+
+  /* -------------------------------------------------- window.doc.rail */
+
+  function railAdd(kind, aid, label, onClick) {
+    if (rail === null) return null;
+    if (kind !== "comment" && kind !== "suggestion") return null;
+    if (typeof aid !== "string" || !AID.test(aid)) return null;
+    if (!validRailLabel(label)) return null;
+    if (typeof onClick !== "function") return null;
+    const found = blockElements().get(aid);
+    if (found === undefined || found === null || !found.element.isConnected) return null;
+    /* Suggestions are whole-block state: several suggestions on one block are
+       one marker, so a second one for the same aid is refused rather than
+       stacked. */
+    if (kind === "suggestion") {
+      for (const record of railEntries.values()) {
+        if (record.kind === "suggestion" && record.aid === aid) return null;
+      }
+    }
+    const token = railRegister(kind, aid, leadingCount(label), label, onClick);
+    if (token === null) return null;
+    schedulePlacement();
+    return token;
+  }
+
+  /* Only the exact identity this controller returned names an entry.  A
+     foreign object, a repeat, or anything else simply misses. */
+  function railRemove(token) {
+    return railDrop(token);
+  }
+
+  function railPlace() {
+    schedulePlacement();
+    return undefined;
+  }
+
+  /* ------------------------------------------------- window.doc.panel */
+
+  function panelRegister(kind, renderFn) {
+    if (kind !== "suggestion") return false;
+    if (typeof renderFn !== "function") return false;
+    if (extensionRenderer !== null) return false;
+    extensionRenderer = renderFn;
+    renderExtension();
+    return true;
+  }
+
+  /* One ordinary repaint of the panel and one placement frame.  It reads
+     nothing from the network and resolves no anchor.
+
+     A renderer that calls back into this from inside its own repaint would
+     otherwise recurse until the stack gave out, and the `try/catch` around the
+     renderer would swallow that as an ordinary renderer failure, leaving the
+     panel half rebuilt.  A nested repaint is simply refused instead. */
+  function panelRepaint() {
+    if (panel === null || rendering) return undefined;
+    render();
+    return undefined;
+  }
+
+  function panelOpen(aid) {
+    if (panel === null || toggle === null || list === null) return false;
+    if (aid !== null) {
+      if (typeof aid !== "string" || !AID.test(aid)) return false;
+      const found = blockElements().get(aid);
+      if (found === undefined || found === null || !found.element.isConnected) return false;
+    }
+    blockFilter = aid;
+    kindFilter = "all";
+    if (selectKind !== null) selectKind("all");
+    if (panel.hidden) openPanel(toggle, null);
+    applyFilters();
+    renderExtension();
+    schedulePlacement();
+    return true;
+  }
+
+  /* One empty section, rebuilt on each repaint, after the comment groups and
+     before the panel's own empty note.  The renderer may append only its own
+     UI; comments.js never reads what it appended and never hands it the
+     comment model. */
+  function renderExtension() {
+    dropExtension();
+    if (list === null) return;
+    if (kindFilter !== "all" && kindFilter !== "suggestions") return;
+    if (extensionRenderer === null) {
+      if (kindFilter !== "suggestions") return;
+      const note = mountExtension();
+      note.appendChild(el("p", { class: "doc-panel-extension-empty" }, NO_SUGGESTIONS));
+      return;
+    }
+    const section = mountExtension();
+    let result;
+    rendering = true;
+    try {
+      result = extensionRenderer(section, blockFilter);
+    } catch (error) {
+      // The renderer failed; the comments beside it stay usable.
+      dropExtension();
+      return;
+    } finally {
+      rendering = false;
+    }
+    if (isThenable(result)) {
+      /* An async renderer would paint into a section this repaint no longer
+         owns, so the return is treated as misuse rather than awaited. */
+      Promise.resolve(result).catch(() => {});
+      dropExtension();
+    }
+  }
+
+  function mountExtension() {
+    const section = el("section", { class: EXTENSION_CLASS });
+    const empty = list.querySelector(".doc-comments-empty");
+    if (empty === null) list.appendChild(section);
+    else list.insertBefore(section, empty);
+    extension = section;
+    return section;
+  }
+
+  function dropExtension() {
+    if (extension === null) return;
+    if (extension.parentNode !== null) extension.parentNode.removeChild(extension);
+    extension = null;
+  }
+
+  /* The two published surfaces.  The shorthand names are the contract's; the
+     module-scope names differ because `refresh` here is already the network
+     read.  Both the surface and the six functions are frozen: nothing about
+     either can be replaced once the page has them. */
+  function railSurface() {
+    const add = Object.freeze(railAdd);
+    const remove = Object.freeze(railRemove);
+    const place = Object.freeze(railPlace);
+    return Object.freeze({ add, remove, place });
+  }
+
+  function panelSurface() {
+    const register = Object.freeze(panelRegister);
+    const refresh = Object.freeze(panelRepaint);
+    const open = Object.freeze(panelOpen);
+    return Object.freeze({ register, refresh, open });
+  }
+
+  /* ------------------------------------------------ the overlay barrier */
+
+  /* P4-B's barrier is optional and is *discovered*, never used.  An accessor
+     at either level is a foreign object shaped like the seam, so only own data
+     descriptors count and no getter is ever invoked. */
+  function overlayBarrier() {
+    const editDescriptor = Object.getOwnPropertyDescriptor(doc, "edit");
+    if (editDescriptor === undefined || !hasOwn(editDescriptor, "value")) return null;
+    const edit = editDescriptor.value;
+    if (edit === null || typeof edit !== "object") return null;
+    const readyDescriptor = Object.getOwnPropertyDescriptor(edit, "overlaysReady");
+    if (readyDescriptor === undefined || !hasOwn(readyDescriptor, "value")) return null;
+    const ready = readyDescriptor.value;
+    if (!(ready instanceof Promise)) return null;
+    /* `instanceof` only walks the prototype chain, so an ordinary object made
+       with `Object.create(Promise.prototype)` passes it and then throws
+       synchronously out of `then()` -- taking the session listener, and with
+       it every comment on the page, down with it.  `then` needs the internal
+       slot, so calling it here is the brand check.  The no-op reaction it
+       leaves on a genuine Promise is harmless: this module ignores both the
+       fulfillment value and the rejection anyway. */
+    try {
+      Promise.prototype.then.call(ready, () => {}, () => {});
+    } catch (error) {
+      return null;
+    }
+    return ready;
+  }
+
+  /* The first anchor resolution waits for the applied overlay so no Range is
+     built against text about to be replaced -- but never past the guard, and
+     never on the barrier's own value or failure.  A publisher that never
+     settles costs this page 5.5 seconds, not its comments. */
+  function awaitOverlays() {
+    const ready = overlayBarrier();
+    if (ready === null) return startRefresh();
+    let timer = 0;
+    const guard = new Promise((resolve) => { timer = setTimeout(resolve, BARRIER_DEADLINE_MS); });
+    readiness = Promise.race([ready.then(() => undefined, () => undefined), guard]).then(() => {
+      clearTimeout(timer);
+      readiness = null;
+      return startRefresh();
+    });
+    return readiness;
+  }
+
+  /* ------------------------------------------------- the overlay event */
+
+  /* The one in-page signal that rendered block content changed.  Nothing is
+     coerced and no getter runs: the detail is already the exact frozen shape
+     the contract fixes, or the event does nothing at all. */
+  function overlayAids(event) {
+    const detail = event === null ? null : event.detail;
+    if (!isPlain(detail) || !Object.isFrozen(detail)) return null;
+    if (Object.getOwnPropertySymbols(detail).length !== 0) return null;
+    const names = Object.getOwnPropertyNames(detail);
+    if (names.length !== 1 || names[0] !== "aids") return null;
+    const slot = Object.getOwnPropertyDescriptor(detail, "aids");
+    if (!hasOwn(slot, "value") || slot.enumerable !== true) return null;
+    const aids = slot.value;
+    if (!Array.isArray(aids) || Object.getPrototypeOf(aids) !== Array.prototype) return null;
+    if (!Object.isFrozen(aids)) return null;
+    if (aids.length < 1 || aids.length > OVERLAY_MAX) return null;
+    if (Object.getOwnPropertySymbols(aids).length !== 0) return null;
+    if (Object.getOwnPropertyNames(aids).length !== aids.length + 1) return null;
+    const blocks = blockElements();
+    let previous = null;
+    for (let at = 0; at < aids.length; at += 1) {
+      const indexed = Object.getOwnPropertyDescriptor(aids, String(at));
+      if (indexed === undefined || !hasOwn(indexed, "value") || indexed.enumerable !== true) return null;
+      const aid = indexed.value;
+      if (typeof aid !== "string" || !AID.test(aid)) return null;
+      if (previous !== null && !(aid > previous)) return null;
+      previous = aid;
+      const found = blocks.get(aid);
+      if (found === undefined || found === null || !found.element.isConnected) return null;
+    }
+    return aids;
+  }
+
+  function onOverlay(event) {
+    if (!activated || panel === null) return;
+    const aids = overlayAids(event);
+    if (aids === null) return;
+    enqueueOverlay(aids);
+  }
+
+  /* Several valid events in one task become one microtask with their sorted
+     union.  A union past the bound is not dropped and not unbounded: the
+     current batch runs and the remainder becomes the next finite one. */
+  function enqueueOverlay(aids) {
+    for (const aid of aids) {
+      if (overlayBatch !== null && overlayBatch.has(aid)) continue;
+      if (overlayNext !== null && overlayNext.has(aid)) continue;
+      if (overlayBatch === null) overlayBatch = new Set();
+      if (overlayBatch.size < OVERLAY_MAX) {
+        overlayBatch.add(aid);
+        continue;
+      }
+      if (overlayNext === null) overlayNext = new Set();
+      overlayNext.add(aid);
+    }
+    if (overlayBatch !== null && !overlayScheduled) {
+      overlayScheduled = true;
+      queueMicrotask(flushOverlay);
+    }
+  }
+
+  function flushOverlay() {
+    overlayScheduled = false;
+    const named = overlayBatch;
+    overlayBatch = null;
+    if (named !== null && named.size > 0) reconcile(named);
+    const carry = overlayNext;
+    overlayNext = null;
+    if (carry !== null) enqueueOverlay(carry);
+  }
+
+  /* Repair after an overlay replaced the children of the named blocks.  Only
+     the named text maps are walked again, and only a thread that could have
+     changed state is located again: new text in a named block can turn a
+     moved or orphaned quote into a different state, so a thread whose home
+     block is missing is re-run too.  A thread anchored to another present
+     block keeps the live range it already has, and no thread record and no
+     discussion card changes. */
+  function reconcile(named) {
+    if (placementFrame !== 0 && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(placementFrame);
+      placementFrame = 0;
+    }
+    const index = buildBlockIndex(blockIndex, named);
+    if (index === null) return;
+    blockIndex = index;
+    model = model.map((entry) => {
+      if (entry.location === null) return entry;
+      const home = entry.thread.anchor.block;
+      if (!named.has(home) && index.has(home)) return entry;
+      return { thread: entry.thread, location: locate(entry.thread.anchor, index) };
+    });
+    if (activeId !== null && !model.some((entry) => entry.thread.id === activeId)) activeId = null;
+    render();
   }
 
   /* ============================================================== writes */
@@ -3759,6 +4564,7 @@ function installComments() {
   function integrate(record) {
     const index = buildBlockIndex();
     if (index === null) return false;
+    blockIndex = index;
     const entry = {
       thread: record,
       location: record.kind === "comment" ? locate(record.anchor, index) : null,
@@ -4040,13 +4846,18 @@ function installComments() {
 
   /* ------------------------------------------------------- lifecycle */
 
+  /* Published before any listener, so a second client that loads later either
+     sees both surfaces or sees the nulls P1-B left. */
+  doc.rail = railSurface();
+  doc.panel = panelSurface();
+
   document.addEventListener("session", (event) => {
     const detail = event.detail;
     if (detail === null || typeof detail !== "object") return;
     if (activated) return;
     session = projectSession(detail);
     activated = true;
-    refresh();
+    awaitOverlays();
   }, { once: true });
 
   /* Only visible edges after activation count toward the 30-second window;
@@ -5118,6 +5929,12 @@ runHistory();
 // which is what keeps a realtime-disabled deployment visually dark without
 // asking P3-F for a state getter it deliberately does not expose.
 //
+// P4-I extends the same discipline to editing claims. A peer's `edit.claim`
+// hides that block's direct Edit button and shows one chip; it is a hint, not
+// a lock, and the server's block hash still decides every write. Claims live
+// only in memory, expire with the roster lease they ride behind, and never
+// extend one.
+//
 // The one persisted fact is a local privacy preference. Storage that is
 // corrupt or unavailable fails closed toward silence: a reader who cannot be
 // proven visible-by-default is treated as hidden and gets only a recovery
@@ -5130,6 +5947,7 @@ runHistory();
   const LEASE_MS = 50000;
   const SWEEP_MS = 5000;
   const MAX_READERS = 200;
+  const MAX_CLAIMS = 200;
   const STORAGE_KEY = "doc.presence.hidden.v1";
   const CLIENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
   const AID_RE = /^a[0-9a-f]{8}$/;
@@ -5155,7 +5973,9 @@ runHistory();
   const ROLE_VALUES = ["owner", "editor", "commenter", "viewer", "none"];
   const BEAT_KEYS = ["source", "t", "clientId", "label", "act", "aid"];
   const BYE_KEYS = ["source", "t", "clientId"];
+  const CLAIM_KEYS = ["source", "t", "clientId", "aid"];
   const OWN_BEAT_KEYS = ["label", "act", "aid"];
+  const EDIT_STATE_KEYS = ["aid"];
 
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -5227,6 +6047,25 @@ runHistory();
   let hiddenByChoice = false;
   let beatPending = false;
   let localLabel = "";
+  let localEditingAid = null;
+  // P3-F publishes over REST and subscribes to the same channel, so this tab
+  // receives its own `edit.claim` back as an ordinary peer projection. While
+  // editing, the `localEditingAid` skip in renderClaims masks it -- but
+  // edit.js dispatches reading/null *before* it publishes the release, so for
+  // one round trip the tab would render a chip naming itself and hide its own
+  // Edit button. Worse, if that release never lands (offline, timeout,
+  // resolved false -- all swallowed by design, with no retry) the tab's own
+  // echoed beats keep renewing its own roster row, so the lease sweep never
+  // expires the claim and the button stays hidden for the rest of the session.
+  //
+  // Presence deliberately never learns its own client id, so the self-claim is
+  // identified by correlation instead: the first claim to arrive for the block
+  // this tab is currently editing is this tab's own echo, because this tab
+  // published before any peer could react to it. A later claim on the same
+  // block is a genuine peer and still renders once local editing ends. The
+  // claim is dropped from the map on release rather than waiting for an echo,
+  // which is what closes the permanent case.
+  let selfClaimClient = null;
 
   let beatTimer = 0;
   let sweepTimer = 0;
@@ -5247,6 +6086,12 @@ runHistory();
   // this module knows, and it authorizes nothing.
   const roster = new Map();
 
+  // clientId -> claimed aid, and the chips currently rendered for it. Both are
+  // advisory presentation: neither authorizes a write, renews a lease, reads a
+  // clock, or creates a timer.
+  const claims = new Map();
+  const chipsByAid = new Map();
+
   document.addEventListener("session", onSession);
   document.addEventListener("doc:event", onDocEvent);
 
@@ -5264,6 +6109,9 @@ runHistory();
     localLabel = admitted.label;
 
     document.addEventListener("visibilitychange", onVisibility);
+    // Only after a valid session: an unactivated module reports nothing about
+    // what this reader is doing.
+    document.addEventListener("doc:edit-state", onEditState);
     window.addEventListener("online", onOnline);
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
@@ -5426,12 +6274,67 @@ runHistory();
 
   // --- Publishing -----------------------------------------------------------
 
-  // The P4-I amendment seam. P3-G itself never publishes an aid or an editing
-  // activity; a later owner amends this one function once it has a proven
-  // editable focus, and every timer, privacy and validation rule here still
-  // applies to what it returns.
+  // The P4-I amendment seam, now filled. The local aid comes from edit.js's
+  // `doc:edit-state` signal, and every timer, privacy and validation rule here
+  // still applies to what this returns: a hidden reader publishes nothing, and
+  // an invalid aid drops the beat rather than broadcasting it.
   function currentBeat() {
-    return { label: localLabel, act: "reading", aid: null };
+    return {
+      label: localLabel,
+      act: localEditingAid === null ? "reading" : "editing",
+      aid: localEditingAid,
+    };
+  }
+
+  // edit.js already publishes the edge transition and the ordinary beat
+  // supplies renewal, so this listener never publishes. It accepts exactly the
+  // frozen one-key detail edit.js dispatches and rejects everything else by
+  // descriptor, without invoking a getter.
+  function onEditState(event) {
+    // Unlike the other bus listeners this one is not gated on `suspended`:
+    // edit.js registers its `pageshow` re-claim during module evaluation, so
+    // it runs before presence un-suspends, and dropping that signal would
+    // leave the restored heartbeat reporting `reading` for an open editor.
+    // Local activity is state, so it is always recorded; only the DOM work
+    // below is withheld while the page is quiesced.
+    if (!activated) return;
+    let detail;
+    try {
+      detail = event.detail;
+    } catch (ignored) {
+      return;
+    }
+
+    let aid;
+    try {
+      if (detail === null || typeof detail !== "object") return;
+      if (Object.getPrototypeOf(detail) !== Object.prototype) return;
+      if (!Object.isFrozen(detail)) return;
+      if (Object.getOwnPropertySymbols(detail).length !== 0) return;
+      if (!sameSequence(Object.getOwnPropertyNames(detail), EDIT_STATE_KEYS)) return;
+      if (!plainDataKey(detail, "aid")) return;
+      aid = detail.aid;
+      if (aid !== null && !(typeof aid === "string" && AID_RE.test(aid))) return;
+    } catch (ignored) {
+      return;
+    }
+
+    if (localEditingAid === aid) return;
+    // Leaving a block takes this tab's own echoed claim with it, so the chip
+    // and the hidden button never outlive the edit. Entering another block
+    // starts the correlation again; only one local claim exists at a time.
+    if (selfClaimClient !== null) {
+      claims.delete(selfClaimClient);
+      selfClaimClient = null;
+    }
+    localEditingAid = aid;
+    if (suspended) return;
+    // A peer claim on the block this tab was editing has been held in memory
+    // rather than rendered; ending local editing is when it may appear.
+    renderClaims();
+    // Chips change the height of the controls row, so the rail markers below
+    // it need re-measuring. Every other renderClaims caller pairs the two.
+    requestPlacement();
   }
 
   function sendBeat() {
@@ -5561,14 +6464,23 @@ runHistory();
     if (detail === null) return;
 
     // An accepted client event proves transport even when it changes nothing.
-    proveTransport();
-    if (detail.t === "beat") applyBeat(detail);
-    else removeReader(detail.clientId);
+    // Beats and byes prove transport, as they always have. Claims must not:
+    // proveTransport() mounts the container and starts the beat and sweep
+    // intervals, and the contract says a claim never creates a timer or
+    // causes a beat.
+    if (detail.t === "beat") {
+      proveTransport();
+      applyBeat(detail);
+    } else if (detail.t === "bye") {
+      proveTransport();
+      removeReader(detail.clientId);
+    } else if (detail.t === "edit.claim") applyClaim(detail);
+    else applyRelease(detail);
   }
 
-  // Only P3-F's two frozen flat client shapes. Server projections and
-  // claim/release events are ignored, and every rejection is descriptor-shaped
-  // so no getter runs.
+  // Only P3-F's frozen flat client shapes: `beat`, `bye`, and P4-I's
+  // `edit.claim` / `edit.release`. Server projections are ignored, and every
+  // rejection is descriptor-shaped so no getter runs.
   function readClientDetail(event) {
     let detail;
     try {
@@ -5586,7 +6498,8 @@ runHistory();
       const keys = Object.getOwnPropertyNames(detail);
       const isBeat = sameSequence(keys, BEAT_KEYS);
       const isBye = !isBeat && sameSequence(keys, BYE_KEYS);
-      if (!isBeat && !isBye) return null;
+      const isClaim = !isBeat && !isBye && sameSequence(keys, CLAIM_KEYS);
+      if (!isBeat && !isBye && !isClaim) return null;
 
       for (let index = 0; index < keys.length; index += 1) {
         if (!plainDataKey(detail, keys[index])) return null;
@@ -5599,6 +6512,14 @@ runHistory();
       if (isBye) {
         if (detail.t !== "bye") return null;
         return { t: "bye", clientId };
+      }
+
+      if (isClaim) {
+        const kind = detail.t;
+        if (kind !== "edit.claim" && kind !== "edit.release") return null;
+        const claimed = detail.aid;
+        if (typeof claimed !== "string" || !AID_RE.test(claimed)) return null;
+        return { t: kind, clientId, aid: claimed };
       }
 
       if (detail.t !== "beat") return null;
@@ -5647,8 +6568,39 @@ runHistory();
     repaint();
   }
 
+  // A beat that merely says `editing` never becomes a claim: only an explicit
+  // `edit.claim` hides a peer's control, so an old replayed beat cannot
+  // resurrect a lock that was already released.
+  function applyClaim(detail) {
+    const existing = claims.get(detail.clientId);
+    // The cap is unconditional and never evicts. A client that already holds a
+    // key may move it to another block even at the cap; a client without one
+    // is dropped there, whether or not the roster has seen it.
+    if (existing === undefined && claims.size >= MAX_CLAIMS) return;
+    if (existing === detail.aid) return;
+    claims.set(detail.clientId, detail.aid);
+    // The first claim on the block this tab is editing is this tab's own echo
+    // coming back off the client channel; see `selfClaimClient`.
+    if (selfClaimClient === null && localEditingAid !== null && detail.aid === localEditingAid) {
+      selfClaimClient = detail.clientId;
+    }
+    repaint();
+  }
+
+  // An out-of-order release names a block this client no longer holds, so it
+  // must not clear the newer claim that replaced it.
+  function applyRelease(detail) {
+    if (claims.get(detail.clientId) !== detail.aid) return;
+    claims.delete(detail.clientId);
+    if (detail.clientId === selfClaimClient) selfClaimClient = null;
+    repaint();
+  }
+
   function removeReader(clientId) {
-    if (!roster.delete(clientId)) return;
+    const hadRow = roster.delete(clientId);
+    const hadClaim = claims.delete(clientId);
+    if (clientId === selfClaimClient) selfClaimClient = null;
+    if (!hadRow && !hadClaim) return;
     repaint();
   }
 
@@ -5660,6 +6612,8 @@ runHistory();
     for (const entry of roster) {
       if (now - entry[1].seen >= LEASE_MS) {
         roster.delete(entry[0]);
+        claims.delete(entry[0]);
+        if (entry[0] === selfClaimClient) selfClaimClient = null;
         changed = true;
       }
     }
@@ -5818,6 +6772,7 @@ runHistory();
     } catch (ignored) {
       return;
     }
+    renderClaims();
     requestPlacement();
   }
 
@@ -5860,6 +6815,158 @@ runHistory();
   function firstPoint(word) {
     for (const point of word) return point;
     return "";
+  }
+
+  // --- Editing claims -------------------------------------------------------
+
+  // A claim renders only against a block P4-B actually made editable: one
+  // unique connected `[data-aid]` element, an open `details` ancestor if it has
+  // one, and an immediately following controls wrapper holding exactly one
+  // direct Edit button. Anything ambiguous renders nothing and hides nothing,
+  // because hiding the wrong control is worse than showing no chip.
+  function claimTarget(blocks, aid) {
+    try {
+      const block = blocks.get(aid);
+      if (block === undefined || block === null) return null;
+      if (block.isConnected !== true) return null;
+      const details = block.closest("details");
+      if (details !== null && details !== undefined && details.open === false) return null;
+      const controls = block.nextElementSibling;
+      if (controls === null || controls === undefined) return null;
+      if (controls.tagName !== "DIV") return null;
+      if (!controls.classList.contains("doc-edit-controls")) return null;
+      const buttons = controls.querySelectorAll("button.doc-edit-button");
+      if (buttons.length !== 1) return null;
+      return { controls, button: buttons[0] };
+    } catch (ignored) {
+      return null;
+    }
+  }
+
+  function claimText(rows) {
+    if (rows.length === 1) return `${rows[0].label} is editing`;
+    return `${rows.length} people are editing`;
+  }
+
+  function claimPhrases(rows) {
+    const phrases = [];
+    for (const row of rows) phrases.push(`${row.label}, editing`);
+    return phrases.join("; ");
+  }
+
+  // Recomputed whole at every material roster or claim repaint. A claim with
+  // no current roster row is retained in memory but contributes nothing here;
+  // the claimant's next valid beat is what makes it visible.
+  function renderClaims() {
+    let blocks;
+    const groups = new Map();
+    try {
+      blocks = blockIndex();
+      for (const row of sortedRoster()) {
+        const aid = claims.get(row.id);
+        if (aid === undefined) continue;
+        // The block this tab is editing keeps its own P4-B controls. Moving
+        // focus-owned DOM while someone is typing is worse than a late chip,
+        // and the claim stays in memory until local editing ends.
+        if (aid === localEditingAid) continue;
+        // This tab's own echoed claim never decorates anything.
+        if (row.id === selfClaimClient) continue;
+        const rows = groups.get(aid);
+        if (rows === undefined) groups.set(aid, [row]);
+        else rows.push(row);
+      }
+    } catch (ignored) {
+      return;
+    }
+
+    for (const aid of [...chipsByAid.keys()]) {
+      if (!groups.has(aid)) dropChip(aid);
+    }
+    for (const entry of groups) showChip(entry[0], entry[1], claimTarget(blocks, entry[0]));
+  }
+
+  function dropChip(aid) {
+    const record = chipsByAid.get(aid);
+    if (record === undefined) return;
+    chipsByAid.delete(aid);
+    // Restoring the affordance comes first and gets its own try. The registry
+    // entry is already gone, so if a throw from the cosmetic removal took the
+    // un-hide with it, nothing would ever give that button back.
+    try {
+      record.button.removeAttribute("hidden");
+    } catch (ignored) {
+      // The controls are already gone; nothing durable depended on them.
+    }
+    try {
+      record.chip.remove();
+    } catch (ignored) {
+      // Same: a chip that cannot be removed is cosmetic, not load-bearing.
+    }
+  }
+
+  // One noninteractive chip immediately before the direct Edit button, and
+  // that button hidden while it stands. Labels enter only as text properties
+  // and a client ID never reaches the DOM.
+  function showChip(aid, rows, target) {
+    if (target === null) {
+      dropChip(aid);
+      return;
+    }
+    const existing = chipsByAid.get(aid);
+    // A rebuilt controls wrapper is a different target, so the old record is
+    // dropped rather than reused against DOM that no longer exists.
+    if (existing !== undefined
+      && (existing.button !== target.button || existing.chip.nextElementSibling !== target.button)) {
+      dropChip(aid);
+    }
+    try {
+      let record = chipsByAid.get(aid);
+      if (record === undefined) {
+        const chip = document.createElement("span");
+        chip.className = "pill warn doc-edit-claim";
+        chip.setAttribute("role", "status");
+        // Eligibility accepts the button as any descendant of the wrapper, so
+        // insert against the button's own parent. Inserting into the wrapper
+        // would throw for a nested button and silently drop the chip while
+        // leaving the Edit button visible.
+        target.button.parentNode.insertBefore(chip, target.button);
+        record = { chip, button: target.button };
+        chipsByAid.set(aid, record);
+      }
+      record.chip.textContent = claimText(rows);
+      const phrases = claimPhrases(rows);
+      record.chip.title = phrases;
+      record.chip.setAttribute("aria-label", phrases);
+      // Hiding the control the reader is standing on would drop focus to the
+      // body. Move it deliberately to the controls wrapper instead, which
+      // keeps the chip itself noninteractive as the contract requires.
+      let hadFocus = false;
+      try {
+        hadFocus = document.activeElement === record.button;
+      } catch (ignored) {
+        hadFocus = false;
+      }
+      record.button.setAttribute("hidden", "");
+      if (hadFocus) {
+        try {
+          target.controls.setAttribute("tabindex", "-1");
+          target.controls.focus();
+        } catch (ignored) {
+          // A host without focus management leaves focus where it was.
+        }
+      }
+    } catch (ignored) {
+      dropChip(aid);
+    }
+  }
+
+  // Every chip removed and every hidden control restored, with the claim map
+  // and this tab's own editing state.
+  function clearClaims() {
+    for (const aid of [...chipsByAid.keys()]) dropChip(aid);
+    claims.clear();
+    localEditingAid = null;
+    selfClaimClient = null;
   }
 
   // --- Block markers --------------------------------------------------------
@@ -6080,6 +7187,7 @@ runHistory();
     stopSweep();
     cancelPlacement();
     roster.clear();
+    clearClaims();
     if (railEl !== null) {
       try {
         railEl.replaceChildren();
@@ -6140,6 +7248,8 @@ runHistory();
     stopSweep();
     cancelPlacement();
     roster.clear();
+    clearClaims();
+    document.removeEventListener("doc:edit-state", onEditState);
     try {
       if (railEl !== null) railEl.remove();
       if (container !== null) container.remove();
@@ -6179,11 +7289,14 @@ function mountSharePanel(event) {
   let docId = session.doc;
   let sessionRole = session.role;
   let mayShare = session.canShare;
+  let maySeeMembers = session.canSeeMembers;
+  let isShared = session.shared;
   let panel = null;
   let heading = null;
   let closeButton = null;
   let status = null;
   let defaultPolicy = null;
+  let memberSection = null;
   let memberList = null;
   let invitationSection = null;
   let invitationList = null;
@@ -6192,6 +7305,24 @@ function mountSharePanel(event) {
   let generation = 0;
   let positionFrame = 0;
   let removed = false;
+
+  /* P4-L write state. Owner authority lives only in these closure fields: it
+     is never read back from the DOM, an attribute, or the cached session
+     event once a transfer or a write-time 403 has put it in doubt. */
+  let defaultForm = null;
+  let defaultSelect = null;
+  let defaultSave = null;
+  let inviteForm = null;
+  let inviteEmail = null;
+  let inviteRole = null;
+  let confirmation = null;
+  let lastOrgDefault = null;
+  let mutationMessage = "";
+  let busy = false;
+  let authorityUnknown = false;
+  let authorityAtRisk = false;
+  let pendingHeadingFocus = false;
+  let latched = null;
 
   const button = document.createElement("button");
   button.id = "doc-share-button";
@@ -6243,7 +7374,7 @@ function mountSharePanel(event) {
     status.setAttribute("aria-live", "polite");
     defaultPolicy = fixedElement("p", "share-default", null);
 
-    const memberSection = fixedElement("section", "share-members", null);
+    memberSection = fixedElement("section", "share-members", null);
     memberSection.setAttribute("aria-labelledby", "doc-share-members-title");
     const memberTitle = fixedElement("h3", "", "People with access");
     memberTitle.id = "doc-share-members-title";
@@ -6280,10 +7411,12 @@ function mountSharePanel(event) {
     invoker = button;
     panel.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    mutationMessage = "";
     status.textContent = "Loading access…";
     if (!positionPanel()) return;
     heading.focus();
-    refreshRoster();
+    if (authorityUnknown) reconcileThenRefresh();
+    else refreshRoster();
   }
 
   function closePanel() {
@@ -6291,6 +7424,19 @@ function mountSharePanel(event) {
     panel.hidden = true;
     button.setAttribute("aria-expanded", "false");
     generation += 1;
+    busy = false;
+    pendingHeadingFocus = false;
+    mutationMessage = "";
+    latched = null;
+    panel.removeAttribute("aria-busy");
+    clearConfirmation(false);
+    if (inviteEmail !== null) inviteEmail.value = "";
+    /* Closing during a transfer or a session reconciliation leaves ownership
+       genuinely unknown; the next open must ask the server, not the cache. */
+    if (authorityAtRisk) {
+      authorityAtRisk = false;
+      demoteAuthority();
+    }
     if (controller !== null) {
       const closingController = controller;
       controller = null;
@@ -6436,10 +7582,28 @@ function mountSharePanel(event) {
       if (!isCurrent(requestGeneration)) return;
       renderRoster(roster);
     } catch (error) {
-      if (isCurrent(requestGeneration)) status.textContent = "Access list could not be refreshed.";
+      if (isCurrent(requestGeneration)) {
+        /* A read failure outranks and replaces any retained mutation result. */
+        mutationMessage = "";
+        status.textContent = "Access list could not be refreshed.";
+      }
     } finally {
       clearTimeout(deadline);
       if (generation === requestGeneration && controller === requestController) controller = null;
+      settleReadUi(requestGeneration);
+    }
+  }
+
+  /* The write controls are re-enabled only once the refresh that follows a
+     mutation has settled, so a second write can never race the read that owns
+     the authoritative state. */
+  function settleReadUi(requestGeneration) {
+    if (removed || panel === null || panel.hidden || generation !== requestGeneration) return;
+    panel.removeAttribute("aria-busy");
+    restoreControlsAfterWrite();
+    if (pendingHeadingFocus) {
+      pendingHeadingFocus = false;
+      heading.focus();
     }
   }
 
@@ -6522,12 +7686,15 @@ function mountSharePanel(event) {
   }
 
   function renderRoster(roster) {
-    const memberRows = roster.members.map((member) => {
+    clearConfirmation(false);
+    const owner = ownerEligible();
+    const memberRows = roster.members.map((member, index) => {
       const row = document.createElement("li");
       const fields = member.name === ""
         ? [member.email, roleLabel(member.role)]
         : [member.name, member.email, roleLabel(member.role)];
       appendIsolatedFields(row, fields);
+      if (owner && index !== 0) row.appendChild(memberControls(member, row));
       return row;
     });
     const invitationRows = roster.invitations.map((invitation) => {
@@ -6538,14 +7705,15 @@ function mountSharePanel(event) {
       date.setAttribute("datetime", invitation.expiresAt);
       date.appendChild(document.createTextNode(invitation.expiresAt.slice(0, 10)));
       row.appendChild(date);
+      if (owner) row.appendChild(invitationControls(invitation));
       return row;
     });
-    const defaultLabels = { commenter: "Commenter", viewer: "Viewer", none: "No access" };
     memberList.replaceChildren(...memberRows);
     invitationList.replaceChildren(...invitationRows);
-    defaultPolicy.textContent = `Organization default: ${defaultLabels[roster.orgDefault]}`;
+    renderOwnerForms(roster.orgDefault, owner);
     invitationSection.hidden = invitationRows.length === 0;
-    status.textContent = "";
+    status.textContent = mutationMessage;
+    latched = null;
     handlePositionChange();
   }
 
@@ -6567,6 +7735,19 @@ function mountSharePanel(event) {
     if (memberList !== null) memberList.replaceChildren();
     if (invitationList !== null) invitationList.replaceChildren();
     if (defaultPolicy !== null) defaultPolicy.textContent = "";
+    confirmation = null;
+    defaultForm = null;
+    defaultSelect = null;
+    defaultSave = null;
+    inviteForm = null;
+    inviteEmail = null;
+    inviteRole = null;
+    lastOrgDefault = null;
+    mutationMessage = "";
+    busy = false;
+    pendingHeadingFocus = false;
+    authorityAtRisk = false;
+    latched = null;
     button.remove();
     if (panel !== null) panel.remove();
     if (controller !== null) {
@@ -6577,8 +7758,521 @@ function mountSharePanel(event) {
     docId = "";
     sessionRole = "";
     mayShare = false;
+    maySeeMembers = false;
+    isShared = false;
     invoker = null;
   }
+
+  /* ------------------------------------------------------------------ *
+   * P4-L — owner-only controls and the single serialized write path.
+   * ------------------------------------------------------------------ */
+
+  /* Owner controls exist only while the latest validated session — the initial
+     event or a reconciliation — still says owner. `authorityUnknown` is the
+     one-way door a transfer or a write-time 403 opens: it can only be closed
+     by a fresh server session, never by the cached event. */
+  function ownerEligible() {
+    return !removed
+      && !authorityUnknown
+      && sessionRole === "owner"
+      && mayShare === true
+      && maySeeMembers === true
+      && isShared === true;
+  }
+
+  function demoteAuthority() {
+    sessionRole = "editor";
+    mayShare = false;
+    authorityUnknown = true;
+    clearConfirmation(false);
+    removeOwnerControls();
+  }
+
+  function opControl(element) {
+    element.classList.add("share-op");
+    return element;
+  }
+
+  function opButton(className, text) {
+    const control = fixedElement("button", className, text);
+    control.setAttribute("type", "button");
+    return opControl(control);
+  }
+
+  function roleSelect(className, roles, selected) {
+    const select = fixedElement("select", className, null);
+    for (const role of roles) {
+      const option = fixedElement("option", "", roleLabel(role));
+      option.value = role;
+      select.appendChild(option);
+    }
+    select.value = selected;
+    return opControl(select);
+  }
+
+  /* The accessible name is label text, so a server address never reaches an
+     attribute, an id, a selector or a live announcement. */
+  function labelled(text, control) {
+    const label = fixedElement("label", "share-op-label", text);
+    label.appendChild(control);
+    return label;
+  }
+
+  /* A write disables every owner control and remembers which ones were
+     already disabled — an unchanged select's Save button, or the row behind an
+     open confirmation — so a failed refresh restores the panel it interrupted
+     rather than enabling a button the roster never justified. */
+  function disableControlsForWrite() {
+    if (panel === null) return;
+    latched = new Set();
+    for (const node of panel.querySelectorAll(".share-op")) {
+      if (node.disabled) latched.add(node);
+      node.disabled = true;
+    }
+  }
+
+  function restoreControlsAfterWrite() {
+    if (panel === null || latched === null) return;
+    const held = latched;
+    latched = null;
+    for (const node of panel.querySelectorAll(".share-op")) node.disabled = held.has(node);
+    if (confirmation !== null && confirmation.controls !== null) {
+      for (const node of confirmation.controls.querySelectorAll(".share-op")) node.disabled = true;
+    }
+  }
+
+  function removeOwnerControls() {
+    clearConfirmation(false);
+    if (inviteForm !== null) {
+      inviteForm.remove();
+      inviteForm = null;
+      inviteEmail = null;
+      inviteRole = null;
+    }
+    if (defaultForm !== null) {
+      defaultForm.remove();
+      defaultForm = null;
+      defaultSelect = null;
+      defaultSave = null;
+    }
+    if (panel !== null) {
+      for (const group of panel.querySelectorAll(".share-row-controls")) group.remove();
+    }
+    if (defaultPolicy !== null && lastOrgDefault !== null) {
+      defaultPolicy.hidden = false;
+      defaultPolicy.textContent = `Organization default: ${DEFAULT_LABELS[lastOrgDefault]}`;
+    }
+  }
+
+  function renderOwnerForms(orgDefault, owner) {
+    lastOrgDefault = orgDefault;
+    if (defaultForm !== null) {
+      defaultForm.remove();
+      defaultForm = null;
+      defaultSelect = null;
+      defaultSave = null;
+    }
+    if (inviteForm !== null) {
+      inviteForm.remove();
+      inviteForm = null;
+      inviteEmail = null;
+      inviteRole = null;
+    }
+    if (!owner) {
+      defaultPolicy.hidden = false;
+      defaultPolicy.textContent = `Organization default: ${DEFAULT_LABELS[orgDefault]}`;
+      return;
+    }
+    defaultPolicy.hidden = true;
+    defaultPolicy.textContent = "";
+    defaultForm = createDefaultForm(orgDefault);
+    inviteForm = createInviteForm();
+    panel.insertBefore(defaultForm, memberSection);
+    panel.insertBefore(inviteForm, memberSection);
+  }
+
+  function createDefaultForm(orgDefault) {
+    const form = fixedElement("div", "share-default-form", null);
+    defaultSelect = roleSelect("share-default-control", ["commenter", "viewer", "none"], orgDefault);
+    defaultSave = opButton("share-default-save", "Save default");
+    defaultSave.disabled = true;
+    defaultSelect.addEventListener("change", () => {
+      defaultSave.disabled = defaultSelect.value === orgDefault;
+    });
+    defaultSave.addEventListener("click", () => {
+      if (defaultSelect.value === orgDefault) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, orgDefault: defaultSelect.value }, false, noop);
+    });
+    form.append(labelled("Organization default", defaultSelect), defaultSave);
+    return form;
+  }
+
+  function createInviteForm() {
+    const form = fixedElement("form", "share-invite", null);
+    form.setAttribute("novalidate", "");
+    inviteEmail = opControl(fixedElement("input", "share-invite-email", null));
+    inviteEmail.setAttribute("type", "email");
+    inviteEmail.setAttribute("autocomplete", "off");
+    inviteEmail.setAttribute("maxlength", "254");
+    inviteRole = roleSelect("share-invite-role", ["commenter", "viewer", "editor"], "commenter");
+    const submit = opControl(fixedElement("button", "share-invite-submit", "Invite"));
+    submit.setAttribute("type", "submit");
+    form.append(labelled("Email", inviteEmail), labelled("Role", inviteRole), submit);
+    form.addEventListener("submit", handleInvite);
+    return form;
+  }
+
+  function handleInvite(event) {
+    event.preventDefault();
+    if (!ownerEligible() || inviteEmail === null) return;
+    if (busy || controller !== null) return;
+    const email = inviteEmail.value.trim().toLowerCase();
+    if (!validInviteEmail(email)) {
+      mutationMessage = "Enter a valid email address.";
+      status.textContent = mutationMessage;
+      return;
+    }
+    const role = inviteRole.value;
+    sendMutation("POST", ACCESS_PATH, { doc: docId, email, role }, false, () => {
+      if (inviteEmail !== null) inviteEmail.value = "";
+    });
+  }
+
+  /* The canonical P2-G grammar: 3–254 bytes, ASCII, one interior `@`. Accepted
+     input is ASCII, so the `maxlength` character cap and the byte ceiling are
+     the same number. */
+  function validInviteEmail(value) {
+    return typeof value === "string" && value.length >= 3 && validEmail(value);
+  }
+
+  function memberControls(member, row) {
+    const target = { sub: member.sub, role: member.role, email: member.email };
+    const group = fixedElement("div", "share-row-controls", null);
+    const select = roleSelect("share-role", ["editor", "commenter", "viewer"], target.role);
+    const save = opButton("share-save-role", "Save role");
+    save.disabled = true;
+    select.addEventListener("change", () => {
+      save.disabled = select.value === target.role;
+    });
+    save.addEventListener("click", () => {
+      if (select.value === target.role) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, sub: target.sub, role: select.value }, false, noop);
+    });
+    const revoke = opButton("share-revoke", "Revoke access");
+    revoke.addEventListener("click", () => {
+      sendMutation("DELETE", ACCESS_PATH, { doc: docId, sub: target.sub }, false, noop);
+    });
+    const transfer = opButton("share-transfer", "Transfer ownership");
+    transfer.addEventListener("click", () => openConfirmation(row, group, transfer, target.sub));
+    group.append(labelled(`Role for ${target.email}`, select), save, revoke, transfer);
+    return group;
+  }
+
+  function invitationControls(invitation) {
+    const target = { email: invitation.email, role: invitation.role };
+    const group = fixedElement("div", "share-row-controls", null);
+    const select = roleSelect("share-role", ["editor", "commenter", "viewer"], target.role);
+    const save = opButton("share-save-role", "Save role");
+    save.disabled = true;
+    select.addEventListener("change", () => {
+      save.disabled = select.value === target.role;
+    });
+    save.addEventListener("click", () => {
+      if (select.value === target.role) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, email: target.email, role: select.value }, false, noop);
+    });
+    const cancel = opButton("share-cancel-invitation", "Cancel invitation");
+    cancel.addEventListener("click", () => {
+      sendMutation("DELETE", ACCESS_PATH, { doc: docId, email: target.email }, false, noop);
+    });
+    /* P4-J's recovery-only reissue branch: the identical invite body, which
+       changes no access record or expiry and appends no event. */
+    const resend = opButton("share-resend", "Resend setup link");
+    resend.addEventListener("click", () => {
+      sendMutation("POST", ACCESS_PATH, { doc: docId, email: target.email, role: target.role }, false, noop);
+    });
+    group.append(labelled(`Role for ${target.email}`, select), save, cancel, resend);
+    return group;
+  }
+
+  function openConfirmation(row, controls, initiator, sub) {
+    if (!ownerEligible() || busy) return;
+    clearConfirmation(true);
+    const group = fixedElement("div", "share-transfer-confirm", null);
+    group.appendChild(fixedElement("p", "", TRANSFER_WARNING));
+    const confirm = opButton("share-transfer-yes", "Transfer");
+    const cancel = opButton("share-transfer-no", "Cancel");
+    confirm.addEventListener("click", () => {
+      sendMutation("POST", TRANSFER_PATH, { doc: docId, sub }, true, noop);
+    });
+    cancel.addEventListener("click", () => clearConfirmation(true));
+    group.append(confirm, cancel);
+    /* The row's own disabled state is remembered, not assumed: cancelling
+       must not enable a Save button an unchanged select never justified. */
+    const held = new Set();
+    for (const node of controls.querySelectorAll(".share-op")) {
+      if (node.disabled) held.add(node);
+      node.disabled = true;
+    }
+    confirmation = { group, initiator, controls, held };
+    row.appendChild(group);
+    confirm.focus();
+  }
+
+  function clearConfirmation(restoreFocus) {
+    if (confirmation === null) return;
+    const open = confirmation;
+    confirmation = null;
+    open.group.remove();
+    if (open.controls !== null && !busy && open.controls.isConnected) {
+      for (const node of open.controls.querySelectorAll(".share-op")) node.disabled = open.held.has(node);
+    }
+    if (restoreFocus && open.initiator !== null && open.initiator.isConnected) open.initiator.focus();
+  }
+
+  function noop() {}
+
+  /* One state machine serves every control. There is at most one in-flight
+     request across mutation, session and roster work, no queue, no retry, and
+     no response body is ever read from a mutation: the following GET owns
+     every visible authoritative value. */
+  async function sendMutation(method, path, body, isTransfer, onAccepted) {
+    if (removed || busy || controller !== null) return;
+    if (panel === null || panel.hidden || !ownerEligible()) return;
+    let endpoint;
+    try {
+      endpoint = new URL(path, location.origin);
+    } catch (error) {
+      return;
+    }
+    if (endpoint.origin !== location.origin) return;
+
+    const requestGeneration = generation;
+    const requestController = new AbortController();
+    busy = true;
+    if (isTransfer) authorityAtRisk = true;
+    controller = requestController;
+    panel.setAttribute("aria-busy", "true");
+    disableControlsForWrite();
+    status.textContent = "Updating access…";
+    const deadline = setTimeout(() => requestController.abort(), 15_000);
+    let outcome = null;
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body),
+        signal: requestController.signal,
+      });
+      if (!isCurrent(requestGeneration)) return;
+      const code = response.status;
+      if (response.redirected === true) outcome = "ambiguous";
+      else if (code === 401) outcome = "unauthorized";
+      else if (code === 403) outcome = "forbidden";
+      else if (code === 204) outcome = "ok";
+      else if (code === 400 || code === 404 || code === 413 || code === 415 || code === 429
+        || (code === 409 && !isTransfer)) outcome = "rejected";
+      else outcome = "ambiguous";
+    } catch (error) {
+      if (isCurrent(requestGeneration)) outcome = "ambiguous";
+    } finally {
+      clearTimeout(deadline);
+      busy = false;
+      if (controller === requestController) controller = null;
+    }
+    if (outcome === null || !isCurrent(requestGeneration)) return;
+
+    if (outcome === "unauthorized") {
+      removeFeature();
+      return;
+    }
+    if (outcome === "ok") {
+      clearConfirmation(false);
+      onAccepted();
+      mutationMessage = "Access updated.";
+    } else if (outcome === "forbidden") {
+      mutationMessage = "Your access changed.";
+    } else if (outcome === "rejected") {
+      mutationMessage = "Access change was not accepted.";
+    } else {
+      mutationMessage = "Access change could not be completed.";
+    }
+    status.textContent = mutationMessage;
+    pendingHeadingFocus = true;
+
+    /* A completed transfer, an ambiguous transfer, and any write-time 403 all
+       mean the cached owner authority may be a lie. Give it up before the read
+       and let the server say what this session is now. */
+    const reconcile = outcome === "forbidden"
+      || (isTransfer && (outcome === "ok" || outcome === "ambiguous"));
+    if (!reconcile) {
+      if (isTransfer) authorityAtRisk = false;
+      refreshRoster();
+      return;
+    }
+    demoteAuthority();
+    authorityAtRisk = true;
+    if (!await refreshSession(requestGeneration)) return;
+    refreshRoster();
+  }
+
+  async function reconcileThenRefresh() {
+    const requestGeneration = generation;
+    if (!await refreshSession(requestGeneration)) return;
+    refreshRoster();
+  }
+
+  /* P2-C's exact session transport, repeated once. This is P4-L's deliberate
+     successor exception to the single startup probe: it dispatches no event,
+     touches no `data-session`, and amends no other module. */
+  async function refreshSession(requestGeneration) {
+    if (!isCurrent(requestGeneration) || controller !== null) return false;
+    const endpoint = new URL("/api/session", location.href);
+    endpoint.searchParams.set("doc", docId);
+    const requestController = new AbortController();
+    controller = requestController;
+    const timer = setTimeout(() => requestController.abort(), 2_000);
+    let refreshed = null;
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "application/json" },
+        signal: requestController.signal,
+      });
+      if (response.status === 200) {
+        const header = response.headers.get("content-type");
+        if (header !== null && isJsonContentType(header)) {
+          const parsed = await response.json();
+          refreshed = validFinalSession(parsed);
+          if (refreshed !== null) deepFreeze(refreshed);
+        }
+      }
+    } catch (error) {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+      if (controller === requestController) controller = null;
+    }
+    if (removed) return false;
+    if (!isCurrent(requestGeneration)) {
+      /* A close during reconciliation leaves authority unknown on purpose. */
+      return false;
+    }
+    if (refreshed === null) {
+      removeFeature();
+      return false;
+    }
+    sessionRole = refreshed.role;
+    mayShare = refreshed.canShare;
+    maySeeMembers = refreshed.canSeeMembers;
+    isShared = refreshed.shared;
+    authorityUnknown = false;
+    authorityAtRisk = false;
+    if (!ownerEligible()) removeOwnerControls();
+    return true;
+  }
+
+  /* The complete thirteen-field P3-H final session, plus the only two
+     internally consistent shapes that may keep a Share surface open. */
+  function validFinalSession(body) {
+    if (!isRecord(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
+    for (const field of FINAL_SESSION_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(body, field)) return null;
+    }
+    if (typeof body.sub !== "string" || typeof body.email !== "string"
+      || typeof body.name !== "string") return null;
+    if (!Array.isArray(body.roles) || body.roles.length !== 1) return null;
+    if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
+    if (typeof body.canComment !== "boolean" || typeof body.canEdit !== "boolean") return null;
+    if (body.doc !== docId) return null;
+    if (!SESSION_ROLES.includes(body.role)) return null;
+    if (typeof body.shared !== "boolean" || typeof body.canSuggest !== "boolean"
+      || typeof body.canAccept !== "boolean" || typeof body.canShare !== "boolean"
+      || typeof body.canSeeMembers !== "boolean") return null;
+    if (body.shared !== true || body.canSeeMembers !== true) return null;
+    const consistent = (body.role === "owner" && body.canShare === true)
+      || (body.role === "editor" && body.canShare === false);
+    return consistent ? body : null;
+  }
+
+  function deepFreeze(root) {
+    const stack = [root];
+    const ordered = [];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      ordered.push(current);
+      for (const field of Object.keys(current)) {
+        const child = current[field];
+        if (child !== null && typeof child === "object") stack.push(child);
+      }
+    }
+    for (let index = ordered.length - 1; index >= 0; index -= 1) Object.freeze(ordered[index]);
+    return root;
+  }
+
+  /* P2-C's single accepted content-type grammar. */
+  function isJsonContentType(value) {
+    if (typeof value !== "string") return false;
+    const length = value.length;
+    let at = 0;
+    const ows = () => {
+      while (at < length) {
+        const code = value.charCodeAt(at);
+        if (code === 32 || code === 9) at += 1;
+        else return;
+      }
+    };
+    const lower = (code) => (code >= 65 && code <= 90 ? code + 32 : code);
+    const word = (expected) => {
+      if (at + expected.length > length) return false;
+      for (let index = 0; index < expected.length; index += 1) {
+        if (lower(value.charCodeAt(at)) !== expected.charCodeAt(index)) return false;
+        at += 1;
+      }
+      return true;
+    };
+    ows();
+    if (!word("application")) return false;
+    if (at >= length || value.charCodeAt(at) !== 47) return false;
+    at += 1;
+    if (!word("json")) return false;
+    ows();
+    if (at === length) return true;
+    if (value.charCodeAt(at) !== 59) return false;
+    at += 1;
+    ows();
+    if (!word("charset")) return false;
+    if (at >= length || value.charCodeAt(at) !== 61) return false;
+    at += 1;
+    if (at < length && value.charCodeAt(at) === 34) {
+      at += 1;
+      if (!word("utf-8")) return false;
+      if (at >= length || value.charCodeAt(at) !== 34) return false;
+      at += 1;
+    } else if (!word("utf-8")) {
+      return false;
+    }
+    ows();
+    return at === length;
+  }
+
+  const ACCESS_PATH = "/api/access";
+  const TRANSFER_PATH = "/api/access/transfer";
+  const TRANSFER_WARNING = "Transfer ownership to this person? You will become an editor."
+    + " If setup stops during transfer, the new owner may need to invite you again.";
+  const DEFAULT_LABELS = { commenter: "Commenter", viewer: "Viewer", none: "No access" };
+  const FINAL_SESSION_FIELDS = [
+    "sub", "email", "name", "roles", "canComment", "canEdit",
+    "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+  ];
+  const SESSION_ROLES = ["owner", "editor", "commenter", "viewer", "none"];
 }
 
 </script>

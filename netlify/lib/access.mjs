@@ -140,8 +140,15 @@ const INVITATION_HASH_PATTERN = /^[0-9a-f]{32}$/;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const GRANTABLE_ROLES = Object.freeze(["editor", "commenter", "viewer"]);
-const ORG_DEFAULTS = Object.freeze(["commenter", "viewer", "none"]);
+/**
+ * The roles an owner may grant, and the organization-wide defaults a document
+ * may carry. Exported because `netlify/functions/access.mjs` validates request
+ * bodies against exactly these lists, and a second copy declared there would be
+ * free to drift away from the record validators below — the defect #125 fixed
+ * elsewhere in the deploy tree.
+ */
+export const GRANTABLE_ROLES = Object.freeze(["editor", "commenter", "viewer"]);
+export const ORG_DEFAULTS = Object.freeze(["commenter", "viewer", "none"]);
 
 const USER_KEYS = Object.freeze(["email", "isOrg", "name", "sub"]);
 const ACTOR_KEYS = Object.freeze(["email", "name", "sub"]);
@@ -729,6 +736,110 @@ export function capabilitiesFor(role) {
     throw accessError("invalid-role");
   }
   return { ...ROLE_CAPABILITIES[role] };
+}
+
+/** The exact keys of one resolved access row: the two identity fields, then
+ * the eight capabilities in matrix order. */
+const ACCESS_ROW_KEYS = Object.freeze([
+  "role",
+  "shared",
+  "canRead",
+  "canComment",
+  "threadControl",
+  "canSuggest",
+  "canEdit",
+  "canAccept",
+  "canShare",
+  "canSeeMembers",
+]);
+
+const ACCESS_CAPABILITY_KEYS = Object.freeze(ACCESS_ROW_KEYS.slice(2));
+const ACCESS_ROLES = Object.freeze(Object.keys(ROLE_CAPABILITIES));
+const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
+
+/**
+ * `hasExactShape()` plus two further requirements: every own property is an
+ * enumerable *data* property, and the own keys appear in exactly
+ * `expectedKeys` order. An accessor is rejected without being invoked, so a
+ * getter can never be read once and then differ from what the caller later
+ * observes. Order is checked because a resolved access row is always built by
+ * spreading the frozen capability matrix onto `role` and `shared`, so any row
+ * whose keys arrive in another order was assembled by something other than
+ * `resolveRole()` — and three of the seven hand copies this function replaced
+ * asserted that (#125, #128).
+ *
+ * @param {unknown} value
+ * @param {readonly string[]} expectedKeys
+ * @returns {boolean}
+ */
+function hasExactOrderedDataShape(value, expectedKeys) {
+  if (!hasExactShape(value, expectedKeys)) {
+    return false;
+  }
+  const names = Object.getOwnPropertyNames(value);
+  return expectedKeys.every((key, index) => {
+    if (names[index] !== key) {
+      return false;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return Object.hasOwn(descriptor, "value") && descriptor.enumerable === true;
+  });
+}
+
+/**
+ * Is `result` a complete, internally consistent resolved access row?
+ *
+ * This is the single definition of that question. Every path that resolves a
+ * role shares it rather than keeping its own copy: a hand-duplicated security
+ * validator only has to drift in one file to open a hole the other copies
+ * still close, and whichever copy no gate happens to exercise is the one that
+ * drifts (#125). The four copies that outlived #125 proved the point —
+ * `pending.mjs`'s had already grown a key-order requirement the others lacked,
+ * and `events.mjs`'s had diverged far enough to be named `assertResolvedAccess`
+ * and so escape the acceptance grep entirely (#128).
+ *
+ * A partial, extended, accessor-backed, array, non-ordinary-prototype, or
+ * internally inconsistent object is invalid — never a falsy capability. The
+ * caller decides what an invalid row means; here it is only ever `false`.
+ *
+ * `capabilityTable` is a parameter rather than the module's own
+ * `capabilitiesFor` so that `edit.mjs` and `pending.mjs`, whose closed
+ * factories receive the table as an injected dependency, validate against the
+ * table they were actually given. A table that throws, or that answers with
+ * anything other than the eight capability keys as ordinary enumerable data
+ * properties in matrix order, is itself invalid.
+ *
+ * @param {unknown} result
+ * @param {(role: unknown) => unknown} capabilityTable
+ * @returns {boolean}
+ */
+export function validateAccessRow(result, capabilityTable) {
+  if (!hasExactOrderedDataShape(result, ACCESS_ROW_KEYS)) {
+    return false;
+  }
+  if (!ACCESS_ROLES.includes(result.role) || typeof result.shared !== "boolean") {
+    return false;
+  }
+  for (const key of ACCESS_CAPABILITY_KEYS) {
+    const value = result[key];
+    if (key === "threadControl") {
+      if (!THREAD_CONTROLS.includes(value)) {
+        return false;
+      }
+    } else if (typeof value !== "boolean") {
+      return false;
+    }
+  }
+  let expected;
+  try {
+    expected = capabilityTable(result.role);
+  } catch {
+    return false;
+  }
+  if (!hasExactOrderedDataShape(expected, ACCESS_CAPABILITY_KEYS)) {
+    return false;
+  }
+  return ACCESS_CAPABILITY_KEYS.every((key) => expected[key] === result[key]);
 }
 
 /**

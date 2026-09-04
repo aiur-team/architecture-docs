@@ -7,16 +7,26 @@ import {
   threadKey,
   upgrade,
 } from "../lib/store.mjs";
+import { capabilitiesFor, resolveRole, validateAccessRow } from "../lib/access.mjs";
+import { appendEvent } from "./events.mjs";
+import { notify } from "../lib/notify.mjs";
 
 /**
  * P3-A — `/api/threads/:doc/:id`: append one reply (`POST`) or resolve and
  * reopen a thread (`PATCH`) through P2-B's six-attempt compare-and-swap.
  *
- * Every actor is projected from the verified server identity. This file
- * requires authentication only; mutation-role enforcement and the P3-B audit
- * appends are added by P4-M, which is the only ticket allowed to import the
- * access library here. `threads.mjs` duplicates the private validators below
- * on purpose: the ticket forbids a shared third helper file.
+ * Every actor is projected from the verified server identity. P4-M adds the
+ * mutation-role enforcement (`canComment` for a reply, `threadControl` for a
+ * status change, with the `"own"` author comparison inside the pure CAS
+ * transform), the post-commit P3-B audit appends, and the `thread.replied`
+ * fan-out.
+ *
+ * The access-row check is *not* one of the private validators below: it is
+ * `validateAccessRow()` from `../lib/access.mjs`, shared with every other path
+ * that resolves a role. This header used to say that duplicating it here was
+ * deliberate and that a shared helper was forbidden; that was the reason the
+ * copies drifted until one of them stopped being covered at all (#125, #128).
+ * Do not reintroduce a local copy.
  */
 
 const MAX_REQUEST_BYTES = 65_536;
@@ -634,6 +644,50 @@ function parseStatusBody(parsed) {
 }
 
 // ---------------------------------------------------------------------------
+// P4-M authorization. P2-G is the sole role authority; nothing here infers a
+// capability from `role`, an email domain, an Identity role, the stored actor,
+// or any request field.
+// ---------------------------------------------------------------------------
+
+/** The safe classification of an access rejection: own data properties
+ * `name === "StoreError"`, `code === "unavailable"`, `status === 503`. */
+function isUnavailableRejection(error) {
+  if (error === null || typeof error !== "object" || Array.isArray(error)) {
+    return false;
+  }
+  const name = ownData(error, "name");
+  const code = ownData(error, "code");
+  const status = ownData(error, "status");
+  return (
+    name !== null &&
+    code !== null &&
+    status !== null &&
+    name.value === "StoreError" &&
+    code.value === "unavailable" &&
+    status.value === 503
+  );
+}
+
+/**
+ * The single non-consuming P2-G lookup for this request. It runs after every
+ * public request gate and before the clock, the identifier randomness, and
+ * the thread store; its own access-store reads are the authority lookup, not
+ * forbidden domain work.
+ */
+async function resolveAccess(docId, identity) {
+  let result;
+  try {
+    result = await resolveRole(docId, identity, { consumeInvitation: false });
+  } catch (error) {
+    throw fail(isUnavailableRejection(error) ? "unavailable" : "invalid-state");
+  }
+  if (!validateAccessRow(result, capabilitiesFor)) {
+    throw fail("invalid-state");
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Pure CAS transformations. Each receives a fresh draft from P2-B, validates
 // it, and returns one complete thread or `null` for a status no-op. Nothing
 // here reads the request, clock, randomness, identity, or storage.
@@ -659,12 +713,24 @@ function replyTransformation(docId, threadId, comment) {
   };
 }
 
-function statusTransformation(docId, threadId, status, operationTime, actor) {
+/**
+ * `threadControl` is a predicate over the *committed* thread, not over a stale
+ * pre-read, so the author comparison lives here and is re-evaluated against
+ * every fresh draft P2-B hands back. `control` and `sub` are scalars captured
+ * before the CAS loop; this callback stays synchronous and pure, performing no
+ * access call, clock, randomness, event, log, or other I/O.
+ */
+function statusTransformation(docId, threadId, status, operationTime, actor, control, sub) {
   return (draft) => {
     if (draft === null) {
       throw fail("not-found");
     }
     const current = validateThread(draft, docId, threadId);
+    if (control !== "any" && current.author.sub !== sub) {
+      // Denial outranks the no-op: a non-author never learns this thread's
+      // current status, and never wins by racing a status change in between.
+      throw fail("forbidden");
+    }
     if (current.status === status) {
       return null;
     }
@@ -699,22 +765,43 @@ async function mutateThread(req, context, method) {
   const actor = requireActor(identity);
   const { docId, threadId } = parsePath(req, context);
   const parsed = await readJsonObject(req);
+  const body = method === "POST" ? parseReplyBody(parsed) : null;
+  const status = method === "POST" ? null : parseStatusBody(parsed);
+
+  // P4-M: the one non-consuming P2-G lookup, after every public request gate
+  // and before the clock, the identifier randomness, and `docState()`.
+  const access = await resolveAccess(docId, identity);
 
   let apply;
+  let commentId = null;
   if (method === "POST") {
-    const body = parseReplyBody(parsed);
+    if (access.canComment !== true) {
+      throw fail("forbidden");
+    }
     const { operationMs, operationTime } = sampleOperationTime();
+    commentId = sampleIdentifier("c", operationMs);
     const comment = {
-      id: sampleIdentifier("c", operationMs),
+      id: commentId,
       body,
       author: copyActor(actor),
       createdAt: operationTime,
     };
     apply = replyTransformation(docId, threadId, comment);
   } else {
-    const status = parseStatusBody(parsed);
+    // `none` cannot reach the store at all; `own` is decided per CAS draft.
+    if (access.threadControl === "none") {
+      throw fail("forbidden");
+    }
     const { operationTime } = sampleOperationTime();
-    apply = statusTransformation(docId, threadId, status, operationTime, actor);
+    apply = statusTransformation(
+      docId,
+      threadId,
+      status,
+      operationTime,
+      actor,
+      access.threadControl,
+      actor.sub,
+    );
   }
 
   const key = threadKey(docId, threadId);
@@ -723,7 +810,80 @@ async function mutateThread(req, context, method) {
   if (committed === null || typeof committed !== "object" || !hasOwn(committed, "value")) {
     throw fail("invalid-state");
   }
-  return jsonResponse(200, { thread: committed.value });
+  const response = jsonResponse(200, { thread: committed.value });
+
+  // The state is durable from here on. P3-B has no transaction with the domain
+  // record and the fan-out is best effort, so neither may change this response,
+  // retry, roll back, or encourage a replay of a non-idempotent POST. A PATCH
+  // whose P2-B result did not change anything is not a state transition and
+  // audits nothing.
+  if (method === "PATCH" && committed.changed !== true) {
+    return response;
+  }
+  let thread;
+  try {
+    thread = validateThread(committed.value, docId, threadId);
+  } catch {
+    return response;
+  }
+  if (method === "POST") {
+    const appended = thread.comments.find((entry) => entry.id === commentId) ?? null;
+    if (appended === null) {
+      return response;
+    }
+    await auditThread(store, thread, actor, "comment.reply", {
+      threadId: thread.id,
+      commentId: appended.id,
+      aid: thread.anchor?.block ?? null,
+    }, `commented on ${thread.section}`);
+    fanOutThreadReplied(context, thread, appended);
+    return response;
+  }
+  const kind = thread.status === "resolved" ? "thread.resolve" : "thread.reopen";
+  const verb = thread.status === "resolved" ? "resolved" : "reopened";
+  await auditThread(store, thread, actor, kind, {
+    threadId: thread.id,
+    aid: thread.anchor?.block ?? null,
+  }, `${verb} ${thread.section}`);
+  return response;
+}
+
+/** One canonical P3-B append, attempted only after the authoritative state
+ * operation succeeded. A collision, an unavailable store, and an unexpected
+ * throw are all absorbed identically: the audit row may be lost, the thread
+ * state may not. */
+async function auditThread(store, thread, actor, kind, target, summary) {
+  try {
+    await appendEvent({
+      store,
+      docId: thread.docId,
+      actor: { sub: actor.sub, name: actor.name, email: actor.email },
+      kind,
+      target,
+      docVersion: thread.docVersion,
+      summary,
+    });
+  } catch {
+    // Best effort by contract; the response is already decided.
+  }
+}
+
+/** The sole P4-D/P4-H fan-out call for a durable reply. Its boolean result is
+ * ignored and any throw is absorbed: a notification can never turn a landed
+ * write into a failed response. Resolve and reopen notify nobody. */
+function fanOutThreadReplied(context, thread, appended) {
+  try {
+    notify(context, {
+      t: "thread.replied",
+      docId: thread.docId,
+      threadId: thread.id,
+      actorName: appended.author.name,
+      body: appended.body,
+      quote: thread.kind === "comment" ? thread.anchor.exact : null,
+    });
+  } catch {
+    // Best effort by contract.
+  }
 }
 
 /**

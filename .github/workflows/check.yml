@@ -27,6 +27,19 @@ jobs:
       - name: root lockfile is in sync
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # Nothing else in this workflow imports netlify/, so until this step
+      # existed a function could name an import that does not resolve, or
+      # destructure an export its dependency does not emit, and every gate
+      # stayed green (#107). Linking is the gate: ESM resolves named imports
+      # before it evaluates anything. Modules are loaded, never invoked.
+      #
+      # The position of this step is load-bearing: it runs before anything
+      # compiles or installs a workspace, because a deploy carries only
+      # netlify/, netlify.toml and the root lockfile. Moving it after a build
+      # would make it pass by arranging a condition production never provides.
+      - name: every deploy module loads
+        run: node scripts/check-function-modules.mjs
+
       # notify() runs after the authoritative write, so a body it rejects that
       # the store accepted is a 500 for a comment that already landed. The two
       # grammars are only kept in step by being asserted against each other.
@@ -36,6 +49,33 @@ jobs:
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
+      # A function that imports `templates/docbuild/dist/` cannot load: `dist/`
+      # is gitignored, and the P4-S connect tool copies only the deploy tree
+      # into a connected site. The two modules `netlify/functions/edit.mjs`
+      # needs are therefore vendored into `netlify/lib/` as generated, tracked
+      # copies, and this step holds those copies equal to the canonical build.
+      # It also asserts the invariant behind them — no relative import anywhere
+      # under `netlify/` may leave `netlify/` — so the defect cannot come back
+      # by a route other than the one it arrived by.
+      #
+      # It runs after the typecheck step, whose `npm ci` prepare build is what
+      # emits the canonical `dist/` the copies are compared against.
+      - name: the deploy tree is self-contained
+        run: node scripts/vendor-netlify-lib.mjs
+
+      # Both copies of the converter, against the same 12 canonical rows: the
+      # hand-written browser twin in `templates/base/edit.js`, and the vendored
+      # server copy the edit endpoint imports. The second run is implied by the
+      # step above while that step exists — equal bytes convert equally — and is
+      # kept so the acceptance property is asserted directly rather than
+      # inferred from the order of two other gates.
+      - name: Check inline converter parity
+        run: |
+          node scripts/check-inline-md.mjs
+          node scripts/check-inline-md.mjs \
+            --fixture templates/fixtures/inline.json \
+            --module netlify/lib/inline-md.mjs
+
       # The unit tests were written before anything ran them, and a test that
       # never executes cannot hold a regression out. Every file is named
       # explicitly rather than globbed: `node --test` treats an unmatched
@@ -43,6 +83,13 @@ jobs:
       # still matches some other test file would go green with this one
       # silently dropped. A literal path that stops being emitted fails loudly.
       # Add new test files to this list.
+      #
+      # "Add new test files to this list" was missed three times running, so the
+      # list is now enforced rather than remembered: this step fails when a
+      # tracked test file exists that no run step below names (#107).
+      - name: every test file is wired into CI
+        run: node scripts/check-test-inventory.mjs
+
       - name: unit tests
         run: |
           npm --prefix templates/docbuild run build
@@ -50,6 +97,76 @@ jobs:
             templates/docbuild/dist/index.test.js \
             templates/docbuild/dist/anchors.test.js
           node --test scripts/connect.test.mjs
+          node --test scripts/temp-roots.test.mjs
+          node --experimental-vm-modules --test netlify/lib/identity.test.mjs
+          # The permanent regression runners are standalone supervisors, not
+          # `node --test` files: each one names itself, forks its own matrices
+          # and prints its own PASS lines. They are heavier than the docbuild
+          # tests -- test-p4-a.mjs installs a pinned Playwright and Chromium
+          # into a temporary root -- which is the price of the write paths
+          # having a gate at all. Anything that needs the TypeScript compiler
+          # relies on the typecheck step above having installed it.
+          # test-p4-a.mjs ran through allow-known-runner-failure.mjs until
+          # #124: its browser matrix measured the selection tooltip without
+          # asserting that it found one, which held locally and died with a
+          # TypeError in Actions. The measurement now waits for a laid-out host
+          # and names the selector when there is none, so the allowance is gone
+          # and every runner is invoked directly.
+          #
+          # test-p4-j.mjs names the mode it runs: `contract` is the hermetic
+          # one, and `hosted` needs operator credentials no build has. This
+          # invocation runs with `P4J_BASE` unset, which means its reviewed-base
+          # gate is SKIPPED and the working tree is what is under test -- the
+          # runner says so on stderr every build. That is deliberate: the only
+          # commits that satisfy the gate live on the ticket branch and do not
+          # survive the squash merge, so a `P4J_BASE` set here would abort every
+          # push build on `main` (#133).
+          #
+          # test-p4-l.mjs takes the same shape: `contract` is the hermetic
+          # matrix pair, and the rendered oracle is its own entry point because
+          # it measures laid-out geometry rather than state. The hosted oracle
+          # needs operator credentials no build has, so CI runs it only far
+          # enough to prove it refuses to touch a provider account without
+          # them -- which is also what names the file for the inventory gate.
+          #
+          # test-p4-k.mjs has one mode and needs no credential; its sibling
+          # browser runner installs its own pinned Playwright and Chromium the
+          # same way test-p4-a.mjs does.
+          node scripts/test-p4-a.mjs
+          node scripts/test-p4-b.mjs
+          node scripts/test-p4-i.mjs
+          node scripts/test-p4-j.mjs contract
+          node scripts/test-p4-l.mjs contract
+          node scripts/test-p4-l-browser.mjs
+          if node scripts/test-p4-l-hosted.mjs; then
+            echo "scripts/test-p4-l-hosted.mjs ran without operator credentials" >&2
+            exit 1
+          fi
+          node scripts/test-p4-m.mjs
+          node scripts/test-p4-n.mjs
+          node scripts/test-p4-o.mjs
+          node scripts/test-p4-q.mjs
+          # The four paths #125 left holding hand copies of the access-row
+          # validator had no test of any kind before #128. This runner drives
+          # the capability matrix through each of them, so neutering the shared
+          # validator -- or any one of the four call sites -- fails here.
+          node scripts/test-access-row.mjs
+          node --experimental-vm-modules scripts/test-p4-k.mjs contract
+          node scripts/test-p4-k-browser.mjs
+
+      # P4-K's hosted oracle creates and deletes a real Netlify site and needs
+      # operator credentials no build has. It is named here so the test
+      # inventory gate above sees it wired, and it runs only when an operator
+      # supplies the credentials -- never on an untrusted pull request.
+      - name: P4-K hosted acceptance (operator credentials only)
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          if [ -n "${NETLIFY_AUTH_TOKEN:-}" ]; then
+            node scripts/test-p4-k-hosted.mjs
+          else
+            echo "SKIP scripts/test-p4-k-hosted.mjs (no operator credentials)"
+          fi
 
       - name: edge gate config is fail-closed
         run: |

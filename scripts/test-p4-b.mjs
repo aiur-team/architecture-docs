@@ -436,11 +436,18 @@ function identityFor(overrides) {
 
 async function serverMatrix() {
   const store = await import(pathToFileURL(join(ROOT, "netlify/lib/store.mjs")).href);
-  const core = await import(pathToFileURL(join(ROOT, "templates/docbuild/dist/anchor-core.js")).href);
-  const md = await import(pathToFileURL(join(ROOT, "templates/docbuild/dist/inline_md.js")).href);
+  // The vendored deploy-tree copies, not `templates/docbuild/dist/`: these are
+  // the exact modules `edit.mjs` imports in production, so the server matrix
+  // exercises the same functions the endpoint will actually call.
+  const core = await import(pathToFileURL(join(ROOT, "netlify/lib/anchor-core.mjs")).href);
+  const md = await import(pathToFileURL(join(ROOT, "netlify/lib/inline-md.mjs")).href);
   const { createEditHandler } = await import(
     pathToFileURL(join(ROOT, "netlify/functions/edit.mjs")).href
   );
+  const access = await import(
+    pathToFileURL(join(ROOT, "netlify/lib/access.mjs")).href
+  );
+  const gitedit = await import(pathToFileURL(join(ROOT, "netlify/lib/gitedit.mjs")).href);
 
   const fixture = join(process.env.P4B_ROOT, "fixture");
   mkdirSync(fixture, { recursive: true });
@@ -454,11 +461,45 @@ async function serverMatrix() {
     DOCS_BOT_EMAIL: BOT_EMAIL,
   };
 
-  /** Build one handler plus the doubles it was wired to. */
+  /** Build one handler plus the doubles it was wired to.
+   *
+   * P4-N moved the manifest, source, repository and receipt work out of
+   * `edit.mjs` and behind the one apply path in `gitedit.mjs`. The seam moved;
+   * the behaviour this matrix pins did not. The same doubles are therefore
+   * wired into `createGitEditService()`, and the two apply entry points it
+   * returns are injected into the narrowed edit factory. */
   function build(options = {}) {
     const blobs = options.store ?? new FakeStore();
     const github = options.github ?? new FakeGitHub();
-    const counters = { identify: 0, origin: 0, docState: 0 };
+    const counters = { identify: 0, origin: 0, docState: 0, notify: 0 };
+    const converters = options.converters ?? md;
+    // `undefined` means "this variable is not set", which the service models by
+    // omitting the name rather than by capturing an undefined value.
+    const environment = {};
+    for (const [name, value] of Object.entries({ ...env, ...(options.env ?? {}) })) {
+      if (value !== undefined) environment[name] = value;
+    }
+    const service = gitedit.createGitEditService({
+      storeFn: () => {
+        counters.docState += 1;
+        if (options.docStateThrows === true) {
+          throw new store.StoreError("unavailable", 503, "State store unavailable");
+        }
+        return blobs;
+      },
+      readFn: store.read,
+      mutateFn: store.mutate,
+      fetchFn: (url, init) => github.fetch(url, init),
+      // The apply path's audit row is best effort and strictly downstream of
+      // the receipt; this matrix is about the write, so it is a no-op here.
+      appendEventFn: async () => {},
+      nowFn: () => options.now ?? NOW_MS,
+      sha256Fn: sha256,
+      scanBlocksFn: core.scanBlocks,
+      toMdFn: converters.toMd,
+      toHtmlFn: converters.toHtml,
+      env: environment,
+    });
     const deps = {
       requireOrigin: (req) => {
         counters.origin += 1;
@@ -469,27 +510,30 @@ async function serverMatrix() {
         if (options.identifyThrows === true) throw new Error("identity");
         return options.identity === undefined ? identityFor({}) : options.identity;
       },
-      docState: () => {
-        counters.docState += 1;
-        if (options.docStateThrows === true) {
-          throw new store.StoreError("unavailable", 503, "State store unavailable");
-        }
-        return blobs;
-      },
-      editKey: store.editKey,
-      read: store.read,
-      mutate: store.mutate,
-      upgrade: store.upgrade,
-      StoreError: store.StoreError,
-      scanBlocks: core.scanBlocks,
-      toMd: (options.converters ?? md).toMd,
-      toHtml: (options.converters ?? md).toHtml,
-      fetch: (url, init) => github.fetch(url, init),
-      now: () => options.now ?? NOW_MS,
+      // P4-M replaced the temporary `isOrg` gate with the P2-G document role.
+      // The P4-B matrix is about the apply path, so the default double grants
+      // an owner; `options.role` selects a denial for the gate cases below.
+      resolveRole: async () => ({
+        role: options.role ?? "owner",
+        shared: true,
+        ...access.capabilitiesFor(options.role ?? "owner"),
+      }),
+      capabilitiesFor: access.capabilitiesFor,
+      readEffectiveBase: service.readEffectiveBase,
+      applyText: service.applyText,
+      notify: () => { counters.notify += 1; return true; },
+      toMd: converters.toMd,
+      toHtml: converters.toHtml,
       sha256Hex: sha256,
-      getEnv: (name) => ({ ...env, ...(options.env ?? {}) })[name],
     };
-    return { handle: createEditHandler(deps), blobs, github, counters };
+    const handler = createEditHandler(deps);
+    return {
+      handle: (req) => handler(req, {}),
+      blobs,
+      github,
+      counters,
+      service,
+    };
   }
 
   const post = (body, init = {}) => new Request("https://docs.example.com/api/edit", {
@@ -508,8 +552,8 @@ async function serverMatrix() {
   /* ---- the factory ---------------------------------------------------- */
 
   const keys = [
-    "requireOrigin", "identify", "docState", "editKey", "read", "mutate", "upgrade",
-    "StoreError", "scanBlocks", "toMd", "toHtml", "fetch", "now", "sha256Hex", "getEnv",
+    "requireOrigin", "identify", "resolveRole", "capabilitiesFor",
+    "readEffectiveBase", "applyText", "notify", "toMd", "toHtml", "sha256Hex",
   ];
   ok(typeof build().handle === "function", "the factory returns a handler");
   for (const bad of [null, undefined, [], "x", 1, Object.create(null)]) {
@@ -524,10 +568,9 @@ async function serverMatrix() {
   {
     const complete = {
       requireOrigin: () => {}, identify: async () => null,
-      docState: () => ({}), editKey: store.editKey, read: store.read, mutate: store.mutate,
-      upgrade: store.upgrade, StoreError: store.StoreError,
-      scanBlocks: core.scanBlocks, toMd: md.toMd, toHtml: md.toHtml,
-      fetch: () => {}, now: () => 0, sha256Hex: () => "", getEnv: () => undefined,
+      resolveRole: async () => ({}), capabilitiesFor: () => ({}),
+      readEffectiveBase: async () => ({}), applyText: async () => ({}),
+      notify: () => true, toMd: md.toMd, toHtml: md.toHtml, sha256Hex: () => "",
     };
     for (const key of keys) {
       const partial = { ...complete };
@@ -547,14 +590,25 @@ async function serverMatrix() {
       extraThrew = true;
     }
     ok(extraThrew, "factory refuses an extra dependency key");
-    let storeErrorThrew = false;
+    let nonCallableThrew = false;
     try {
-      createEditHandler({ ...complete, StoreError: class Other extends Error {} });
+      createEditHandler({ ...complete, applyText: "not a function" });
     } catch {
-      storeErrorThrew = true;
+      nonCallableThrew = true;
     }
-    ok(storeErrorThrew, "factory refuses a substituted StoreError");
-    ok(createEditHandler(complete).length === 1, "handler takes exactly one argument");
+    ok(nonCallableThrew, "factory refuses a non-callable apply path");
+    // The apply seam is closed on its own side too: the store, the provider
+    // and the environment reach the write only through this service.
+    let unknownSeamThrew = false;
+    try {
+      gitedit.createGitEditService({ surprise: () => {} });
+    } catch {
+      unknownSeamThrew = true;
+    }
+    ok(unknownSeamThrew, "the apply service refuses an unknown dependency key");
+    // The handler now also receives the Functions context, which it passes to
+    // the fan-out and to nothing else.
+    ok(createEditHandler(complete).length === 2, "handler takes the request and its context");
   }
 
   /* ---- method, origin, identity, gate ---------------------------------- */
@@ -616,13 +670,18 @@ async function serverMatrix() {
     eq(built.github.calls.length, 0, `identity with ${label} performs no provider work`);
   }
   {
-    const built = build({ identity: identityFor({ isOrg: false }) });
-    const response = await built.handle(post(valid));
-    eq(response.status, 403, "a non-org identity is 403");
+    // P4-M owns the write gate now: `isOrg` no longer decides anything, and a
+    // document role without `canEdit` is the denial P4-B's apply path must
+    // never see. The full capability matrix lives in scripts/test-p4-m.mjs.
+    const built = build({ identity: identityFor({ isOrg: false }), role: "owner" });
+    eq((await built.handle(post(valid))).status, 200, "isOrg no longer gates the write");
+    const denied = build({ role: "viewer" });
+    const response = await denied.handle(post(valid));
+    eq(response.status, 403, "a role without canEdit is 403");
     eq((await readJson(response)).error,
       { code: "forbidden", message: "Document edit denied" }, "403 body");
-    eq(built.github.calls.length, 0, "403 performs no provider work");
-    eq(built.counters.docState, 0, "403 performs no store work");
+    eq(denied.github.calls.length, 0, "403 performs no provider work");
+    eq(denied.counters.docState, 0, "403 performs no store work");
   }
 
   /* ---- URL and body ---------------------------------------------------- */
@@ -943,7 +1002,12 @@ async function serverMatrix() {
     const built = build({ github });
     const response = await built.handle(post(valid));
     eq(response.status, 409, "a second file-SHA conflict is the public conflict");
-    eq((await readJson(response)).current, null, "the second conflict carries no current text");
+    // P4-N deliberately widened this one body. The retry has already re-read
+    // the source, so the conflict can report what the block now says instead
+    // of a bare null the client cannot act on. Nothing else about the case
+    // changed: the write is refused and the commit never loops.
+    eq((await readJson(response)).current, TEXT,
+      "the second conflict reports the re-read source text");
     const puts = github.calls.filter((call) => call.startsWith("PUT"));
     eq(puts.length, 2, "the handler never loops on the commit");
   }
@@ -1020,8 +1084,11 @@ async function serverMatrix() {
     eq(blobs.records.get(receiptKey).value, freshReceipt({ text: NEXT_TEXT }),
       "the stored receipt is exact");
     const body = await readJson(response);
+    // P4-N's spec adds `aid` to the head of this projection so a client that
+    // fans an edit out has the block it applies to without re-deriving it.
     eq(body, {
       receipt: {
+        aid: AID,
         text: NEXT_TEXT,
         by: { sub: SUB, name: NAME, email: EMAIL },
         at: NOW_ISO,
@@ -1053,6 +1120,8 @@ async function serverMatrix() {
   {
     // The idempotent branch. The precheck must miss and the swap must then see
     // a byte-identical receipt, which is the only way `apply` returns null.
+    // Under P4-N the effective base is read before the apply path runs, so the
+    // first two reads are the ones that must miss.
     const blobs = new FakeStore();
     const github = new FakeGitHub();
     const built = build({ store: blobs, github });
@@ -1060,16 +1129,20 @@ async function serverMatrix() {
     let reads = 0;
     blobs.getWithMetadata = async () => {
       reads += 1;
-      return reads === 1 ? null : { data: structuredClone(identical), etag: '"v7"' };
+      return reads <= 2 ? null : { data: structuredClone(identical), etag: '"v7"' };
     };
-    let wrote = false;
-    blobs.setJSON = async () => {
-      wrote = true;
+    let written = null;
+    blobs.setJSON = async (key, value) => {
+      written = structuredClone(value);
       return { modified: true, etag: '"v8"' };
     };
     const response = await built.handle(post(valid));
     eq(response.status, 200, "an identical receipt still reports success");
-    eq(wrote, false, "an identical receipt performs no conditional write");
+    // P4-N's callback contract distinguishes the two snapshots P4-B collapsed.
+    // The captured pre-apply snapshot here is null, so an identical receipt
+    // observed at the swap is rewritten with the same bytes rather than
+    // skipped. It is still idempotent: nothing a caller can observe changes.
+    eq(written, identical, "an identical receipt is rewritten with the same value");
     eq((await readJson(response)).receipt.text, NEXT_TEXT, "the projection is the stored text");
   }
   {
@@ -1117,6 +1190,7 @@ async function serverMatrix() {
     // A receipt shape this build cannot read appears only after the precheck.
     // It is neither stale nor fresh, so the callback refuses rather than
     // clobbering what could be a later schema's acceptance or audit state.
+    // The effective-base read and the precheck both precede the swap.
     const blobs = new FakeStore();
     const github = new FakeGitHub();
     const built = build({ store: blobs, github });
@@ -1124,7 +1198,7 @@ async function serverMatrix() {
     const original = blobs.getWithMetadata.bind(blobs);
     blobs.getWithMetadata = async (key) => {
       reads += 1;
-      if (reads === 1) return null;
+      if (reads <= 2) return null;
       return { data: { v: 1, aid: AID, fromTheFuture: true }, etag: '"v9"' };
     };
     const response = await built.handle(post(valid));
