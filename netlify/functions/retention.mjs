@@ -263,7 +263,21 @@ function parseEventKey(key) {
     throw new RetentionError("invalid-event-key");
   }
   const iso = new Date(idMs).toISOString();
-  if (iso.slice(0, 7) !== month || eventKey(docId, iso, eventId) !== key) {
+  if (iso.slice(0, 7) !== month) {
+    throw new RetentionError("invalid-event-key");
+  }
+  // The P2-B builder is the authority on what our writers can produce, and it
+  // signals a key it would not have built by throwing rather than returning.
+  // A zero-padded millisecond segment reaches here matching both the pattern
+  // and the month, so both outcomes have to become the same corrupt-state
+  // error; a provider key must never surface as a provider failure.
+  let rebuilt;
+  try {
+    rebuilt = eventKey(docId, iso, eventId);
+  } catch {
+    throw new RetentionError("invalid-event-key");
+  }
+  if (rebuilt !== key) {
     throw new RetentionError("invalid-event-key");
   }
   return { key, eventId, idMs };
