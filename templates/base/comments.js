@@ -187,9 +187,12 @@ function installComments() {
   let railSeq = 0;
 
   /* The single registered panel extension renderer, and the section it last
-     rendered into. */
+     rendered into.  `rendering` is true only while the renderer is on the
+     stack, so a repaint it asks for from inside itself is refused rather than
+     recursed. */
   let extensionRenderer = null;
   let extension = null;
+  let rendering = false;
 
   /* The initial-read barrier and the overlay reconciliation queue. */
   let readiness = null;
@@ -731,7 +734,9 @@ function installComments() {
     if (share !== null) head.insertBefore(toggle, share);
     else head.appendChild(toggle);
 
-    rail = el("div", { id: "doc-comments-rail", "aria-label": "Comment locations" });
+    /* P4-Q: the rail carries both kinds now, so the group a screen reader
+       lands in has to say so. */
+    rail = el("div", { id: "doc-comments-rail", "aria-label": "Comment and suggestion locations" });
     document.body.appendChild(rail);
 
     panel = el("aside", { id: "doc-comments-panel", "aria-labelledby": "doc-comments-title" });
@@ -1181,8 +1186,12 @@ function installComments() {
      uses the location P3-C resolved, including a range inside a block it moved
      to; a suggestion is whole-block by definition. */
   function railAnchorOf(record, blocks) {
-    if (record.kind === "comment") {
-      const location = record.entry === null ? null : record.entry.location;
+    /* A comment marker this module made carries the entry P3-C resolved.  One
+       a *caller* made through the public `add("comment", ...)` carries only an
+       aid, so it is placed whole-block exactly like a suggestion rather than
+       being hidden forever for want of an entry. */
+    if (record.kind === "comment" && record.entry !== null) {
+      const location = record.entry.location;
       if (location === null || location.element === null) return null;
       return { host: location.element, source: location.range === null ? location.element : location.range, order: location.order };
     }
@@ -1204,7 +1213,7 @@ function installComments() {
   function placeMarkers() {
     if (rail === null || !rail.isConnected) return;
     let needsBlocks = false;
-    for (const record of railEntries.values()) if (record.kind === "suggestion") needsBlocks = true;
+    for (const record of railEntries.values()) if (record.kind === "suggestion" || record.entry === null) needsBlocks = true;
     const blocks = needsBlocks ? blockElements() : new Map();
 
     const candidates = [];
@@ -1276,7 +1285,7 @@ function installComments() {
      leading digits; any other label draws an empty circle and keeps its
      complete accessible name. */
   function leadingCount(label) {
-    const match = /^[0-9]{1,3}(?= )/.exec(label);
+    const match = /^[0-9]+(?= )/.exec(label);
     return match === null ? "" : match[0];
   }
 
@@ -1369,9 +1378,14 @@ function installComments() {
   }
 
   /* One ordinary repaint of the panel and one placement frame.  It reads
-     nothing from the network and resolves no anchor. */
+     nothing from the network and resolves no anchor.
+
+     A renderer that calls back into this from inside its own repaint would
+     otherwise recurse until the stack gave out, and the `try/catch` around the
+     renderer would swallow that as an ordinary renderer failure, leaving the
+     panel half rebuilt.  A nested repaint is simply refused instead. */
   function panelRepaint() {
-    if (panel === null) return undefined;
+    if (panel === null || rendering) return undefined;
     render();
     return undefined;
   }
@@ -1409,12 +1423,15 @@ function installComments() {
     }
     const section = mountExtension();
     let result;
+    rendering = true;
     try {
       result = extensionRenderer(section, blockFilter);
     } catch (error) {
       // The renderer failed; the comments beside it stay usable.
       dropExtension();
       return;
+    } finally {
+      rendering = false;
     }
     if (isThenable(result)) {
       /* An async renderer would paint into a section this repaint no longer
@@ -1470,7 +1487,20 @@ function installComments() {
     const readyDescriptor = Object.getOwnPropertyDescriptor(edit, "overlaysReady");
     if (readyDescriptor === undefined || !hasOwn(readyDescriptor, "value")) return null;
     const ready = readyDescriptor.value;
-    return ready instanceof Promise ? ready : null;
+    if (!(ready instanceof Promise)) return null;
+    /* `instanceof` only walks the prototype chain, so an ordinary object made
+       with `Object.create(Promise.prototype)` passes it and then throws
+       synchronously out of `then()` -- taking the session listener, and with
+       it every comment on the page, down with it.  `then` needs the internal
+       slot, so calling it here is the brand check.  The no-op reaction it
+       leaves on a genuine Promise is harmless: this module ignores both the
+       fulfillment value and the rejection anyway. */
+    try {
+      Promise.prototype.then.call(ready, () => {}, () => {});
+    } catch (error) {
+      return null;
+    }
+    return ready;
   }
 
   /* The first anchor resolution waits for the applied overlay so no Range is

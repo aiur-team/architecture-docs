@@ -29,7 +29,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -150,6 +150,8 @@ window.doc.edit = Object.freeze(seam);
 `;
   }
   if (mode === "notPromise") return `window.doc.edit = Object.freeze({ overlaysReady: { then: function () {} } });`;
+  /* Passes `instanceof Promise` and throws synchronously out of `then()`. */
+  if (mode === "promiseProto") return `window.doc.edit = Object.freeze({ overlaysReady: Object.create(Promise.prototype) });`;
   if (mode === "editNotObject") return `window.doc.edit = "not an object";`;
   const body = mode === "resolve"
     ? "window.__settle = function () { resolve(Object.freeze({ applied: Object.freeze([]), available: true })); };"
@@ -523,10 +525,24 @@ function runChild(args, { deadline, cwd = ROOT, env = {}, onLine = null } = {}) 
       }
     };
 
+    let giveUpTimer = null;
     const timer = setTimeout(() => {
       expired = true;
       stop("SIGTERM");
       killTimer = setTimeout(() => stop("SIGKILL"), KILL_GRACE_MS);
+      /* SIGKILL cannot be caught, so this only fires when the escalation
+         itself is broken.  Reporting that is the whole point: a supervisor
+         whose last resort does not work must fail the run, not hang it. */
+      giveUpTimer = setTimeout(() => {
+        for (const [name, handler] of forwarded) process.removeListener(name, handler);
+        resolve({
+          code: 125,
+          signal: null,
+          stdout: out.toString(),
+          stderr: `${err.toString()}child ${child.pid} outlived TERM and KILL\n`,
+          orphaned: true,
+        });
+      }, KILL_GRACE_MS * 2);
     }, deadline);
 
     const forwarded = [];
@@ -554,6 +570,7 @@ function runChild(args, { deadline, cwd = ROOT, env = {}, onLine = null } = {}) 
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (killTimer !== null) clearTimeout(killTimer);
+      if (giveUpTimer !== null) clearTimeout(giveUpTimer);
       for (const [name, handler] of forwarded) process.removeListener(name, handler);
       const resolved = expired ? 124 : code !== null ? code : 128 + (SIGNALS[signal] || 0);
       /* Reaped: the group must be gone, or something outlived its supervisor. */
@@ -597,7 +614,25 @@ async function proveSupervision(self) {
 
   const hung = await runChild([self, "--probe-hang"], { deadline: HANG_DEADLINE_MS });
   if (hung.code !== 124) fail("P4-Q deadline probe expected 124", hung);
+  if (hung.signal !== "SIGTERM") fail("P4-Q deadline probe expected a TERM stop", hung);
   if (hung.orphaned) fail("P4-Q deadline probe left its process group behind", hung);
+
+  /* A child that ignores TERM has to be escalated.  The probe above dies on
+     TERM by default disposition, so it can never reach the KILL timer and
+     cannot prove the escalation exists. */
+  const stubborn = await runChild([self, "--probe-stubborn"], { deadline: HANG_DEADLINE_MS });
+  if (stubborn.code !== 124) fail("P4-Q stubborn probe expected 124", stubborn);
+  if (stubborn.signal !== "SIGKILL") fail("P4-Q stubborn probe expected TERM escalated to KILL", stubborn);
+  if (stubborn.orphaned) fail("P4-Q stubborn probe left its process group behind", stubborn);
+
+  /* Forwarding is a property of the supervisor, not of the probe: signalling
+     the child directly only proves the child's own handler.  This probe runs
+     one supervisor of its own, signals *itself*, and reports what its
+     grandchild exited with. */
+  const forwarded = await runChild([self, "--probe-forward"], { deadline: PROBE_DEADLINE_MS });
+  if (forwarded.code !== 0) fail("P4-Q forwarding probe failed", forwarded);
+  if (forwarded.stdout !== "forwarded:143\n") fail("P4-Q forwarding probe did not relay TERM to its child", forwarded);
+  if (forwarded.orphaned) fail("P4-Q forwarding probe left its process group behind", forwarded);
 }
 
 function guardedRoot(prefix) {
@@ -650,18 +685,29 @@ async function supervise(self) {
         cwd: root,
         env: {
           P4Q_INSTALL: install,
+          /* Playwright puts each launch's user-data-dir in `os.tmpdir()`, so
+             pointing the worker's temporary directory at its own guarded root
+             is what actually keeps the browser profile inside it. */
+          TMPDIR: root,
           P4Q_ROOT: root,
           PLAYWRIGHT_BROWSERS_PATH: join(install, "browsers"),
         },
       });
       if (result.code !== 0) fail(`P4-Q worker ${flag}`, result);
       if (result.orphaned) fail(`P4-Q worker ${flag} left its process group behind`, result);
+      /* The contract fixes this runner's whole output, so a worker that exits
+         0 while narrating to either stream is a failure, not a success. */
+      if (result.stderr !== "") fail(`P4-Q worker ${flag} wrote to stderr`, result);
+      if (result.stdout !== "") fail(`P4-Q worker ${flag} wrote to stdout`, result);
       process.stdout.write(`${line}\n`);
     }
     ok = true;
   } finally {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
   }
+  /* Printing the line is not the evidence; the roots being gone is. */
+  const left = roots.filter((root) => existsSync(root));
+  if (left.length !== 0) fail(`P4-Q left fixture state behind: ${left.join(", ")}`);
   if (ok) process.stdout.write("PASS  P4-Q fixture cleaned\n");
 }
 
@@ -675,6 +721,28 @@ function probeSignal() {
 
 function probeHang() {
   setInterval(() => {}, 1000);
+}
+
+/* Ignores TERM on purpose, so only the KILL escalation can stop it. */
+function probeStubborn() {
+  process.on("SIGTERM", () => {});
+  setInterval(() => {}, 1000);
+}
+
+/* One supervisor over one grandchild.  It signals itself and must relay that
+   to the group it started; 143 is the grandchild's TERM exit. */
+async function probeForward(self) {
+  let signalled = false;
+  const result = await runChild([self, "--probe-signal"], {
+    deadline: PROBE_DEADLINE_MS,
+    onLine: (line) => {
+      if (line === "ready" && !signalled) {
+        signalled = true;
+        process.kill(process.pid, "SIGTERM");
+      }
+    },
+  });
+  process.stdout.write(`forwarded:${result.code}\n`);
 }
 
 /* ============================================================== workers */
@@ -805,7 +873,25 @@ async function flush(page, rounds = 4) {
   }
 }
 
-const RUNTIME_SCRIPTS = [BASE_SHIM, FETCH_STUB, HELPERS];
+/* `pageerror` reports uncaught exceptions, not unhandled rejections, so
+   without this probe "the rejection was contained" is indistinguishable from
+   "the rejection was ignored by the harness". */
+const REJECTION_PROBE = `
+window.__rejections = [];
+window.addEventListener("unhandledrejection", function (event) {
+  window.__rejections.push(String(event.reason));
+  event.preventDefault();
+});
+`;
+
+const RUNTIME_SCRIPTS = [BASE_SHIM, REJECTION_PROBE, FETCH_STUB, HELPERS];
+
+/* An unhandled rejection is delivered in a later task than the one that
+   created it, so give it one before reading the log. */
+async function rejections(page) {
+  await flush(page, 2);
+  return page.evaluate(() => window.__rejections);
+}
 
 const q = (page, fn, ...args) => page.evaluate(fn, ...args);
 
@@ -962,9 +1048,31 @@ async function railScenarios(browser, host) {
         labelNumber: add("suggestion", aid, 1, ok),
         clickMissing: add("suggestion", aid, "1 suggestion", undefined),
         clickObject: add("suggestion", aid, "1 suggestion", { call: function () {} }),
+        aidDuplicated: (function () {
+          /* The contract wants one *unique* connected block, so an aid that
+             now names two elements is not addressable. */
+          var twin = document.createElement("p");
+          twin.setAttribute("data-aid", "a5c1d2e3f");
+          twin.textContent = "A duplicate of the third paragraph.";
+          document.querySelector("main").appendChild(twin);
+          var refused = add("suggestion", "a5c1d2e3f", "1 suggestion", ok);
+          twin.parentNode.removeChild(twin);
+          return refused;
+        }()),
+        aidDetached: (function () {
+          var block = document.querySelector('[data-aid="a6a7b8c9d"]');
+          var parent = block.parentNode;
+          var next = block.nextSibling;
+          parent.removeChild(block);
+          var refused = add("suggestion", "a6a7b8c9d", "1 suggestion", ok);
+          parent.insertBefore(block, next);
+          return refused;
+        }()),
       };
     }, A1);
     for (const [name, value] of Object.entries(refusals)) assert.equal(value, null, `rail.add rejects ${name}`);
+    assert.notEqual(await q(page, () => document.getElementById("doc-comments-rail")), null,
+      "the rail exists, so an empty marker list means refusal and not a missing rail");
     assert.deepEqual(await q(page, () => window.__q.markers().filter((m) => m.cls.includes("doc-rail-suggestion"))), []);
 
     /* 160 scalars is the boundary, not 160 UTF-16 units. */
@@ -988,8 +1096,16 @@ async function railScenarios(browser, host) {
 
     /* One suggestion marker per aid, whatever the count says. */
     assert.equal(await q(page, () => window.doc.rail.add("suggestion", "a44f0e1b7", "4 suggestions", function () {})), null);
-    /* A comment marker beside it is a second entry, not a replacement. */
+    /* A comment marker beside it is a second entry, not a replacement -- and
+       it is placed whole-block, because a caller's marker carries no thread
+       entry and must not be hidden forever for want of one. */
     assert.notEqual(await q(page, () => window.doc.rail.add("comment", "a44f0e1b7", "1 message", function () {})), null);
+    await settle(page);
+    const foreign = await q(page, () => window.__q.markers().filter((marker) => marker.label === "1 message"));
+    assert.equal(foreign.length, 1);
+    assert.equal(foreign[0].hidden, false, "a caller's comment marker is placed, not hidden");
+    assert.equal(foreign[0].top !== "" && Number.isFinite(parseFloat(foreign[0].top)), true,
+      "a caller's comment marker gets a real position");
 
     await settle(page);
     const drawn = await q(page, () => window.__q.markers());
@@ -1014,6 +1130,24 @@ async function railScenarios(browser, host) {
     assert.deepEqual(
       labels.filter((pair) => pair[0].length < 40).sort(),
       [["1 suggestion", "1"], ["3 suggestions", "3"], ["Suggestions here", ""]],
+    );
+
+    /* The glyph is the label's own leading digits, however many there are. */
+    const wide = await q(page, () => {
+      const block = document.createElement("p");
+      block.setAttribute("data-aid", "ab1c2d3e4");
+      block.textContent = "A block with a great many suggestions on it.";
+      document.querySelector("main").appendChild(block);
+      window.doc.rail.add("suggestion", "ab1c2d3e4", "1000 suggestions", function () {});
+      const found = window.__q.markers().filter((marker) => marker.label === "1000 suggestions");
+      return found.length === 1 ? found[0].text : null;
+    });
+    assert.equal(wide, "1000", "a four-digit count is not silently blanked");
+
+    /* The rail hosts both kinds now, and says so. */
+    assert.equal(
+      await q(page, () => document.getElementById("doc-comments-rail").getAttribute("aria-label")),
+      "Comment and suggestion locations",
     );
 
     /* Only the exact identity this controller returned names an entry. */
@@ -1052,6 +1186,8 @@ async function railScenarios(browser, host) {
     assert.deepEqual(await q(page, () => window.__q.fired),
       ["1 suggestion", "2 suggestions", "3 suggestions"]);
     assert.equal(await q(page, () => window.__q.markers().filter((m) => m.cls.includes("doc-rail-suggestion")).length), 3);
+    assert.deepEqual(await rejections(page), [],
+      "a rejecting callback is contained, not merely unobserved");
   });
 
   /* A collapsed section hides both kinds; opening it shows both again. */
@@ -1096,7 +1232,8 @@ async function panelScenarios(browser, host) {
       extension: window.__q.extension(),
     }));
     assert.deepEqual(all.order.slice(-2), ["doc-panel-extension", "doc-comments-empty[hidden]"]);
-    assert.equal(all.order.indexOf("doc-panel-extension") > all.order.indexOf("doc-comments-group"), true,
+    assert.equal(all.order.indexOf("doc-comments-group") >= 0, true, "a comment group is present to order against");
+    assert.equal(all.order.indexOf("doc-panel-extension") > all.order.lastIndexOf("doc-comments-group"), true,
       "the extension is rendered after every comment group");
     const last = all.renders[all.renders.length - 1];
     assert.deepEqual(
@@ -1125,10 +1262,18 @@ async function panelScenarios(browser, host) {
     assert.deepEqual(await q(page, () => window.__q.pressed("Kind")),
       ["Anchored:false", "Discussions:false", "Suggestions:false", "All:true"]);
 
-    /* Status filters comments only; suggestion cards are never hidden by them. */
+    /* Status filters comments only.  Pin the extension's whole shape, not just
+       its existence: a status filter that emptied or hid the suggestion cards
+       inside it would leave the section standing. */
+    const untouched = { text: "every block", children: 1, connected: true };
     for (const label of ["Open", "Resolved", "All"]) {
       assert.equal(await choose(page, "Status", label), true, label);
-      assert.notEqual(await q(page, () => window.__q.extension()), null, `${label} keeps the extension`);
+      assert.deepEqual(await q(page, () => window.__q.extension()), untouched,
+        `${label} leaves the suggestion cards alone`);
+      assert.equal(await q(page, () => {
+        const node = document.querySelector(".doc-panel-extension .doc-suggest-card");
+        return node === null ? null : node.hidden;
+      }), false, `${label} does not hide a suggestion card`);
     }
     assert.deepEqual(await q(page, () => window.__q.pressed("Status")),
       ["Open:false", "Resolved:false", "All:true"]);
@@ -1153,7 +1298,8 @@ async function panelScenarios(browser, host) {
     assert.deepEqual(focused.cards, [T1], "only the named block's comment threads");
     assert.equal(focused.renders.aid, A1, "the renderer is told which block");
     assert.equal(focused.extension.text, `block ${A1}`);
-    assert.equal(focused.order.indexOf("doc-panel-extension") > focused.order.indexOf("doc-comments-group"), true,
+    assert.equal(focused.order.indexOf("doc-comments-group") >= 0, true, "a comment group is present to order against");
+    assert.equal(focused.order.indexOf("doc-panel-extension") > focused.order.lastIndexOf("doc-comments-group"), true,
       "comment threads render above suggestion cards for one block");
 
     /* Any kind click takes the panel back from open(). */
@@ -1196,6 +1342,36 @@ async function panelScenarios(browser, host) {
     assert.equal(await q(page, () => window.__q.visibleCards().length > 0), true);
   });
 
+  /* A renderer that repaints from inside its own repaint must be refused,
+     not recursed until the stack gives out. */
+  await withPage(browser, host, { scripts: RUNTIME_SCRIPTS }, async (page) => {
+    await activate(page, THREADS());
+    await openPanel(page);
+    const registered = await q(page, () => {
+      window.__q.reentered = 0;
+      return window.doc.panel.register("suggestion", function (mount) {
+        window.__q.reentered += 1;
+        window.doc.panel.refresh();
+        mount.appendChild(document.createElement("p"));
+        return undefined;
+      });
+    });
+    assert.equal(registered, true);
+    await settle(page);
+    const nested = await q(page, () => ({
+      reentered: window.__q.reentered,
+      extension: window.__q.extension(),
+      cards: window.__q.visibleCards().length,
+    }));
+    assert.equal(nested.reentered, 1, "the nested repaint was refused rather than recursed");
+    assert.notEqual(nested.extension, null, "the section survives");
+    assert.equal(nested.cards > 0, true, "the comments beside it stay usable");
+    assert.deepEqual(await rejections(page), []);
+    /* And an ordinary repaint from outside still works afterwards. */
+    assert.equal(await q(page, () => window.doc.panel.refresh()), undefined);
+    assert.equal(await q(page, () => window.__q.reentered), 2);
+  });
+
   /* A thenable return is misuse: it is not awaited and the section goes. */
   for (const mode of ["reject", "async"]) {
     await withPage(browser, host, { scripts: RUNTIME_SCRIPTS }, async (page) => {
@@ -1205,6 +1381,8 @@ async function panelScenarios(browser, host) {
       await settle(page);
       assert.equal(await q(page, () => window.__q.extension()), null, `${mode} renderer keeps no section`);
       assert.equal(await q(page, () => window.__q.visibleCards().length > 0), true);
+      assert.deepEqual(await rejections(page), [],
+        `a ${mode} renderer's rejection is contained, not merely unobserved`);
     });
   }
 }
@@ -1226,22 +1404,29 @@ async function barrierScenarios(browser, host) {
 
   /* An absent seam, a non-object seam and a thenable that is not a genuine
      Promise all refresh immediately. */
-  for (const mode of ["absent", "editNotObject", "notPromise"]) {
+  for (const mode of ["absent", "editNotObject", "notPromise", "promiseProto"]) {
     await withPage(browser, host, {
-      scripts: [BASE_SHIM, CLOCK_SHIM, editShim(mode), FETCH_STUB, HELPERS],
+      scripts: [BASE_SHIM, REJECTION_PROBE, CLOCK_SHIM, editShim(mode), FETCH_STUB, HELPERS],
     }, async (page) => {
       await q(page, (threads) => { window.__list = { threads, nextCursor: null }; window.__q.session(); }, THREADS());
       await flush(page);
       assert.equal(await q(page, () => window.__calls.length > 0), true, `${mode} refreshes without waiting`);
       assert.equal(await q(page, () => window.__clock.delays().includes(5500)), false,
         `${mode} arms no barrier guard`);
+      /* A seam that only looks like a Promise must be refused, not awaited and
+         not thrown through: the whole comments read hangs off this call. */
+      assert.equal(await q(page, () => window.__q.states()[Object.keys(window.__q.states())[0]]), "exact",
+        `${mode} still resolves anchors`);
+      assert.deepEqual(await rejections(page), [], `${mode} leaves no unhandled rejection`);
     });
   }
 
-  /* The guard is exactly 5,500 ms and no anchor is resolved before it. */
-  for (const mode of ["never", "resolve", "reject"]) {
+  /* The guard is exactly 5,500 ms and no anchor is resolved before it.  Only
+     the never-settling shape belongs here; a barrier that does settle is
+     released by its settlement, which is a different property, below. */
+  for (const mode of ["never"]) {
     await withPage(browser, host, {
-      scripts: [BASE_SHIM, CLOCK_SHIM, editShim(mode), FETCH_STUB, HELPERS],
+      scripts: [BASE_SHIM, REJECTION_PROBE, CLOCK_SHIM, editShim(mode), FETCH_STUB, HELPERS],
     }, async (page) => {
       await q(page, (threads) => { window.__list = { threads, nextCursor: null }; window.__q.session(); }, THREADS());
       await flush(page);
@@ -1270,18 +1455,24 @@ async function barrierScenarios(browser, host) {
     });
   }
 
-  /* A barrier that settles before the guard is not waited out. */
-  await withPage(browser, host, {
-    scripts: [BASE_SHIM, CLOCK_SHIM, editShim("resolve"), FETCH_STUB, HELPERS],
-  }, async (page) => {
-    await q(page, (threads) => { window.__list = { threads, nextCursor: null }; window.__q.session(); }, THREADS());
-    await flush(page);
-    assert.equal(await q(page, () => window.__calls.length), 0);
-    await q(page, () => { window.__settle(); });
-    await flush(page);
-    assert.equal(await q(page, () => window.__calls.length > 0), true, "settlement releases the read at once");
-    assert.equal(await q(page, () => window.__clock.now), 0, "no clock time was needed");
-  });
+  /* A barrier that settles before the guard is not waited out -- and a
+     *rejected* barrier releases the read exactly like a fulfilled one, with
+     its failure ignored rather than escaping. */
+  for (const mode of ["resolve", "reject"]) {
+    await withPage(browser, host, {
+      scripts: [BASE_SHIM, REJECTION_PROBE, CLOCK_SHIM, editShim(mode), FETCH_STUB, HELPERS],
+    }, async (page) => {
+      await q(page, (threads) => { window.__list = { threads, nextCursor: null }; window.__q.session(); }, THREADS());
+      await flush(page);
+      assert.equal(await q(page, () => window.__calls.length), 0, `${mode}: nothing before settlement`);
+      await q(page, () => { window.__settle(); });
+      await flush(page);
+      assert.equal(await q(page, () => window.__calls.length > 0), true, `${mode}: settlement releases the read at once`);
+      assert.equal(await q(page, () => window.__clock.now), 0, `${mode}: no clock time was needed`);
+      assert.equal((await q(page, () => window.__q.states()))[T1], "exact", `${mode}: anchors resolved`);
+      assert.deepEqual(await rejections(page), [], `${mode}: the barrier's own failure is ignored, not leaked`);
+    });
+  }
 }
 
 /* --- the overlay event -------------------------------------------------- */
@@ -1319,8 +1510,9 @@ async function overlayScenarios(browser, host) {
       await flush(page, 2);
       assert.equal((await q(page, () => window.__q.states()))[T1], "exact", `${name} does no work`);
     }
-    /* A non-string member cannot survive the structured clone that carries a
-       shape across, so it is built in the page instead. */
+    /* Two shapes cannot survive the structured clone that carries a shape
+       across, so they are built in the page instead: a non-string member, and
+       an accessor at the *index* level rather than on `aids` itself. */
     await q(page, () => {
       document.dispatchEvent(new CustomEvent("doc:overlay", {
         detail: Object.freeze({ aids: Object.freeze([1]) }),
@@ -1328,6 +1520,22 @@ async function overlayScenarios(browser, host) {
     });
     await flush(page, 2);
     assert.equal((await q(page, () => window.__q.states()))[T1], "exact", "a non-string aid does no work");
+
+    await q(page, (aid) => {
+      const aids = [];
+      Object.defineProperty(aids, "0", {
+        enumerable: true,
+        configurable: false,
+        get: function () { window.__q.indexCoerced = true; return aid; },
+      });
+      aids.length = 1;
+      document.dispatchEvent(new CustomEvent("doc:overlay", {
+        detail: Object.freeze({ aids: Object.freeze(aids) }),
+      }));
+    }, A1);
+    await flush(page, 2);
+    assert.equal((await q(page, () => window.__q.states()))[T1], "exact", "an indexed accessor does no work");
+    assert.equal(await q(page, () => window.__q.indexCoerced), undefined, "no indexed getter was invoked");
     assert.equal(await q(page, () => window.__q.coerced), undefined, "no getter was invoked");
 
     /* A non-bubbling event on a block never reaches the document listener. */
@@ -1422,10 +1630,49 @@ async function overlayScenarios(browser, host) {
     assert.equal(after.active.id, "doc-comments-close", "panel focus is preserved across the repaint");
   });
 
+  /* Without the Custom Highlight API the client decorates whole blocks with a
+     class instead.  That is a second, independent branch of `paintDecoration`,
+     and an overlay has to repair it exactly like the registries. */
+  await withPage(browser, host, {
+    scripts: [BASE_SHIM, REJECTION_PROBE, "window.Highlight = undefined;", FETCH_STUB, HELPERS],
+  }, async (page) => {
+    await activate(page, THREADS());
+    await openPanel(page);
+    const decorated = () => q(page, () => [].map.call(
+      document.querySelectorAll(".doc-comment-block"), (node) => node.getAttribute("data-aid")).sort());
+
+    assert.equal(await q(page, () => typeof window.Highlight), "undefined",
+      "the Highlight constructor is genuinely absent here");
+    assert.deepEqual(await q(page, () => window.__q.highlights()), { open: 0, active: 0, texts: [] },
+      "nothing was painted into the registries");
+    assert.deepEqual(await decorated(), [A1, A2, A4].sort(), "every open live thread decorates its block");
+
+    /* Move T1: its home block goes and the quote turns up, uniquely, in A5. */
+    await q(page, (aids) => {
+      window.__q.paint(aids[1], "Rollout happens in two stages once the cache key settles.");
+      window.__q.dropBlock(aids[0]);
+      window.__q.overlay({ aids: [aids[1]] });
+    }, [A1, A5]);
+    await flush(page, 2);
+    assert.equal((await q(page, () => window.__q.states()))[T1], "Moved from its original block");
+    assert.deepEqual(await decorated(), [A2, A4, A5].sort(),
+      "the fallback follows the repaired anchors instead of stranding a class");
+
+    /* Orphan it: no block may keep a stale decoration. */
+    await q(page, (aid) => {
+      window.__q.paint(aid, "Rollout happens in two stages.");
+      window.__q.overlay({ aids: [aid] });
+    }, A5);
+    await flush(page, 2);
+    assert.equal((await q(page, () => window.__q.states()))[T1], "Not attached any more");
+    assert.deepEqual(await decorated(), [A2, A4].sort(), "an orphaned thread decorates nothing");
+    assert.deepEqual(await rejections(page), []);
+  });
+
   /* Bounds and coalescing, on a document with enough named blocks to reach
      them honestly. */
   await withPage(browser, host, { scripts: RUNTIME_SCRIPTS }, async (page) => {
-    await addSyntheticBlocks(page, 60);
+    await addSyntheticBlocks(page, 61);
     const threads = [
       fixtureThread(T1, quote(SYNTH(0), "quote number 0", "holds ", " here.", 20)),
       fixtureThread(T2, quote(SYNTH(50), "quote number 50", "holds ", " here.", 20)),
@@ -1435,6 +1682,8 @@ async function overlayScenarios(browser, host) {
     await openPanel(page);
     assert.deepEqual(await q(page, () => window.__q.states()), { [T1]: "exact", [T2]: "exact", [T3]: "exact" });
 
+    /* All 61 exist, so the two over-bound cases are refused by the bound and
+       not incidentally by an unknown aid. */
     const aids = Array.from({ length: 61 }, (unused, index) => SYNTH(index));
     await q(page, (list) => {
       for (const aid of list) window.__q.paint(aid, "Synthetic block now holds nothing nameable.");
@@ -1600,8 +1849,11 @@ async function browserMatrix() {
       assert.equal(geometry.overflow, true, "the extension does not force the panel to scroll sideways");
 
       await page.keyboard.press("Tab");
-      assert.equal(await q(page, () => document.activeElement !== document.body), true,
-        "the panel keeps keyboard focus after the extension rendered");
+      assert.equal(
+        await q(page, () => document.getElementById("doc-comments-panel").contains(document.activeElement)),
+        true,
+        "the panel keeps keyboard focus after the extension rendered",
+      );
       await page.keyboard.press("Escape");
       assert.equal(await q(page, () => document.getElementById("doc-comments-panel").hidden), true,
         "Escape still closes the panel");
@@ -1612,7 +1864,12 @@ async function browserMatrix() {
        inside the page; P3-C's narrow layout drops the rail entirely, and the
        panel with the extension in it has to carry the reader instead. */
     const environments = [
-      ["200% zoom", { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 }, true],
+      /* Browser zoom shrinks the CSS viewport, it does not change the device
+         pixel ratio: 200% on an ordinary 1280-pixel window is 640 CSS pixels,
+         which is inside P3-C's narrow layout.  The separate 2x entry keeps the
+         device-pixel-ratio case honest at a width that still has a rail. */
+      ["200% zoom", { viewport: { width: 640, height: 360 }, deviceScaleFactor: 2 }, false],
+      ["2x device pixels", { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 }, true],
       ["narrow", { viewport: { width: 360, height: 720 } }, false],
       ["light", { colorScheme: "light" }, true],
       ["dark", { colorScheme: "dark" }, true],
@@ -1656,6 +1913,7 @@ async function browserMatrix() {
         if (!railed) {
           assert.equal(view.railDisplay, "none", `${name}: P3-C's narrow layout drops the rail`);
           await openPanel(page);
+          assert.deepEqual(await rejections(page), []);
           const panelled = await q(page, () => ({
             cards: window.__q.visibleCards().length,
             extension: window.__q.extension(),
@@ -1675,6 +1933,23 @@ async function browserMatrix() {
           assert.equal(view.borderWidth, "1px", "forced colours keeps a visible border");
         } else {
           assert.equal(view.distinct, true, `${name}: the kinds differ in ordinary colour`);
+        }
+        if (name === "reduced motion") {
+          await openPanel(page);
+          const still = await q(page, () => {
+            const read = (node) => {
+              const style = getComputedStyle(node);
+              return [style.animationDuration, style.transitionDuration];
+            };
+            return {
+              marker: read(document.querySelector(".doc-rail-suggestion")),
+              panel: read(document.getElementById("doc-comments-panel")),
+              extension: read(document.querySelector(".doc-panel-extension")),
+            };
+          });
+          for (const [where, pair] of Object.entries(still)) {
+            assert.deepEqual(pair, ["0s", "0s"], `reduced motion: ${where} animates nothing`);
+          }
         }
       });
     }
@@ -1747,6 +2022,8 @@ function worker(run) {
 const MODE = process.argv[2];
 if (MODE === "--probe-signal") probeSignal();
 else if (MODE === "--probe-hang") probeHang();
+else if (MODE === "--probe-stubborn") probeStubborn();
+else if (MODE === "--probe-forward") worker(() => probeForward(SELF));
 else if (MODE === "--runtime") worker(runtimeMatrix);
 else if (MODE === "--browser") worker(browserMatrix);
 else if (MODE === undefined) worker(() => supervise(SELF));
