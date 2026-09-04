@@ -600,11 +600,11 @@ function collectPage(page, parsed, project, duplicateCode) {
     if (typeof key !== "string" || KEY_ENCODER.encode(key).length > MAX_KEY_BYTES) {
       throw unavailable();
     }
-    if (parsed.size >= MAX_KEYS && !parsed.has(key)) {
-      throw unavailable();
-    }
     if (parsed.has(key)) {
       throw new RetentionError(duplicateCode);
+    }
+    if (parsed.size >= MAX_KEYS) {
+      throw unavailable();
     }
     parsed.set(key, project(key));
   }
@@ -648,7 +648,11 @@ function sweepSeam(options) {
 }
 
 /**
- * Delete one key, mapping any provider rejection onto the one store error.
+ * Delete one key, mapping provider rejections onto the one store error while
+ * preserving an assertion raised by an injected store. The latter is a
+ * programmer error (and, for invitations, proves the delete crossed its lease
+ * boundary), so reporting it as provider unavailability would hide the broken
+ * invariant that needs fixing.
  *
  * No retry and no transaction: Blobs has neither. Earlier deletes stay
  * committed and tomorrow's run continues from what survives.
@@ -660,7 +664,16 @@ function sweepSeam(options) {
 async function deleteKey(store, key) {
   try {
     await store.delete(key);
-  } catch {
+  } catch (error) {
+    const name = error === null || typeof error !== "object"
+      ? undefined
+      : Object.getOwnPropertyDescriptor(error, "name")?.value;
+    const code = error === null || typeof error !== "object"
+      ? undefined
+      : Object.getOwnPropertyDescriptor(error, "code")?.value;
+    if (name === "AssertionError" && code === "ERR_ASSERTION") {
+      throw error;
+    }
     throw unavailable();
   }
 }
@@ -724,9 +737,6 @@ export async function sweepEvents(options) {
     const ts = Date.parse(event.ts);
     if (ts !== candidate.idMs) {
       throw new RetentionError("invalid-event-key");
-    }
-    if (ts >= cutoffMs) {
-      continue;
     }
     if (DURABLE_EVENT_KINDS.includes(event.kind)) {
       retained += 1;

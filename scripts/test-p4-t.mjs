@@ -197,8 +197,12 @@ async function runtimeMatrix(file, source) {
     invitation: new Error("invitation validator fixture failure"),
   };
   const deleteFailure = new Error("delete fixture failure");
+  const leaseBoundaryAssertion = new assert.AssertionError({
+    message: "invitation delete crossed its held lease",
+  });
   const failValidation = { event: false, suggestion: false, invitationCall: 0 };
   let deleteFailurePrefix = "";
+  let deleteAssertionPrefix = "";
   let invitationValidationCalls = 0;
   let leaseMode = "acquire";
   let beforeLeaseRun = null;
@@ -246,6 +250,9 @@ async function runtimeMatrix(file, source) {
       }
       if (deleteFailurePrefix && k.startsWith(deleteFailurePrefix)) {
         throw deleteFailure;
+      }
+      if (deleteAssertionPrefix && k.startsWith(deleteAssertionPrefix)) {
+        throw leaseBoundaryAssertion;
       }
       deleted.push(k);
       records.delete(k);
@@ -615,6 +622,22 @@ async function runtimeMatrix(file, source) {
   );
   assert.deepEqual(deleted, []);
   failValidation.invitationCall = 0;
+
+  // A lease-boundary assertion is a programmer error, not a provider outage.
+  // Preserve its identity so a misplaced invitation delete fails with the
+  // invariant's useful message rather than a misleading StoreError.
+  installRace();
+  deleteAssertionPrefix = "access/";
+  {
+    const before = storeErrorCalls.length;
+    await assert.rejects(
+      () => mod.namespace.sweepInvitations({ store, nowMs: now }),
+      (error) => error === leaseBoundaryAssertion,
+    );
+    assert.equal(storeErrorCalls.length, before);
+  }
+  assert.deepEqual(deleted, []);
+  deleteAssertionPrefix = "";
 
   // --- provider delete failure maps to one store error --------------------
   const expectDeleteFailure = async (run) => {
