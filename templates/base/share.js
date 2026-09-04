@@ -494,7 +494,6 @@ function mountSharePanel(event) {
     invoker = null;
   }
 
-
   /* ------------------------------------------------------------------ *
    * P4-L — owner-only controls and the single serialized write path.
    * ------------------------------------------------------------------ */
@@ -739,8 +738,14 @@ function mountSharePanel(event) {
     });
     cancel.addEventListener("click", () => clearConfirmation(true));
     group.append(confirm, cancel);
-    confirmation = { group, initiator, controls };
-    for (const node of controls.querySelectorAll(".share-op")) node.disabled = true;
+    /* The row's own disabled state is remembered, not assumed: cancelling
+       must not enable a Save button an unchanged select never justified. */
+    const held = new Set();
+    for (const node of controls.querySelectorAll(".share-op")) {
+      if (node.disabled) held.add(node);
+      node.disabled = true;
+    }
+    confirmation = { group, initiator, controls, held };
     row.appendChild(group);
     confirm.focus();
   }
@@ -751,7 +756,7 @@ function mountSharePanel(event) {
     confirmation = null;
     open.group.remove();
     if (open.controls !== null && !busy && open.controls.isConnected) {
-      for (const node of open.controls.querySelectorAll(".share-op")) node.disabled = false;
+      for (const node of open.controls.querySelectorAll(".share-op")) node.disabled = open.held.has(node);
     }
     if (restoreFocus && open.initiator !== null && open.initiator.isConnected) open.initiator.focus();
   }

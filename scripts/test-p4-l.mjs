@@ -949,10 +949,16 @@ async function p4lMatrix() {
       await click(page, "#doc-share-panel .share-members li:nth-of-type(3) .share-transfer");
       state = await probe(page);
       assert.equal(state.confirmations, 1, "only one confirmation may exist");
-      const restored = await page.evaluate((selector) =>
-        Array.from(document.querySelectorAll(`${selector} .share-row-controls .share-op`)).some((node) => node.disabled),
-      MEMBER_ROW);
-      assert.equal(restored, false, "the replaced row is restored");
+      /* Restoring a row is not the same as enabling it: the Save button an
+         unchanged select left disabled must stay disabled. */
+      const restored = await page.evaluate((selector) => ({
+        select: document.querySelector(`${selector} .share-role`).disabled,
+        save: document.querySelector(`${selector} .share-save-role`).disabled,
+        revoke: document.querySelector(`${selector} .share-revoke`).disabled,
+        transfer: document.querySelector(`${selector} .share-transfer`).disabled,
+      }), MEMBER_ROW);
+      assert.deepEqual(restored, { select: false, save: true, revoke: false, transfer: false },
+        "the replaced row is restored to the state the roster justified");
 
       await click(page, "#doc-share-panel .share-transfer-no");
       state = await probe(page);
