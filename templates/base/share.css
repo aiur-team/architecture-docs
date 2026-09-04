@@ -1,0 +1,147 @@
+.share-btn {
+  flex: none;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: .7rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.share-btn[aria-expanded="true"] {
+  color: var(--surface, #fff);
+  background: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-btn:focus-visible,
+.share-close:focus-visible {
+  outline: 2px solid var(--accent, #c0122a);
+  outline-offset: 2px;
+}
+
+.share-pop {
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 50;
+  width: min(24rem, calc(100vw - 1rem));
+  max-width: min(24rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+  padding: 1rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .75rem;
+  box-shadow: var(--shadow, 0 8px 24px rgba(20, 24, 30, .12));
+}
+
+.share-pop[hidden] {
+  display: none;
+}
+
+.share-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.share-head h2 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.share-close {
+  flex: none;
+  padding: .35rem .6rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface-2, #eef1f4);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .4rem;
+  cursor: pointer;
+  font: 600 .75rem/1.2 var(--sans, system-ui, sans-serif);
+}
+
+.share-close:hover {
+  color: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-status,
+.share-default {
+  margin: .75rem 0 0;
+  font-size: .88rem;
+  overflow-wrap: anywhere;
+}
+
+.share-status {
+  color: var(--ink-3, #7a8492);
+}
+
+.share-members,
+.share-invitations {
+  margin-top: 1rem;
+}
+
+.share-members h3,
+.share-invitations h3 {
+  margin: 0 0 .45rem;
+  font-size: .85rem;
+  overflow-wrap: anywhere;
+}
+
+.share-list {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-list li {
+  margin: 0;
+  padding: .5rem 0;
+  border-top: 1px solid var(--border, #e2e6eb);
+  font-size: .82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.share-value {
+  unicode-bidi: isolate;
+}
+
+@media (forced-colors: active) {
+  .share-btn,
+  .share-pop,
+  .share-close {
+    border: 1px solid CanvasText;
+  }
+
+  .share-btn:focus-visible,
+  .share-close:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+@media (max-width: 640px) {
+  .share-pop {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .share-pop,
+  .share-pop * {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media print {
+  .share-btn,
+  .share-pop {
+    display: none !important;
+  }
+}
