@@ -382,6 +382,14 @@ function installEdit() {
 
   let claimedAid = null;
 
+  /* The block whose editor is currently open, and how to re-announce it. A
+     `pagehide` releases the claim without closing the editor, so a BFCache
+     restore comes back to a live `contenteditable` whose claim is gone: the
+     heartbeat would say `reading` while the reader is still typing, and a peer
+     claim on that block would no longer be excluded from the editing host.
+     Re-running the claim edge on restore is what keeps the two in step. */
+  let activeEditor = null;
+
   function ignore() {}
 
   function realtimeSurface() {
@@ -454,6 +462,18 @@ function installEdit() {
   // release before the bye. No `unload` or `beforeunload` listener is added.
   try {
     window.addEventListener("pagehide", () => releaseBlock(null));
+    // The mirror of that release. Only a genuine BFCache restore re-claims: a
+    // normal navigation builds a fresh page whose editors are all closed.
+    window.addEventListener("pageshow", (event) => {
+      let persisted = false;
+      try {
+        persisted = event.persisted === true;
+      } catch (error) {
+        return;
+      }
+      if (!persisted || activeEditor === null || claimedAid !== null) return;
+      claimBlock(activeEditor);
+    });
   } catch (error) {
     // A host without the page lifecycle simply never fires it.
   }
@@ -523,6 +543,7 @@ function installEdit() {
       // Before the save request, the restore, or the programmatic blur: peers
       // learn this block is free ahead of any write or navigation work.
       releaseBlock(aid);
+      if (activeEditor === aid) activeEditor = null;
       editing = false;
       element.removeAttribute("contenteditable");
       element.classList.remove(EDITING_CLASS);
@@ -550,6 +571,10 @@ function installEdit() {
       // reader typed: discarding their text and calling it a failed save
       // would lose work this block never even tried to send.
       if (saving) {
+        // The reader has already left this editor, so peers must not keep
+        // seeing it claimed while another block finishes its request. The
+        // text stays put; focusing the retry editor publishes a fresh claim.
+        releaseBlock(aid);
         setStatus(BUSY_MESSAGE);
         return;
       }
@@ -631,7 +656,20 @@ function installEdit() {
       if (event.key === "Escape") {
         event.preventDefault();
         cancel();
-        button.focus();
+        // `cancel()` releases synchronously, so a peer claim that presence was
+        // holding back for this block can appear and hide this very button
+        // before the focus call. Focusing a hidden element silently does
+        // nothing and strands the reader on `body`, so fall back to the
+        // controls wrapper, which is always still there.
+        try {
+          if (!button.hasAttribute("hidden")) button.focus();
+          else {
+            controls.setAttribute("tabindex", "-1");
+            controls.focus();
+          }
+        } catch (error) {
+          // A host without focus management leaves the caret where it was.
+        }
         return;
       }
       if (event.key !== "Enter") return;
@@ -661,6 +699,7 @@ function installEdit() {
       element.classList.add(EDITING_CLASS);
       controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
       editing = true;
+      activeEditor = aid;
       claimBlock(aid);
       element.addEventListener("keydown", onKeyDown);
       element.addEventListener("paste", onPaste);

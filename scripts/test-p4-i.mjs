@@ -193,10 +193,16 @@ async function supervise() {
       const workerRoot = join(root, mode.slice(2));
       mkdirSync(workerRoot, { mode: 0o700 });
       const result = await runChild([mode], WORKER_DEADLINE_MS, { P4I_ROOT: workerRoot }, ROOT);
-      if (result.code !== 0 || result.stderr !== "") {
+      // A passing matrix worker is silent on both streams. Gating on stdout
+      // too is what makes the "no console output" criterion enforceable:
+      // without it, a stray console.log -- including one leaking a client ID
+      // -- would print a PASS line and exit 0.
+      if (result.code !== 0 || result.stderr !== "" || result.stdout !== "") {
         process.stderr.write(result.stdout);
         process.stderr.write(result.stderr);
-        throw new Error(`${mode} worker exited ${result.code}`);
+        throw new Error(result.code === 0 && result.stderr === ""
+          ? `${mode} worker wrote to stdout`
+          : `${mode} worker exited ${result.code}`);
       }
       ok(groupIsGone(result.pid), `${mode} worker process group reaped`);
       process.stdout.write(`${line}\n`);
@@ -614,6 +620,13 @@ const PEERS = [
   { id: "c_nolan_03", label: "Cy Nolan" },
 ];
 
+// P3-F publishes over REST and subscribes to the same channel, so every
+// message this tab sends comes back to it as an ordinary client projection.
+// Presence never learns its own client id, so on the wire this is
+// indistinguishable from a peer -- which is exactly why the self-echo cases
+// below matter. `SELF` stands in for this tab's own token-bound client id.
+const SELF = { id: "c_self_00", label: "Local Reader" };
+
 /**
  * One closed page running both real modules in P1-B's order, with P3-F's
  * transport installed between them exactly as the generated document does.
@@ -699,6 +712,11 @@ function makePage(options = {}) {
 
   addBlock(main, AID_A, true);
   addBlock(main, AID_B, true);
+
+  // Extra editable blocks so the 200-key cap can be counted one chip per key.
+  for (let index = 0; index < (options.blockCount ?? 0); index += 1) {
+    addBlock(main, `a5${String(index).padStart(7, "0")}`, true);
+  }
 
   const openDetails = new El(document, "details");
   openDetails.open = true;
@@ -1306,22 +1324,52 @@ async function runtimeMatrix() {
   }
 
   {
+    // The cap admits exactly 200 keys and not one more. The map is private, so
+    // its size is counted through the render path: every filler is rostered on
+    // its own block, which turns one accepted key into exactly one chip.
+    const page = await startPage({ blockCount: 201 });
+    const fillerAid = (index) => `a5${String(index).padStart(7, "0")}`;
+    const chipCount = () =>
+      page.document.documentElement.querySelectorAll("span.doc-edit-claim").length;
+
+    for (let index = 0; index < 199; index += 1) {
+      beatFrom(page, { id: `c_filler_${index}`, label: `Filler ${index}` });
+      claimFrom(page, { id: `c_filler_${index}` }, fillerAid(index));
+    }
+    eq(chipCount(), 199, "199 distinct claimants render 199 chips");
+
+    // The 200th is still accepted -- this is what pins the cap from below.
+    beatFrom(page, { id: "c_filler_199", label: "Filler 199" });
+    claimFrom(page, { id: "c_filler_199" }, fillerAid(199));
+    eq(chipCount(), 200, "the 200th claimant is accepted at the cap");
+
+    // The 201st is not, and nothing is evicted to make room for it.
+    beatFrom(page, { id: "c_filler_200", label: "Filler 200" });
+    claimFrom(page, { id: "c_filler_200" }, fillerAid(200));
+    eq(chipCount(), 200, "the 201st claimant is dropped and evicts nothing");
+    eq(chipFor(page, fillerAid(200)), null, "the dropped claimant renders no chip");
+    ok(chipFor(page, fillerAid(0)) !== null, "the first claimant is not evicted");
+  }
+
+  {
     // The unconditional 200-key cap.
     const page = await startPage();
     for (let index = 0; index < 200; index += 1) {
       claimFrom(page, { id: `c_filler_${index}` }, AID_A);
     }
-    const claimed = page.sandbox; // the map is private; observe through behaviour
-    ok(claimed !== null, "the claim map is private to presence.js");
 
-    // An unrostered previously unseen claimant is dropped at the cap.
-    claimFrom(page, { id: "c_unrostered_x" }, AID_B);
-    eq(chipFor(page, AID_B), null, "an unrostered claimant is dropped at the cap");
-    // A rostered previously unseen claimant is dropped at the cap too.
+    // A rostered previously unseen claimant is dropped at the cap. This is
+    // asserted FIRST and against a rendering claimant, because it is the only
+    // observable that distinguishes `size >= 200` from `size > 200`: a later
+    // claimant would silently spend the off-by-one and mask the mutation.
     const [avery] = PEERS;
     beatFrom(page, avery);
     claimFrom(page, avery, AID_B);
     eq(chipFor(page, AID_B), null, "a rostered but previously unseen claimant is dropped at the cap");
+    // An unrostered previously unseen claimant is dropped at the cap too.
+    claimFrom(page, { id: "c_unrostered_x" }, AID_B);
+    beatFrom(page, { id: "c_unrostered_x", label: "Unrostered" });
+    eq(chipFor(page, AID_B), null, "an unrostered claimant is dropped at the cap");
     // A client that already holds a key may still move it.
     beatFrom(page, { id: "c_filler_0", label: "Avery Quill" });
     claimFrom(page, { id: "c_filler_0" }, AID_B);
@@ -1379,6 +1427,12 @@ async function runtimeMatrix() {
       detail: page.frozen({ source: "client", t: "bye", clientId: avery.id }),
     });
     eq(chipFor(page, AID_A), null, "a bye removes the claim with the roster row");
+    // The bye deleted the claim itself, not merely the roster row that was
+    // rendering it: a later beat from the same client must not resurrect it.
+    beatFrom(page, avery);
+    eq(chipFor(page, AID_A), null, "a beat after a bye cannot resurrect the claim");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "a beat after a bye leaves the direct Edit button alone");
     eq(buttonFor(page, AID_A).hasAttribute("hidden"), false, "a bye restores the direct Edit button");
   }
 
@@ -1458,20 +1512,220 @@ async function runtimeMatrix() {
   }
 
   {
+    // An ambiguous controls wrapper names no single direct Edit button, so it
+    // renders nothing and -- more importantly -- hides nothing.
+    const page = await startPage();
+    const [avery] = PEERS;
+    beatFrom(page, avery);
+    const controls = controlsFor(page, AID_B);
+    const intruder = new El(page.document, "button");
+    intruder.className = "doc-edit-button";
+    controls.appendChild(intruder);
+
+    claimFrom(page, avery, AID_B);
+    eq(chipFor(page, AID_B), null, "a two-button controls wrapper renders no chip");
+    eq(buttonFor(page, AID_B).hasAttribute("hidden"), false,
+      "a two-button controls wrapper hides no button");
+    eq(intruder.hasAttribute("hidden"), false, "the ambiguous second button is untouched");
+
+    // Removing the ambiguity makes the block renderable again. The claim is
+    // re-announced because an identical repeat is deduped rather than repainted.
+    intruder.remove();
+    claimFrom(page, avery, AID_B, "edit.release");
+    claimFrom(page, avery, AID_B);
+    ok(chipFor(page, AID_B) !== null, "an unambiguous wrapper renders the claim");
+  }
+
+  {
+    // A block detached AFTER it was indexed: the isConnected guard, not the
+    // missing-from-index short circuit, is what has to catch this one.
+    const page = await startPage();
+    const [avery] = PEERS;
+    beatFrom(page, avery);
+    // The block stays in the tree -- and therefore in the freshly built index
+    // -- but reports itself detached, which is the only way to reach the
+    // isConnected guard rather than the missing-from-index short circuit.
+    const block = page.blocks.get(AID_A);
+    Object.defineProperty(block, "isConnected", { value: false, configurable: true });
+
+    claimFrom(page, avery, AID_A);
+    eq(chipFor(page, AID_A), null, "a block detached after indexing renders no chip");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "a block detached after indexing hides no button");
+
+    delete block.isConnected;
+    claimFrom(page, avery, AID_A, "edit.release");
+    claimFrom(page, avery, AID_A);
+    ok(chipFor(page, AID_A) !== null, "a reconnected block renders the claim");
+  }
+
+  {
     // The local editing host keeps its own P4-B controls.
     const page = await startPage();
     const [avery] = PEERS;
     beatFrom(page, avery);
+    beatFrom(page, SELF);
     clickEdit(page, AID_A);
+    // What the wire actually delivers: this tab's own claim echoes back first,
+    // because it published before any peer could react to it. Then a genuine
+    // peer claims the same block.
+    claimFrom(page, SELF, AID_A);
     claimFrom(page, avery, AID_A);
     eq(chipFor(page, AID_A), null, "no chip is inserted into the block being edited locally");
     eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
       "the local editing host keeps its P4-B button state");
 
     page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
-    ok(chipFor(page, AID_A) !== null, "the held claim appears once local editing ends");
+    const held = chipFor(page, AID_A);
+    ok(held !== null, "the held claim appears once local editing ends");
+    // The self echo is dropped on release, so only the real peer is named --
+    // never the local reader, and never a count of two.
+    eq(held.textContent, "Avery Quill is editing",
+      "the tab's own echoed claim never joins the chip");
     eq(buttonFor(page, AID_A).hasAttribute("hidden"), true,
       "the held claim hides the button once local editing ends");
+  }
+
+  {
+    // The self-echo on its own must never decorate anything. This is the
+    // permanent-lockout case: if the release publish never lands there is no
+    // retry, and the tab's own echoed beats keep renewing its own roster row,
+    // so the lease sweep would never expire the claim either.
+    const page = await startPage();
+    beatFrom(page, SELF);
+    clickEdit(page, AID_A);
+    claimFrom(page, SELF, AID_A);
+    page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
+    eq(chipFor(page, AID_A), null, "the tab's own echoed claim renders no chip");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "the tab never hides its own Edit button");
+
+    // ... and it stays gone across the lease it would otherwise have ridden.
+    page.clock.advance(54999);
+    eq(chipFor(page, AID_A), null, "the self claim does not reappear after a sweep");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "the tab's own Edit button survives the lease window");
+
+    // The retry editor is reachable, which is what the acceptance criterion
+    // "focusing the retry editor publishes a new claim" actually requires.
+    const before = page.published.length;
+    clickEdit(page, AID_A);
+    eq(page.published.slice(before).map((event) => event.t).join(","), "edit.claim",
+      "the retry editor publishes a fresh claim");
+  }
+
+  {
+    // The finish sequence captures and clears the aid BEFORE its side effects,
+    // which is the whole reentrancy defence. A listener that finishes again
+    // from inside the synchronous reading/null dispatch must publish nothing.
+    const page = await startPage();
+    clickEdit(page, AID_A);
+    const before = page.published.length;
+    const states = page.editStates().length;
+    let reentered = false;
+    const reenter = (event) => {
+      if (reentered || event.detail.aid !== null) return;
+      reentered = true;
+      page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
+    };
+    page.document.addEventListener("doc:edit-state", reenter);
+    page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
+    page.document.removeEventListener("doc:edit-state", reenter);
+
+    ok(reentered, "the reentrant finish actually ran");
+    eq(page.published.slice(before).map((event) => `${event.t}/${event.aid}`).join(","),
+      `edit.release/${AID_A}`,
+      "a finish reentered from its own dispatch publishes exactly one release");
+    eq(page.editStates().length, states + 1,
+      "a finish reentered from its own dispatch dispatches exactly one state");
+  }
+
+  {
+    // A suggestion draft is not a direct edit: focusing one publishes no claim
+    // and never flips the heartbeat to editing. P4-P reuses this lifecycle for
+    // its direct Edit path only, and this is the negative test that pins it.
+    const page = await startPage();
+    const before = page.published.length;
+    const states = page.editStates().length;
+    const block = page.blocks.get(AID_A);
+    // Editable focus reached without going through P4-B's direct Edit button.
+    block.dispatchEvent(makeEvent("focus"));
+    block.dispatchEvent(makeEvent("focusin"));
+    eq(page.published.length, before, "a suggestion-style focus publishes nothing");
+    eq(page.editStates().length, states, "a suggestion-style focus dispatches no local state");
+
+    page.clock.advance(20000);
+    const beats = page.published.filter((event) => event.t === "beat");
+    eq(beats.filter((beat) => beat.act !== "reading").length, 0,
+      "a suggestion-style focus never changes the heartbeat to editing");
+  }
+
+  {
+    // A blur while another block is mid-save still runs the finish sequence.
+    // save() returns at the busy guard before stopEditing(), so this is the
+    // one enumerated finish trigger that could be skipped entirely.
+    // A request that never settles keeps the module-level `saving` flag set.
+    const page = await startPage({
+      responder: (url) => (url.includes("/api/edit")
+        ? new Promise(() => {})
+        : { status: 200, body: {} }),
+    });
+    // Both editors are opened before either saves: `editing` is per block,
+    // so B is still open when A's request takes the save slot.
+    clickEdit(page, AID_A);
+    clickEdit(page, AID_B);
+    page.blocks.get(AID_A).textContent = "first edit";
+    page.blocks.get(AID_A).dispatchEvent(makeEvent("blur"));
+
+    page.blocks.get(AID_B).textContent = "second edit";
+    const before = page.published.length;
+    const states = page.editStates().length;
+    page.blocks.get(AID_B).dispatchEvent(makeEvent("blur"));
+    eq(page.published.slice(before).map((event) => `${event.t}/${event.aid}`).join(","),
+      `edit.release/${AID_B}`,
+      "a blur during a concurrent save still publishes its release");
+    eq(page.editStates().length, states + 1,
+      "a blur during a concurrent save still dispatches reading/null");
+  }
+
+  {
+    // A BFCache restore comes back to a live editor. Without a re-claim the
+    // heartbeat would report reading while the reader is still typing, and the
+    // local-active exclusion protecting the editing host would be gone.
+    const page = await startPage();
+    clickEdit(page, AID_A);
+    firePageHide(page);
+    const before = page.published.length;
+    firePageShow(page, true);
+    const restored = page.published.slice(before);
+    eq(restored.filter((event) => event.t.startsWith("edit."))
+      .map((event) => `${event.t}/${event.aid}`).join(","),
+      `edit.claim/${AID_A}`,
+      "a BFCache restore re-claims the still-open editor");
+    // The re-claim lands before presence un-suspends, so the restored beat has
+    // to carry the aid -- otherwise peers are told the reader went idle.
+    eq(restored.filter((event) => event.t === "beat")
+      .map((event) => `${event.act}/${event.aid}`).join(","),
+      `editing/${AID_A}`,
+      "the restored heartbeat still reports the open editor");
+
+    const [avery] = PEERS;
+    beatFrom(page, avery);
+    claimFrom(page, avery, AID_A);
+    eq(chipFor(page, AID_A), null,
+      "a restored editor is still excluded from the chip");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "a restored editor keeps its own button state");
+  }
+
+  {
+    // A normal navigation is not a restore, so nothing is re-claimed.
+    const page = await startPage();
+    clickEdit(page, AID_A);
+    firePageHide(page);
+    const before = page.published.length;
+    firePageShow(page, false);
+    eq(page.published.length, before, "a non-persisted pageshow re-claims nothing");
   }
 
   {
@@ -1509,10 +1763,24 @@ async function runtimeMatrix() {
 
     firePageShow(page, true);
     eq(chipFor(page, AID_A), null, "a BFCache restore starts with no stale claim");
-    claimFrom(page, avery, AID_A);
-    eq(chipFor(page, AID_A), null, "the restored tab has no roster row for the claimant yet");
+    // The map was cleared, not just the chips: a beat alone -- with no fresh
+    // claim -- must not repaint a lock the peer already gave up.
     beatFrom(page, avery);
-    ok(chipFor(page, AID_A) !== null, "a fresh beat after restore makes the claim visible again");
+    eq(chipFor(page, AID_A), null, "a beat after restore cannot revive a cleared claim");
+    eq(buttonFor(page, AID_A).hasAttribute("hidden"), false,
+      "a beat after restore leaves the direct Edit button alone");
+
+    // A second peer proves the roster is empty after the restore too: the
+    // claim is retained but invisible until that client's own beat lands.
+    const bo = PEERS[1];
+    claimFrom(page, bo, AID_B);
+    eq(chipFor(page, AID_B), null, "the restored tab has no roster row for the claimant yet");
+    beatFrom(page, bo);
+    ok(chipFor(page, AID_B) !== null, "a fresh beat after restore makes the claim visible again");
+
+    // And a genuinely fresh claim from the original peer renders normally.
+    claimFrom(page, avery, AID_A);
+    ok(chipFor(page, AID_A) !== null, "a fresh claim after restore renders again");
   }
 
   {
@@ -1587,7 +1855,10 @@ async function runtimeMatrix() {
       "the conflict repaints the server's current text");
   }
 
-  ok(checks > 150, `the runtime matrix ran ${checks} checks`);
+  // Sits just under the real count so deleting assertions is what trips it.
+  // Raise it deliberately when the matrix grows; a floor far below the actual
+  // count cannot detect a regression that removes half the cases.
+  ok(checks >= 380, `the runtime matrix ran ${checks} checks`);
 }
 
 /* ========================================================================= */
@@ -1678,7 +1949,7 @@ async function renderedMatrix() {
   eq(block.getAttribute("data-md"), "Held by the first writer.",
     "the forced write repaints the authoritative text");
 
-  ok(checks > 20, `the rendered matrix ran ${checks} checks`);
+  ok(checks >= 21, `the rendered matrix ran ${checks} checks`);
 }
 
 /* ========================================================================= */

@@ -1858,6 +1858,14 @@ function installEdit() {
 
   let claimedAid = null;
 
+  /* The block whose editor is currently open, and how to re-announce it. A
+     `pagehide` releases the claim without closing the editor, so a BFCache
+     restore comes back to a live `contenteditable` whose claim is gone: the
+     heartbeat would say `reading` while the reader is still typing, and a peer
+     claim on that block would no longer be excluded from the editing host.
+     Re-running the claim edge on restore is what keeps the two in step. */
+  let activeEditor = null;
+
   function ignore() {}
 
   function realtimeSurface() {
@@ -1930,6 +1938,18 @@ function installEdit() {
   // release before the bye. No `unload` or `beforeunload` listener is added.
   try {
     window.addEventListener("pagehide", () => releaseBlock(null));
+    // The mirror of that release. Only a genuine BFCache restore re-claims: a
+    // normal navigation builds a fresh page whose editors are all closed.
+    window.addEventListener("pageshow", (event) => {
+      let persisted = false;
+      try {
+        persisted = event.persisted === true;
+      } catch (error) {
+        return;
+      }
+      if (!persisted || activeEditor === null || claimedAid !== null) return;
+      claimBlock(activeEditor);
+    });
   } catch (error) {
     // A host without the page lifecycle simply never fires it.
   }
@@ -1999,6 +2019,7 @@ function installEdit() {
       // Before the save request, the restore, or the programmatic blur: peers
       // learn this block is free ahead of any write or navigation work.
       releaseBlock(aid);
+      if (activeEditor === aid) activeEditor = null;
       editing = false;
       element.removeAttribute("contenteditable");
       element.classList.remove(EDITING_CLASS);
@@ -2026,6 +2047,10 @@ function installEdit() {
       // reader typed: discarding their text and calling it a failed save
       // would lose work this block never even tried to send.
       if (saving) {
+        // The reader has already left this editor, so peers must not keep
+        // seeing it claimed while another block finishes its request. The
+        // text stays put; focusing the retry editor publishes a fresh claim.
+        releaseBlock(aid);
         setStatus(BUSY_MESSAGE);
         return;
       }
@@ -2107,7 +2132,20 @@ function installEdit() {
       if (event.key === "Escape") {
         event.preventDefault();
         cancel();
-        button.focus();
+        // `cancel()` releases synchronously, so a peer claim that presence was
+        // holding back for this block can appear and hide this very button
+        // before the focus call. Focusing a hidden element silently does
+        // nothing and strands the reader on `body`, so fall back to the
+        // controls wrapper, which is always still there.
+        try {
+          if (!button.hasAttribute("hidden")) button.focus();
+          else {
+            controls.setAttribute("tabindex", "-1");
+            controls.focus();
+          }
+        } catch (error) {
+          // A host without focus management leaves the caret where it was.
+        }
         return;
       }
       if (event.key !== "Enter") return;
@@ -2137,6 +2175,7 @@ function installEdit() {
       element.classList.add(EDITING_CLASS);
       controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
       editing = true;
+      activeEditor = aid;
       claimBlock(aid);
       element.addEventListener("keydown", onKeyDown);
       element.addEventListener("paste", onPaste);
@@ -5720,6 +5759,24 @@ runHistory();
   let beatPending = false;
   let localLabel = "";
   let localEditingAid = null;
+  // P3-F publishes over REST and subscribes to the same channel, so this tab
+  // receives its own `edit.claim` back as an ordinary peer projection. While
+  // editing, the `localEditingAid` skip in renderClaims masks it -- but
+  // edit.js dispatches reading/null *before* it publishes the release, so for
+  // one round trip the tab would render a chip naming itself and hide its own
+  // Edit button. Worse, if that release never lands (offline, timeout,
+  // resolved false -- all swallowed by design, with no retry) the tab's own
+  // echoed beats keep renewing its own roster row, so the lease sweep never
+  // expires the claim and the button stays hidden for the rest of the session.
+  //
+  // Presence deliberately never learns its own client id, so the self-claim is
+  // identified by correlation instead: the first claim to arrive for the block
+  // this tab is currently editing is this tab's own echo, because this tab
+  // published before any peer could react to it. A later claim on the same
+  // block is a genuine peer and still renders once local editing ends. The
+  // claim is dropped from the map on release rather than waiting for an echo,
+  // which is what closes the permanent case.
+  let selfClaimClient = null;
 
   let beatTimer = 0;
   let sweepTimer = 0;
@@ -5945,6 +6002,13 @@ runHistory();
   // frozen one-key detail edit.js dispatches and rejects everything else by
   // descriptor, without invoking a getter.
   function onEditState(event) {
+    // Unlike the other bus listeners this one is not gated on `suspended`:
+    // edit.js registers its `pageshow` re-claim during module evaluation, so
+    // it runs before presence un-suspends, and dropping that signal would
+    // leave the restored heartbeat reporting `reading` for an open editor.
+    // Local activity is state, so it is always recorded; only the DOM work
+    // below is withheld while the page is quiesced.
+    if (!activated) return;
     let detail;
     try {
       detail = event.detail;
@@ -5967,10 +6031,21 @@ runHistory();
     }
 
     if (localEditingAid === aid) return;
+    // Leaving a block takes this tab's own echoed claim with it, so the chip
+    // and the hidden button never outlive the edit. Entering another block
+    // starts the correlation again; only one local claim exists at a time.
+    if (selfClaimClient !== null) {
+      claims.delete(selfClaimClient);
+      selfClaimClient = null;
+    }
     localEditingAid = aid;
+    if (suspended) return;
     // A peer claim on the block this tab was editing has been held in memory
     // rather than rendered; ending local editing is when it may appear.
     renderClaims();
+    // Chips change the height of the controls row, so the rail markers below
+    // it need re-measuring. Every other renderClaims caller pairs the two.
+    requestPlacement();
   }
 
   function sendBeat() {
@@ -6100,10 +6175,17 @@ runHistory();
     if (detail === null) return;
 
     // An accepted client event proves transport even when it changes nothing.
-    proveTransport();
-    if (detail.t === "beat") applyBeat(detail);
-    else if (detail.t === "bye") removeReader(detail.clientId);
-    else if (detail.t === "edit.claim") applyClaim(detail);
+    // Beats and byes prove transport, as they always have. Claims must not:
+    // proveTransport() mounts the container and starts the beat and sweep
+    // intervals, and the contract says a claim never creates a timer or
+    // causes a beat.
+    if (detail.t === "beat") {
+      proveTransport();
+      applyBeat(detail);
+    } else if (detail.t === "bye") {
+      proveTransport();
+      removeReader(detail.clientId);
+    } else if (detail.t === "edit.claim") applyClaim(detail);
     else applyRelease(detail);
   }
 
@@ -6208,6 +6290,11 @@ runHistory();
     if (existing === undefined && claims.size >= MAX_CLAIMS) return;
     if (existing === detail.aid) return;
     claims.set(detail.clientId, detail.aid);
+    // The first claim on the block this tab is editing is this tab's own echo
+    // coming back off the client channel; see `selfClaimClient`.
+    if (selfClaimClient === null && localEditingAid !== null && detail.aid === localEditingAid) {
+      selfClaimClient = detail.clientId;
+    }
     repaint();
   }
 
@@ -6216,12 +6303,14 @@ runHistory();
   function applyRelease(detail) {
     if (claims.get(detail.clientId) !== detail.aid) return;
     claims.delete(detail.clientId);
+    if (detail.clientId === selfClaimClient) selfClaimClient = null;
     repaint();
   }
 
   function removeReader(clientId) {
     const hadRow = roster.delete(clientId);
     const hadClaim = claims.delete(clientId);
+    if (clientId === selfClaimClient) selfClaimClient = null;
     if (!hadRow && !hadClaim) return;
     repaint();
   }
@@ -6235,6 +6324,7 @@ runHistory();
       if (now - entry[1].seen >= LEASE_MS) {
         roster.delete(entry[0]);
         claims.delete(entry[0]);
+        if (entry[0] === selfClaimClient) selfClaimClient = null;
         changed = true;
       }
     }
@@ -6490,6 +6580,8 @@ runHistory();
         // focus-owned DOM while someone is typing is worse than a late chip,
         // and the claim stays in memory until local editing ends.
         if (aid === localEditingAid) continue;
+        // This tab's own echoed claim never decorates anything.
+        if (row.id === selfClaimClient) continue;
         const rows = groups.get(aid);
         if (rows === undefined) groups.set(aid, [row]);
         else rows.push(row);
@@ -6508,11 +6600,18 @@ runHistory();
     const record = chipsByAid.get(aid);
     if (record === undefined) return;
     chipsByAid.delete(aid);
+    // Restoring the affordance comes first and gets its own try. The registry
+    // entry is already gone, so if a throw from the cosmetic removal took the
+    // un-hide with it, nothing would ever give that button back.
     try {
-      record.chip.remove();
       record.button.removeAttribute("hidden");
     } catch (ignored) {
       // The controls are already gone; nothing durable depended on them.
+    }
+    try {
+      record.chip.remove();
+    } catch (ignored) {
+      // Same: a chip that cannot be removed is cosmetic, not load-bearing.
     }
   }
 
@@ -6528,7 +6627,7 @@ runHistory();
     // A rebuilt controls wrapper is a different target, so the old record is
     // dropped rather than reused against DOM that no longer exists.
     if (existing !== undefined
-      && (existing.button !== target.button || existing.chip.parentNode !== target.controls)) {
+      && (existing.button !== target.button || existing.chip.nextElementSibling !== target.button)) {
       dropChip(aid);
     }
     try {
@@ -6537,7 +6636,11 @@ runHistory();
         const chip = document.createElement("span");
         chip.className = "pill warn doc-edit-claim";
         chip.setAttribute("role", "status");
-        target.controls.insertBefore(chip, target.button);
+        // Eligibility accepts the button as any descendant of the wrapper, so
+        // insert against the button's own parent. Inserting into the wrapper
+        // would throw for a nested button and silently drop the chip while
+        // leaving the Edit button visible.
+        target.button.parentNode.insertBefore(chip, target.button);
         record = { chip, button: target.button };
         chipsByAid.set(aid, record);
       }
@@ -6545,7 +6648,24 @@ runHistory();
       const phrases = claimPhrases(rows);
       record.chip.title = phrases;
       record.chip.setAttribute("aria-label", phrases);
+      // Hiding the control the reader is standing on would drop focus to the
+      // body. Move it deliberately to the controls wrapper instead, which
+      // keeps the chip itself noninteractive as the contract requires.
+      let hadFocus = false;
+      try {
+        hadFocus = document.activeElement === record.button;
+      } catch (ignored) {
+        hadFocus = false;
+      }
       record.button.setAttribute("hidden", "");
+      if (hadFocus) {
+        try {
+          target.controls.setAttribute("tabindex", "-1");
+          target.controls.focus();
+        } catch (ignored) {
+          // A host without focus management leaves focus where it was.
+        }
+      }
     } catch (ignored) {
       dropChip(aid);
     }
@@ -6557,6 +6677,7 @@ runHistory();
     for (const aid of [...chipsByAid.keys()]) dropChip(aid);
     claims.clear();
     localEditingAid = null;
+    selfClaimClient = null;
   }
 
   // --- Block markers --------------------------------------------------------
