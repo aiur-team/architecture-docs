@@ -531,7 +531,8 @@ function validHistory(value) {
 function assertEmbeddedHistory(html, history, script) {
   if (script === null) failInput();
   if (
-    html.slice(script.start, script.end) !== '<script type="application/json" id="doc-history">' ||
+    html.slice(script.start, script.end) !==
+      `<script type="application/json" id="doc-history" data-head="${history.head}">` ||
     script.rawStart === undefined ||
     script.rawEnd === undefined ||
     !html.startsWith("</script>", script.rawEnd)

@@ -335,6 +335,106 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
   .doc-comment-block,.doc-comment-block-active{border-inline-start-color:transparent;outline-color:transparent;background-color:transparent;box-shadow:none}
   ::highlight(doc-comments-open),::highlight(doc-comments-active){background-color:transparent}
 }
+/* Direct-edit controls and the pending-overlay decoration.
+
+   Every selector here is `.doc-edit-*` or `[data-editable].doc-edit-*`: the
+   document's own type scale, colours and spacing are untouched, so a page
+   built without edit.js is byte-for-byte what it was. State is never carried
+   by colour alone — each state also has status text the client writes — and
+   print keeps the applied overlay text while dropping the transient chrome. */
+
+.doc-edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin: -.25rem 0 1rem;
+  font-family: var(--sans);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.doc-edit-button {
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: .15rem .55rem;
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease;
+}
+
+.doc-edit-button:hover { color: var(--ink); background: var(--surface-3); }
+
+.doc-edit-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.doc-edit-button[disabled] { cursor: default; opacity: .6; }
+
+.doc-edit-status { color: var(--ink-3); }
+
+.doc-edit-controls-busy .doc-edit-status,
+.doc-edit-saving .doc-edit-status { color: var(--ink-2); }
+
+.doc-edit-conflict .doc-edit-status { color: var(--warn); }
+
+.doc-edit-failed .doc-edit-status { color: var(--risk); }
+
+/* A block being edited is plain text in a visible field. The border, not the
+   background alone, carries the state for a high-contrast reader. */
+[data-editable].doc-edit-editing {
+  white-space: pre-wrap;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: .35rem .5rem;
+  margin-left: -.5rem;
+  margin-right: -.5rem;
+}
+
+[data-editable].doc-edit-editing:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An applied but unmerged overlay. The rule is a left marker rather than a
+   fill so long prose stays readable at any width. */
+[data-editable].doc-edit-pending {
+  box-shadow: -3px 0 0 0 var(--accent-soft);
+}
+
+@media (max-width: 640px) {
+  .doc-edit-controls { font-size: .74rem; }
+  .doc-edit-status { flex-basis: 100%; }
+  [data-editable].doc-edit-editing { margin-left: 0; margin-right: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-edit-button { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .doc-edit-button { border: 1px solid ButtonBorder; }
+  .doc-edit-button:focus-visible { outline: 2px solid Highlight; }
+  [data-editable].doc-edit-editing { border: 1px solid CanvasText; }
+  [data-editable].doc-edit-pending { box-shadow: none; border-left: 3px solid CanvasText; }
+}
+
+/* Print keeps the overlay text and drops every transient decoration. */
+@media print {
+  .doc-edit-controls { display: none !important; }
+  [data-editable].doc-edit-pending { box-shadow: none; }
+  [data-editable].doc-edit-editing {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
 :root {
   /* Changelog client presentation: one change bar prepended to main, plus a
      bullet on each changed section label and its jump-nav link.  Three theme
@@ -448,6 +548,228 @@ nav.jump a.history-changed::after {
   section.history-changed > details.sec > summary .sec-label::before,
   nav.jump a.history-changed::after {
     display: none;
+  }
+}
+/* ============================================================
+   presence.css — the masthead reader strip and the reader-location rail.
+
+   Scoped entirely to the IDs and classes presence.js creates: it never
+   hides or restyles document prose, and the rail consumes no layout space
+   and intercepts no input. Every token carries a literal fallback, because
+   this stylesheet is also loaded on its own by the rendered gate.
+
+   Theme follows P1-B's three states exactly: bare is light, an explicit
+   data-theme wins over the OS in both directions, and no colour is declared
+   only inside a media or [data-theme] block.
+   ============================================================ */
+
+/* No auto start-margin here. `.head-top` is a flex row whose `.status-chip`
+   already carries `margin-left:auto`, and a second auto margin in the same
+   line splits the free space between the two instead of pushing everything
+   right: the chip visibly jumps ~300px left the moment presence mounts. The
+   chip's margin already right-aligns the whole trailing cluster, so the strip
+   still lands immediately before the theme control. */
+.doc-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-presence-faces {
+  display: inline-flex;
+  align-items: center;
+}
+
+.doc-presence-faces[hidden] {
+  display: none !important;
+}
+
+.doc-presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Adjacent masthead faces overlap; the first one must not pull left. */
+.doc-presence-avatar + .doc-presence-avatar {
+  margin-inline-start: -6px;
+}
+
+.doc-presence-more {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 6px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--ink-3, #7A8492);
+  user-select: none;
+}
+
+.doc-presence-toggle {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong, #CBD2DA);
+  border-radius: 6px;
+  background: var(--surface, #FFFFFF);
+  color: var(--ink-2, #49525F);
+  font-family: var(--sans, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.doc-presence-toggle:focus-visible {
+  outline: 2px solid var(--accent, #FF0420);
+  outline-offset: 2px;
+}
+
+/* ---- The reader-location rail -------------------------------------------
+   Absolute at inset zero over the document, pointer-transparent throughout,
+   and lighter than the comment controls it sits beside. */
+
+#doc-presence-rail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.doc-presence-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 1px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.doc-presence-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.doc-presence-initial + .doc-presence-initial {
+  margin-inline-start: -4px;
+}
+
+.doc-presence-marker-more {
+  color: var(--ink-3, #7A8492);
+  background: var(--surface-2, #EEF1F4);
+}
+
+/* ---- The eight fixed colour pairs ---------------------------------------
+   Light is the un-stamped default. The OS preference applies only when no
+   explicit light choice was made, and the two explicit states come last so
+   the toggle wins in both directions. */
+
+.doc-presence-colour-0 { color: #1e3a8a; background-color: #dbeafe; }
+.doc-presence-colour-1 { color: #14532d; background-color: #dcfce7; }
+.doc-presence-colour-2 { color: #78350f; background-color: #fef3c7; }
+.doc-presence-colour-3 { color: #701a75; background-color: #fae8ff; }
+.doc-presence-colour-4 { color: #7f1d1d; background-color: #fee2e2; }
+.doc-presence-colour-5 { color: #164e63; background-color: #cffafe; }
+.doc-presence-colour-6 { color: #4c1d95; background-color: #ede9fe; }
+.doc-presence-colour-7 { color: #1e293b; background-color: #e2e8f0; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .doc-presence-colour-0 { color: #dbeafe; background-color: #1e3a8a; }
+  :root:not([data-theme="light"]) .doc-presence-colour-1 { color: #dcfce7; background-color: #14532d; }
+  :root:not([data-theme="light"]) .doc-presence-colour-2 { color: #fef3c7; background-color: #78350f; }
+  :root:not([data-theme="light"]) .doc-presence-colour-3 { color: #fae8ff; background-color: #701a75; }
+  :root:not([data-theme="light"]) .doc-presence-colour-4 { color: #fee2e2; background-color: #7f1d1d; }
+  :root:not([data-theme="light"]) .doc-presence-colour-5 { color: #cffafe; background-color: #164e63; }
+  :root:not([data-theme="light"]) .doc-presence-colour-6 { color: #ede9fe; background-color: #4c1d95; }
+  :root:not([data-theme="light"]) .doc-presence-colour-7 { color: #e2e8f0; background-color: #1e293b; }
+}
+
+:root[data-theme="dark"] .doc-presence-colour-0 { color: #dbeafe; background-color: #1e3a8a; }
+:root[data-theme="dark"] .doc-presence-colour-1 { color: #dcfce7; background-color: #14532d; }
+:root[data-theme="dark"] .doc-presence-colour-2 { color: #fef3c7; background-color: #78350f; }
+:root[data-theme="dark"] .doc-presence-colour-3 { color: #fae8ff; background-color: #701a75; }
+:root[data-theme="dark"] .doc-presence-colour-4 { color: #fee2e2; background-color: #7f1d1d; }
+:root[data-theme="dark"] .doc-presence-colour-5 { color: #cffafe; background-color: #164e63; }
+:root[data-theme="dark"] .doc-presence-colour-6 { color: #ede9fe; background-color: #4c1d95; }
+:root[data-theme="dark"] .doc-presence-colour-7 { color: #e2e8f0; background-color: #1e293b; }
+
+:root[data-theme="light"] .doc-presence-colour-0 { color: #1e3a8a; background-color: #dbeafe; }
+:root[data-theme="light"] .doc-presence-colour-1 { color: #14532d; background-color: #dcfce7; }
+:root[data-theme="light"] .doc-presence-colour-2 { color: #78350f; background-color: #fef3c7; }
+:root[data-theme="light"] .doc-presence-colour-3 { color: #701a75; background-color: #fae8ff; }
+:root[data-theme="light"] .doc-presence-colour-4 { color: #7f1d1d; background-color: #fee2e2; }
+:root[data-theme="light"] .doc-presence-colour-5 { color: #164e63; background-color: #cffafe; }
+:root[data-theme="light"] .doc-presence-colour-6 { color: #4c1d95; background-color: #ede9fe; }
+:root[data-theme="light"] .doc-presence-colour-7 { color: #1e293b; background-color: #e2e8f0; }
+
+/* ---- Responsive, forced colours, motion, print -------------------------- */
+
+/* Narrow viewports drop only the rail. The strip and the privacy toggle stay
+   available and wrap with .head-top. */
+@media (max-width: 720px) {
+  #doc-presence-rail {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .doc-presence-avatar,
+  .doc-presence-initial,
+  .doc-presence-marker,
+  .doc-presence-toggle {
+    border: 1px solid CanvasText;
+  }
+
+  .doc-presence-marker {
+    opacity: 1;
+  }
+
+  .doc-presence-toggle:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-presence,
+  .doc-presence *,
+  #doc-presence-rail,
+  #doc-presence-rail * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media print {
+  .doc-presence,
+  #doc-presence-rail {
+    display: none !important;
   }
 }
 .share-btn {
@@ -1307,6 +1629,627 @@ export function scanBlocks(fragment) {
 window.doc.anchor = { BLOCK, norm, scanBlocks };
 </script>
 <script type="module">
+/* Direct-edit client and pending-overlay barrier.
+
+   Two jobs, in this order. First, every authenticated reader applies the
+   server's bounded pending receipts over the built text, so what everyone sees
+   is the same overlay; `window.doc.edit.overlaysReady` is the one promise that
+   says when that first pass is done, and P4-Q waits on it before the comments
+   client resolves its first anchor. Second, and only for a session that says
+   it may edit, each build-approved block gets an Edit control that turns the
+   block into plaintext with three inline marks and POSTs it to /api/edit.
+
+   The page is never the authority. The control is a presentation hint from the
+   session projection; the server decides. Outside HTTP(S), without the document
+   id, the anchor core, the platform primitives, or with a namespace another
+   owner already filled, the module installs nothing and the static document is
+   unchanged.
+
+   Amendment chain: P4-B (this initial overlay/direct-edit client) -> P4-I ->
+   P4-P. The four converter declarations below are byte-compatible with P2-D's
+   `inline_md` twin on purpose; P4-C extracts them and runs the parity gate. */
+
+/** Replace every exact `needle` in `input` with `replacement`. */
+const replaceLiteral = (input, needle, replacement) =>
+  input.split(needle).join(replacement);
+
+/**
+ * One `untag` pass: scan left to right for the next exact `<tag>`. When no
+ * exact `</tag>` follows that opening tag, append the untouched remainder and
+ * stop the pass. Otherwise the first following close wins: append the preceding
+ * bytes, `open`, the bytes between the two tags unchanged, and `close`, then
+ * resume immediately after the close.
+ */
+function untag(input, tag, open, close) {
+  const openTag = `<${tag}>`;
+  const closeTag = `</${tag}>`;
+  let out = "";
+  let rest = input;
+  for (;;) {
+    const openAt = rest.indexOf(openTag);
+    if (openAt === -1) return out + rest;
+    const closeAt = rest.indexOf(closeTag, openAt + openTag.length);
+    if (closeAt === -1) return out + rest;
+    out += rest.slice(0, openAt);
+    out += open;
+    out += rest.slice(openAt + openTag.length, closeAt);
+    out += close;
+    rest = rest.slice(closeAt + closeTag.length);
+  }
+}
+
+/**
+ * One `wrap` pass. Find the next delimiter from left to right and let `run` be
+ * the bytes after it through, but not including, the first occurrence of the
+ * delimiter's single character. Wrap only when `run` is nonempty and the bytes
+ * immediately following `run` start with the complete delimiter; on success
+ * append `<tag>run</tag>` and resume after the closing delimiter. On failure
+ * append through the opening delimiter unchanged and resume after it.
+ */
+function wrap(input, delimiter, tag) {
+  const single = delimiter[0];
+  let out = "";
+  let rest = input;
+  for (;;) {
+    const openAt = rest.indexOf(delimiter);
+    if (openAt === -1) return out + rest;
+    const runStart = openAt + delimiter.length;
+    const singleAt = rest.indexOf(single, runStart);
+    if (singleAt === -1) {
+      out += rest.slice(0, runStart);
+      rest = rest.slice(runStart);
+      continue;
+    }
+    const run = rest.slice(runStart, singleAt);
+    if (run !== "" && rest.startsWith(delimiter, singleAt)) {
+      out += rest.slice(0, openAt);
+      out += `<${tag}>`;
+      out += run;
+      out += `</${tag}>`;
+      rest = rest.slice(singleAt + delimiter.length);
+    } else {
+      out += rest.slice(0, runStart);
+      rest = rest.slice(runStart);
+    }
+  }
+}
+
+/** Convert an inner-HTML string to editable text. */
+function toMd(html) {
+  let out = untag(untag(untag(html, "code", "`", "`"), "strong", "**", "**"), "em", "*", "*");
+  out = replaceLiteral(out, "&lt;", "<");
+  out = replaceLiteral(out, "&gt;", ">");
+  out = replaceLiteral(out, "&amp;", "&");
+  return out;
+}
+
+/** Convert editable text to an inner-HTML string. */
+function toHtml(text) {
+  let out = replaceLiteral(text, "&", "&amp;");
+  out = replaceLiteral(out, "<", "&lt;");
+  out = replaceLiteral(out, ">", "&gt;");
+  out = wrap(out, "`", "code");
+  out = wrap(out, "**", "strong");
+  out = wrap(out, "*", "em");
+  return out;
+}
+
+installEdit();
+
+function installEdit() {
+  const protocol = location.protocol;
+  if (protocol !== "http:" && protocol !== "https:") return;
+
+  const metas = document.querySelectorAll('meta[name="doc-id"]');
+  if (metas.length !== 1) return;
+  const content = metas[0].getAttribute("content");
+  const docId = typeof content === "string" ? content.trim() : "";
+  if (!/^[0-9a-f]{6}$/.test(docId)) return;
+
+  const doc = window.doc;
+  if (doc === null || typeof doc !== "object") return;
+  if (doc.edit !== null && doc.edit !== undefined) return;
+  const anchor = doc.anchor;
+  if (anchor === null || typeof anchor !== "object") return;
+  if (!Array.isArray(anchor.BLOCK) || typeof anchor.norm !== "function" ||
+      typeof anchor.scanBlocks !== "function") {
+    return;
+  }
+
+  if (typeof fetch !== "function" ||
+      typeof AbortController !== "function" ||
+      typeof CustomEvent !== "function" ||
+      typeof Range !== "function" ||
+      typeof URL !== "function") {
+    return;
+  }
+
+  /* ------------------------------------------------------------ constants */
+
+  const AID = /^a[0-9a-f]{8}$/;
+  const SUB = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+  const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const SUGGESTION_ID = /^s_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
+
+  const MAX_TEXT = 4000;
+  const MAX_NAME = 200;
+  const OVERLAY_TIMEOUT_MS = 5000;
+  const SAVE_TIMEOUT_MS = 5000;
+  const BATCH = 50;
+
+  const PENDING_CLASS = "doc-edit-pending";
+  const EDITING_CLASS = "doc-edit-editing";
+  const CONFLICT_MESSAGE = "This block changed. Review the current text and try again.";
+  const FAILED_MESSAGE = "The edit was not saved.";
+  const SAVING_MESSAGE = "Saving…";
+  const BUSY_MESSAGE = "Another block is saving. Try again in a moment.";
+  const EDITING_MESSAGE = "Editing. Ctrl+Enter saves, Escape cancels.";
+
+  const RESERVED_FINAL_FIELDS = [
+    "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+  ];
+  const ROLES = ["owner", "editor", "commenter", "viewer", "none"];
+
+  const ENTRY_KEYS = ["text", "by", "at", "pr"];
+  const ACTOR_KEYS = ["sub", "name", "email"];
+
+  /* ------------------------------------------------------------- the blocks */
+
+  const found = document.querySelectorAll("[data-editable][data-aid]");
+  const blocks = [];
+  const byAid = new Map();
+  for (const element of found) {
+    const aid = element.getAttribute("data-aid");
+    if (typeof aid !== "string" || !AID.test(aid)) return;
+    if (byAid.has(aid)) return;
+    byAid.set(aid, element);
+    blocks.push({ aid, element });
+  }
+
+  /* --------------------------------------------------------------- helpers */
+
+  const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function exactKeys(value, keys) {
+    if (!isRecord(value)) return false;
+    const names = Object.keys(value);
+    if (names.length !== keys.length) return false;
+    return keys.every((key) => hasOwn(value, key));
+  }
+
+  function isTimestamp(value) {
+    if (typeof value !== "string" || !TIMESTAMP.test(value)) return false;
+    try {
+      return new Date(value).toISOString() === value;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function isActor(value) {
+    if (!exactKeys(value, ACTOR_KEYS)) return false;
+    return typeof value.sub === "string" && SUB.test(value.sub) &&
+      typeof value.name === "string" && value.name.length <= MAX_NAME &&
+      typeof value.email === "string";
+  }
+
+  /** Text is displayable only when the twin converters reproduce it exactly:
+     the same admission gate the server applies before it will write. */
+  function isEditableText(value) {
+    if (typeof value !== "string" || value.length > MAX_TEXT) return false;
+    const html = toHtml(value);
+    return toMd(html) === value && toHtml(toMd(html)) === html;
+  }
+
+  /** Pure content-type grammar for `application/json` with an optional
+     `charset=utf-8` parameter, ASCII-case-insensitive. */
+  function isJsonContentType(value) {
+    if (typeof value !== "string") return false;
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === "application/json") return true;
+    const semicolon = trimmed.indexOf(";");
+    if (semicolon === -1) return false;
+    if (trimmed.slice(0, semicolon).trim() !== "application/json") return false;
+    const parameter = trimmed.slice(semicolon + 1).trim();
+    return parameter === "charset=utf-8" || parameter === 'charset="utf-8"';
+  }
+
+  function freezeDetail(aids) {
+    return Object.freeze({ aids: Object.freeze(aids) });
+  }
+
+  /* ------------------------------------------------------------- the session */
+
+  /** The complete session projection. Presence of any reserved final field
+     commits to the whole P3-H shape; zero reserved fields selects the legacy
+     shape. Only `canEdit` is ever read, and only as a presentation hint. */
+  function validSession(body) {
+    if (!isRecord(body)) return null;
+    let reservedPresent = 0;
+    for (const field of RESERVED_FINAL_FIELDS) {
+      if (hasOwn(body, field)) reservedPresent += 1;
+    }
+    if (typeof body.sub !== "string") return null;
+    if (typeof body.email !== "string") return null;
+    if (typeof body.name !== "string") return null;
+    if (!Array.isArray(body.roles)) return null;
+    for (const entry of body.roles) {
+      if (typeof entry !== "string") return null;
+    }
+    if (typeof body.canComment !== "boolean") return null;
+    if (typeof body.canEdit !== "boolean") return null;
+    if (reservedPresent === 0) return body;
+
+    if (reservedPresent !== RESERVED_FINAL_FIELDS.length) return null;
+    if (body.doc !== docId) return null;
+    if (!ROLES.includes(body.role)) return null;
+    if (typeof body.shared !== "boolean") return null;
+    if (typeof body.canSuggest !== "boolean") return null;
+    if (typeof body.canAccept !== "boolean") return null;
+    if (typeof body.canShare !== "boolean") return null;
+    if (typeof body.canSeeMembers !== "boolean") return null;
+    if (body.roles.length !== 1) return null;
+    if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
+    return body;
+  }
+
+  /* -------------------------------------------------------- pending overlays */
+
+  /** One entry of P3-E's projection. The suggestion fields are accepted and
+     validated here so a document already carrying P4-N state still overlays,
+     but this ticket writes only the direct shape. */
+  function validEntry(value) {
+    if (!isRecord(value)) return null;
+    const via = hasOwn(value, "via") ? value.via : undefined;
+    let keys = ENTRY_KEYS;
+    if (via === "edit") keys = ENTRY_KEYS.concat(["via"]);
+    else if (via === "suggestion") {
+      keys = ENTRY_KEYS.concat(["via", "sugId", "acceptedBy", "acceptedAt"]);
+    } else if (via !== undefined) return null;
+    if (!exactKeys(value, keys)) return null;
+    if (!isEditableText(value.text)) return null;
+    if (!isActor(value.by)) return null;
+    if (!isTimestamp(value.at)) return null;
+    if (!(value.pr === null || (Number.isSafeInteger(value.pr) && value.pr > 0))) return null;
+    if (via === "suggestion") {
+      if (typeof value.sugId !== "string" || !SUGGESTION_ID.test(value.sugId)) return null;
+      if (!isActor(value.acceptedBy)) return null;
+      if (!isTimestamp(value.acceptedAt)) return null;
+    }
+    return value;
+  }
+
+  /** The complete projection, or null. One bad entry rejects the response:
+     a partial overlay would be a different document for different readers. */
+  function validOverlay(body) {
+    if (!isRecord(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
+    const overlay = new Map();
+    for (const aid of Object.keys(body)) {
+      if (!AID.test(aid)) return null;
+      const entry = validEntry(body[aid]);
+      if (entry === null) return null;
+      overlay.set(aid, entry);
+    }
+    return overlay;
+  }
+
+  /** Paint one block from exact plaintext and keep `data-md` in step, so a
+     later edit reads the overlay rather than stale built text. */
+  function paint(element, text) {
+    element.innerHTML = toHtml(text);
+    element.setAttribute("data-md", text);
+  }
+
+  /** Consecutive frozen batches of 1 through 50 aids, dispatched
+     synchronously. No empty, duplicate, unsorted, or oversized batch. */
+  function announce(aids) {
+    for (let at = 0; at < aids.length; at += BATCH) {
+      const slice = aids.slice(at, at + BATCH);
+      document.dispatchEvent(new CustomEvent("doc:overlay", { detail: freezeDetail(slice) }));
+    }
+  }
+
+  async function loadOverlays() {
+    const endpoint = new URL("/api/pending", location.href);
+    endpoint.searchParams.set("doc", docId);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OVERLAY_TIMEOUT_MS);
+    let overlay = null;
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (response.status !== 200) return { applied: [], available: false };
+      if (!isJsonContentType(response.headers.get("content-type"))) {
+        return { applied: [], available: false };
+      }
+      overlay = validOverlay(await response.json());
+    } catch (error) {
+      return { applied: [], available: false };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (overlay === null) return { applied: [], available: false };
+
+    // DOM order, so a reader watching the page sees one top-to-bottom pass.
+    const applied = [];
+    for (const block of blocks) {
+      const entry = overlay.get(block.aid);
+      if (entry === undefined) continue;
+      paint(block.element, entry.text);
+      block.element.classList.add(PENDING_CLASS);
+      applied.push(block.aid);
+    }
+    applied.sort();
+    return { applied, available: true };
+  }
+
+  /* -------------------------------------------------------------- the editor */
+
+  let saving = false;
+
+  function probePlaintextOnly(element) {
+    try {
+      element.setAttribute("contenteditable", "plaintext-only");
+      if (element.contentEditable === "plaintext-only") return true;
+    } catch (error) {
+      // A host that rejects the value simply does not support it.
+    }
+    element.setAttribute("contenteditable", "true");
+    return false;
+  }
+
+  function makeControls(block) {
+    const controls = document.createElement("div");
+    controls.className = "doc-edit-controls";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "doc-edit-button";
+    button.textContent = "Edit";
+    const status = document.createElement("span");
+    status.className = "doc-edit-status";
+    status.setAttribute("role", "status");
+    controls.appendChild(button);
+    controls.appendChild(status);
+    block.element.insertAdjacentElement("afterend", controls);
+    return { controls, button, status };
+  }
+
+  function editableText(element) {
+    const md = element.getAttribute("data-md");
+    return md === null ? element.textContent : md;
+  }
+
+  function attach(block) {
+    const { element, aid } = block;
+    const { controls, button, status } = makeControls(block);
+
+    let priorHtml = "";
+    let priorMd = null;
+    let priorMdPresent = false;
+    let startText = "";
+    let editing = false;
+    let plaintextOnly = false;
+
+    const setStatus = (text) => {
+      status.textContent = text;
+    };
+
+    const onPaste = (event) => {
+      if (plaintextOnly) return;
+      event.preventDefault();
+      const clipboard = event.clipboardData;
+      const text = clipboard === null || clipboard === undefined
+        ? "" : clipboard.getData("text/plain");
+      if (typeof text !== "string" || text === "") return;
+      document.execCommand("insertText", false, text);
+    };
+
+    const stopEditing = () => {
+      editing = false;
+      element.removeAttribute("contenteditable");
+      element.classList.remove(EDITING_CLASS);
+      element.removeEventListener("keydown", onKeyDown);
+      element.removeEventListener("paste", onPaste);
+      element.removeEventListener("blur", onBlur);
+      button.disabled = false;
+      controls.classList.remove("doc-edit-controls-busy");
+    };
+
+    const restore = () => {
+      element.innerHTML = priorHtml;
+      if (priorMdPresent) element.setAttribute("data-md", priorMd);
+      else element.removeAttribute("data-md");
+    };
+
+    const cancel = () => {
+      stopEditing();
+      restore();
+      setStatus("");
+    };
+
+    async function save() {
+      // Another block is mid-flight. Stay in editing mode and keep what the
+      // reader typed: discarding their text and calling it a failed save
+      // would lose work this block never even tried to send.
+      if (saving) {
+        setStatus(BUSY_MESSAGE);
+        return;
+      }
+      const text = element.textContent;
+      stopEditing();
+      saving = true;
+      button.disabled = true;
+      controls.classList.add("doc-edit-saving");
+      controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
+      setStatus(SAVING_MESSAGE);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+      let response = null;
+      let body = null;
+      try {
+        response = await fetch(new URL("/api/edit", location.href), {
+          method: "POST",
+          mode: "same-origin",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ docId, aid, text }),
+          signal: controller.signal,
+        });
+        if (isJsonContentType(response.headers.get("content-type"))) {
+          body = await response.json();
+        }
+      } catch (error) {
+        response = null;
+      } finally {
+        clearTimeout(timer);
+        saving = false;
+        button.disabled = false;
+        controls.classList.remove("doc-edit-saving");
+      }
+
+      if (response !== null && response.status === 200 && isRecord(body) &&
+          exactKeys(body, ["receipt"])) {
+        const receipt = validEntry(body.receipt);
+        // The receipt carries no document id: the request's already validated
+        // context is what binds this response to this block.
+        if (receipt !== null && receipt.text === text) {
+          paint(element, receipt.text);
+          element.classList.add(PENDING_CLASS);
+          setStatus("");
+          announce([aid]);
+          return;
+        }
+        restore();
+        setStatus(FAILED_MESSAGE);
+        controls.classList.add("doc-edit-failed");
+        return;
+      }
+
+      if (response !== null && response.status === 409) {
+        const current = isRecord(body) && hasOwn(body, "current") ? body.current : null;
+        if (isEditableText(current)) paint(element, current);
+        else restore();
+        setStatus(CONFLICT_MESSAGE);
+        controls.classList.add("doc-edit-conflict");
+        return;
+      }
+
+      restore();
+      setStatus(FAILED_MESSAGE);
+      controls.classList.add("doc-edit-failed");
+    }
+
+    function onBlur() {
+      if (!editing) return;
+      // A blur that changed nothing is not an edit and never becomes a request.
+      if (element.textContent === startText) cancel();
+      else void save();
+    }
+
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+        button.focus();
+        return;
+      }
+      if (event.key !== "Enter") return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        void save();
+        return;
+      }
+      // Enter alone stays text. Native plaintext-only already does that; the
+      // fallback would otherwise insert structural markup, and every modifier
+      // combination the browser treats as a newline has to be caught, not just
+      // the unmodified key.
+      if (!plaintextOnly) {
+        event.preventDefault();
+        document.execCommand("insertText", false, "\n");
+      }
+    }
+
+    button.addEventListener("click", () => {
+      if (editing || saving) return;
+      priorHtml = element.innerHTML;
+      priorMdPresent = element.hasAttribute("data-md");
+      priorMd = priorMdPresent ? element.getAttribute("data-md") : null;
+      startText = editableText(element);
+      element.textContent = startText;
+      plaintextOnly = probePlaintextOnly(element);
+      element.classList.add(EDITING_CLASS);
+      controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
+      editing = true;
+      element.addEventListener("keydown", onKeyDown);
+      element.addEventListener("paste", onPaste);
+      element.addEventListener("blur", onBlur);
+      setStatus(EDITING_MESSAGE);
+      element.focus();
+    });
+  }
+
+  /* ------------------------------------------------------------ composition */
+
+  let settle = null;
+  const overlaysReady = new Promise((resolve) => {
+    settle = resolve;
+  });
+  let settled = false;
+  const finish = (applied, available) => {
+    if (settled) return;
+    settled = true;
+    settle(Object.freeze({ applied: Object.freeze(applied), available }));
+  };
+
+  window.doc.edit = Object.freeze({ overlaysReady });
+
+  let started = false;
+  document.addEventListener("session", (event) => {
+    if (started) return;
+    const session = validSession(event === null ? null : event.detail);
+    if (session === null) {
+      // The reveal happened but this module cannot read it. Staying pending
+      // would strand P4-Q on a promise nothing will ever settle, so the pass
+      // ends here with the built text intact.
+      started = true;
+      finish([], false);
+      return;
+    }
+    started = true;
+    void (async () => {
+      let result = { applied: [], available: false };
+      try {
+        result = await loadOverlays();
+      } catch (error) {
+        result = { applied: [], available: false };
+      }
+      // The barrier settles before anything else observes the pass, and it
+      // never rejects: a failed read is an empty overlay, not a broken page.
+      finish(result.applied, result.available);
+      if (result.applied.length > 0) announce(result.applied);
+      if (session.canEdit === true) {
+        for (const block of blocks) attach(block);
+      }
+    })();
+  });
+}
+
+</script>
+<script type="module">
 /* Comments client, read only.
    Waits for the one `session` reveal, then reads a bounded prefix of the
    thread list with same-origin GETs and shows it in a private margin rail and
@@ -1317,6 +2260,14 @@ window.doc.anchor = { BLOCK, norm, scanBlocks };
    document id, the anchor core, the platform primitives or a session, the
    module returns before touching anything and the static document is
    unchanged.
+
+   P4-A adds the write path on top of that read model: one selection tooltip,
+   anchored-comment and unanchored-discussion drafts, per-thread replies, and
+   resolve/reopen.  Selection capture is the exact inverse of the text map
+   above -- a stable block aid plus a normalised quote, never a DOM path, an
+   ordinal, or a range clamped across two blocks.  The session only decides
+   what is *shown*; every mutation is still authorised by the server, and one
+   401 or 403 retires this page's write controls for good.
 
    Amendment chain: P3-C (this read path) -> P4-A (comment writes) -> P4-Q
    (shared rail/panel publication, Suggestions filter, overlay repair).  The
@@ -1362,6 +2313,13 @@ function installComments() {
   const MAX_COMMENTS = 5000;
   const MAX_THREAD_COMMENTS = 500;
   const PASS_DEADLINE_MS = 5000;
+  const WRITE_DEADLINE_MS = 5000;
+  const SELECTION_DELAY_MS = 250;
+  const REFUSAL_MS = 3000;
+  const MAX_BODY = 8000;
+  const MAX_TITLE = 200;
+  const MAX_EXACT = 1000;
+  const CONTEXT_LIMIT = 32;
   const VISIBILITY_WINDOW_MS = 30000;
   const MARKER_STEP = 24;
 
@@ -1382,12 +2340,23 @@ function installComments() {
   const ACTOR_KEYS = ["sub", "name", "email"];
   const ANCHOR_KEYS = ["block", "exact", "prefix", "suffix", "start"];
   const PAGE_KEYS = ["threads", "nextCursor"];
+  const ENVELOPE_KEYS = ["thread"];
+  const SESSION_KEYS = ["sub", "email", "name", "roles", "canComment", "canEdit", "doc", "role",
+    "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers"];
+  const SESSION_FLAGS = ["canComment", "canEdit", "shared", "canSuggest", "canAccept",
+    "canShare", "canSeeMembers"];
+  const ROLES = ["owner", "editor", "commenter", "viewer", "none"];
 
   const OPEN_HIGHLIGHT = "doc-comments-open";
   const ACTIVE_HIGHLIGHT = "doc-comments-active";
   const BLOCK_CLASS = "doc-comment-block";
   const BLOCK_ACTIVE_CLASS = "doc-comment-block-active";
   const REFRESH_FAILED = "Comments could not be refreshed.";
+  const WRITE_DENIED = "You no longer have permission to change comments.";
+  const WRITE_FAILED = "The comment change was not saved.";
+  const WRITE_PENDING = "Saving the comment change.";
+  const WRITE_SAVED = "The comment change was saved.";
+  const MULTI_BLOCK = "Select inside one paragraph";
 
   const STATE_LABEL = Object.freeze({
     exact: "",
@@ -1410,12 +2379,23 @@ function installComments() {
   let statusFilter = "open";
   let kindFilter = "all";
 
+  /* Write state.  `writesDenied` is deliberately page-lifetime: a server
+     denial is never cleared in place, only by a fresh navigation. */
+  let session = null;
+  let writesDenied = false;
+  let writing = false;
+  let draft = null;
+  let tooltip = null;
+  let tooltipTimer = 0;
+  let selectionTimer = 0;
+
   let toggle = null;
   let rail = null;
   let panel = null;
   let title = null;
   let status = null;
   let truncationNote = null;
+  let actions = null;
   let list = null;
   let opener = null;
   let placementFrame = 0;
@@ -1693,8 +2673,17 @@ function installComments() {
     again = false;
     window.removeEventListener("resize", schedulePlacement);
     window.removeEventListener("hashchange", schedulePlacement);
+    window.removeEventListener("resize", removeTooltip);
     document.removeEventListener("toggle", schedulePlacement, true);
     document.removeEventListener("visibilitychange", visibilityRefresh);
+    document.removeEventListener("mouseup", selectionSettled);
+    document.removeEventListener("selectionchange", selectionChanged);
+    document.removeEventListener("keydown", writeKeydown, true);
+    document.removeEventListener("scroll", removeTooltip, true);
+    clearSelectionTimer();
+    removeTooltip();
+    detachDraft();
+    writing = false;
     clearDecoration();
     if (toggle !== null && toggle.parentNode !== null) toggle.parentNode.removeChild(toggle);
     if (rail !== null && rail.parentNode !== null) rail.parentNode.removeChild(rail);
@@ -1705,6 +2694,7 @@ function installComments() {
     title = null;
     status = null;
     truncationNote = null;
+    actions = null;
     list = null;
     opener = null;
     markers.clear();
@@ -1869,8 +2859,12 @@ function installComments() {
     return el("time", { datetime: value }, `${value.slice(0, 10)} ${value.slice(11, 16)} UTC`);
   }
 
+  /* Once writes are denied that announcement is the only one this panel
+     makes, so a later refresh cannot talk over it. */
   function setStatus(text) {
-    if (status !== null) status.textContent = text;
+    if (status === null) return;
+    if (writesDenied && text !== WRITE_DENIED) return;
+    status.textContent = text;
   }
 
   function openCount() {
@@ -1926,6 +2920,7 @@ function installComments() {
     status = el("div", { id: "doc-comments-status", role: "status", "aria-live": "polite" });
     truncationNote = el("p", { id: "doc-comments-truncation" });
     truncationNote.hidden = true;
+    actions = el("div", { id: "doc-comments-actions" });
     const filters = el("div", { id: "doc-comments-filters" });
     filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], statusFilter, (value) => { statusFilter = value; }));
     filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], kindFilter, (value) => { kindFilter = value; }));
@@ -1933,6 +2928,7 @@ function installComments() {
     panel.appendChild(header);
     panel.appendChild(status);
     panel.appendChild(truncationNote);
+    panel.appendChild(actions);
     panel.appendChild(filters);
     panel.appendChild(list);
     panel.addEventListener("keydown", (event) => {
@@ -1945,7 +2941,12 @@ function installComments() {
 
     window.addEventListener("resize", schedulePlacement);
     window.addEventListener("hashchange", schedulePlacement);
+    window.addEventListener("resize", removeTooltip);
     document.addEventListener("toggle", schedulePlacement, true);
+    document.addEventListener("mouseup", selectionSettled);
+    document.addEventListener("selectionchange", selectionChanged);
+    document.addEventListener("keydown", writeKeydown, true);
+    document.addEventListener("scroll", removeTooltip, true);
     const fonts = document.fonts;
     if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
       && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
@@ -2032,6 +3033,7 @@ function installComments() {
 
   function render() {
     toggle.textContent = `Comments (${openCount()})`;
+    renderActions();
     if (truncation === null) {
       truncationNote.hidden = true;
       truncationNote.textContent = "";
@@ -2190,7 +3192,7 @@ function installComments() {
 
     const messages = el("ol", { class: "doc-comments-messages" });
     for (const comment of thread.comments) {
-      const message = el("li");
+      const message = el("li", { tabindex: "-1" });
       const line = el("p", { class: "doc-comments-byline" });
       line.appendChild(el("span", { class: "doc-comments-author" }, comment.author.name));
       line.appendChild(document.createTextNode(" "));
@@ -2210,6 +3212,8 @@ function installComments() {
       show.addEventListener("click", () => showInDocument(entry));
       article.appendChild(show);
     }
+    if (mayControl(thread)) article.appendChild(statusButton(entry, article));
+    if (mayComment()) article.appendChild(replyForm(entry, article));
     item.appendChild(article);
     cards.set(thread.id, { article, heading, entry });
     return item;
@@ -2332,12 +3336,715 @@ function installComments() {
     }
   }
 
+  /* ============================================================== writes */
+
+  /* Presentation-only projection of P3-H's final session shape.  Everything
+     below decides what to *show*; P3-A and P4-M decide what is allowed, and a
+     server denial always wins over the cached hint. */
+  function projectSession(detail) {
+    if (!isPlain(detail) || !Object.isFrozen(detail)) return null;
+    if (!exactKeys(detail, SESSION_KEYS)) return null;
+    if (detail.doc !== docId) return null;
+    if (typeof detail.sub !== "string" || !SUB.test(detail.sub)) return null;
+    if (typeof detail.name !== "string" || typeof detail.email !== "string") return null;
+    if (!ROLES.includes(detail.role)) return null;
+    if (!Array.isArray(detail.roles) || !Object.isFrozen(detail.roles)) return null;
+    for (const flag of SESSION_FLAGS) if (typeof detail[flag] !== "boolean") return null;
+    return { sub: detail.sub, role: detail.role, canComment: detail.canComment };
+  }
+
+  const mayComment = () => !writesDenied && session !== null && session.canComment === true;
+
+  function mayControl(thread) {
+    if (writesDenied || session === null) return false;
+    if (session.role === "owner" || session.role === "editor") return true;
+    if (session.role === "commenter") return thread.author.sub === session.sub;
+    return false;
+  }
+
+  /* Exactly one history block carrying a valid seven-hex head, or no create.
+     Ambiguous version metadata suppresses creation and nothing else. */
+  function headVersion() {
+    const blocks = document.querySelectorAll("#doc-history");
+    if (blocks.length !== 1) return null;
+    const head = blocks[0].getAttribute("data-head");
+    return typeof head === "string" && DOC_VERSION.test(head) ? head : null;
+  }
+
+  /* The bounded discussion target list: every direct `main > section[id]` in
+     document order.  One invalid or repeated id withdraws the whole action
+     rather than offering a guess. */
+  function sectionInventory() {
+    const found = document.querySelectorAll("main > section[id]");
+    const options = [];
+    const seen = new Set();
+    for (const section of found) {
+      const id = section.getAttribute("id");
+      if (typeof id !== "string" || id.length > 64 || !SECTION.test(id)) return null;
+      if (seen.has(id)) return null;
+      seen.add(id);
+      let label = id;
+      const labels = section.querySelectorAll(".sec-label");
+      if (labels.length === 1) {
+        const text = labels[0].textContent.trim();
+        if (text !== "") label = text;
+      }
+      options.push({ id, label });
+    }
+    return options.length === 0 ? null : options;
+  }
+
+  function defaultSection(options) {
+    const raw = location.hash.slice(1);
+    let target = raw;
+    try {
+      target = decodeURIComponent(raw);
+    } catch (error) {
+      target = raw;
+    }
+    for (const option of options) if (option.id === target) return option.id;
+    return options[0].id;
+  }
+
+  /* ------------------------------------------------- selection capture */
+
+  function boundaryElement(node) {
+    if (node === null || node === undefined) return null;
+    if (node.nodeType === 1) return node;
+    return node.parentElement;
+  }
+
+  /* The one block a boundary belongs to, or null.  A duplicate aid, an
+     out-of-policy element, or a section outside P3-A's grammar is refused
+     because choosing between candidates would misattach the thread. */
+  function blockOf(element) {
+    if (element === null || !element.isConnected) return null;
+    if (typeof element.closest !== "function") return null;
+    const block = element.closest("[data-aid]");
+    if (block === null || !BLOCK.includes(block.localName)) return null;
+    const aid = block.getAttribute("data-aid");
+    if (aid === null || !AID.test(aid)) return null;
+    /* A duplicated anchor id is ambiguous and refused.  `AID` has already
+       constrained the value to `a` plus eight hex digits, so it is safe to ask
+       the engine for just that id rather than walking every `[data-aid]` in the
+       document on each of the two boundary resolutions per selection. */
+    if (document.querySelectorAll(`[data-aid="${aid}"]`).length !== 1) return null;
+    const section = block.closest("section[id]");
+    if (section === null) return null;
+    const id = section.getAttribute("id");
+    if (typeof id !== "string" || id.length > 64 || !SECTION.test(id)) return null;
+    return { element: block, aid, section: id };
+  }
+
+  /* Translate a DOM range into one half-open interval of the normalised text
+     by taking every map span the range touches.  The touched indices must be
+     one contiguous run; anything else is not a selection this anchor grammar
+     can describe. */
+  function intervalFor(map, range) {
+    let first = -1;
+    let last = -1;
+    let count = 0;
+    const probe = new Range();
+    for (let i = 0; i < map.spans.length; i += 1) {
+      const span = map.spans[i];
+      try {
+        probe.setStart(span.startNode, span.startOffset);
+        probe.setEnd(span.endNode, span.endOffset);
+      } catch (error) {
+        return null;
+      }
+      if (probe.compareBoundaryPoints(Range.START_TO_END, range) <= 0) continue;
+      if (probe.compareBoundaryPoints(Range.END_TO_START, range) >= 0) continue;
+      if (first === -1) first = i;
+      last = i;
+      count += 1;
+    }
+    if (count === 0) return null;
+    if (count !== last - first + 1) return null;
+    return { start: first, end: last + 1 };
+  }
+
+  function splitsSurrogate(text, start, end) {
+    const head = text.charCodeAt(start);
+    if (start > 0 && head >= 0xdc00 && head <= 0xdfff) {
+      const before = text.charCodeAt(start - 1);
+      if (before >= 0xd800 && before <= 0xdbff) return true;
+    }
+    const tail = text.charCodeAt(end - 1);
+    if (end < text.length && tail >= 0xd800 && tail <= 0xdbff) {
+      const after = text.charCodeAt(end);
+      if (after >= 0xdc00 && after <= 0xdfff) return true;
+    }
+    return false;
+  }
+
+  /* The inverse of P3-C's text map: a stable aid plus a normalised quote and
+     its context.  No DOM path, source path or ordinal is ever recorded, and a
+     range crossing two blocks is reported, never clamped. */
+  function captureSelection() {
+    if (typeof document.getSelection !== "function") return null;
+    const selection = document.getSelection();
+    if (selection === null || selection.rangeCount !== 1) return null;
+    const range = selection.getRangeAt(0);
+    if (range === null || range.collapsed) return null;
+    const startElement = boundaryElement(range.startContainer);
+    const endElement = boundaryElement(range.endContainer);
+    if (startElement === null || endElement === null) return null;
+    if (!document.contains(startElement) || !document.contains(endElement)) return null;
+    const startBlock = blockOf(startElement);
+    const endBlock = blockOf(endElement);
+    if (startBlock === null || endBlock === null) return null;
+    if (startBlock.element !== endBlock.element) {
+      return { multi: true, rect: range.getBoundingClientRect() };
+    }
+
+    const map = textMap(startBlock.element);
+    const interval = intervalFor(map, range);
+    if (interval === null) return null;
+    const start = interval.start;
+    const end = interval.end;
+    if (splitsSurrogate(map.text, start, end)) return null;
+    const exact = map.text.slice(start, end);
+    if (exact.length === 0 || exact.length > MAX_EXACT) return null;
+    const quote = {
+      block: startBlock.aid,
+      exact,
+      prefix: map.text.slice(Math.max(0, start - CONTEXT_LIMIT), start),
+      suffix: map.text.slice(end, Math.min(map.text.length, end + CONTEXT_LIMIT)),
+      start,
+    };
+    if (!validAnchor(quote)) return null;
+    return { multi: false, anchor: quote, section: startBlock.section, rect: range.getBoundingClientRect() };
+  }
+
+  /* ------------------------------------------------ selection tooltip */
+
+  function removeTooltip() {
+    if (tooltipTimer !== 0) {
+      clearTimeout(tooltipTimer);
+      tooltipTimer = 0;
+    }
+    if (tooltip === null) return;
+    if (tooltip.parentNode !== null) tooltip.parentNode.removeChild(tooltip);
+    tooltip = null;
+  }
+
+  /* This ticket owns no stylesheet, so the transient host carries only the
+     positioning properties it cannot work without. */
+  function placeTooltip(host, rect) {
+    host.style.position = "fixed";
+    host.style.zIndex = "2147483647";
+    host.style.margin = "0";
+    document.body.appendChild(host);
+    const width = host.offsetWidth;
+    const height = host.offsetHeight;
+    const left = Math.min(Math.max(rect.left, 0), Math.max(0, window.innerWidth - width));
+    const above = rect.top - height - 8;
+    const below = Math.min(rect.bottom + 8, Math.max(0, window.innerHeight - height));
+    host.style.left = `${Math.round(left)}px`;
+    host.style.top = `${Math.round(above >= 0 ? above : below)}px`;
+  }
+
+  function showRefusal(rect) {
+    removeTooltip();
+    tooltip = el("div", { role: "status" }, MULTI_BLOCK);
+    placeTooltip(tooltip, rect);
+    tooltipTimer = setTimeout(removeTooltip, REFUSAL_MS);
+  }
+
+  function showCommentTooltip(capture, focusButton) {
+    removeTooltip();
+    const host = el("div");
+    const button = el("button", { type: "button" }, "Comment");
+    /* Keep the document selection alive across the press: the capture that
+       justifies this button is the thing a focus change would destroy. */
+    button.addEventListener("mousedown", (event) => { event.preventDefault(); });
+    button.addEventListener("click", () => {
+      removeTooltip();
+      if (panel !== null && panel.hidden) openPanel(toggle, null);
+      openDraft("comment", toggle, capture);
+    });
+    host.appendChild(button);
+    tooltip = host;
+    placeTooltip(host, capture.rect);
+    /* A pointer user is already next to this button; a keyboard user reached
+       it through Ctrl/Meta+Alt+M and would otherwise have to Tab past the rest
+       of the document to a host that any scroll destroys.  `preventScroll`
+       matters: scrolling here would fire the listener that removes it. */
+    if (focusButton === true) button.focus({ preventScroll: true });
+  }
+
+  function evaluateSelection(focusButton) {
+    if (!mayComment() || panel === null) {
+      removeTooltip();
+      return;
+    }
+    if (draft !== null) return;
+    const capture = captureSelection();
+    if (capture === null) {
+      removeTooltip();
+      return;
+    }
+    if (capture.multi) {
+      showRefusal(capture.rect);
+      return;
+    }
+    if (headVersion() === null) {
+      removeTooltip();
+      return;
+    }
+    showCommentTooltip(capture, focusButton);
+  }
+
+  function clearSelectionTimer() {
+    if (selectionTimer === 0) return;
+    clearTimeout(selectionTimer);
+    selectionTimer = 0;
+  }
+
+  function scheduleSelection() {
+    clearSelectionTimer();
+    selectionTimer = setTimeout(() => {
+      selectionTimer = 0;
+      evaluateSelection();
+    }, SELECTION_DELAY_MS);
+  }
+
+  function selectionChanged() {
+    removeTooltip();
+    scheduleSelection();
+  }
+
+  function selectionSettled() {
+    clearSelectionTimer();
+    evaluateSelection(false);
+  }
+
+  function selectionSettledByKey() {
+    clearSelectionTimer();
+    evaluateSelection(true);
+  }
+
+  function writeKeydown(event) {
+    if (event.key === "Escape") {
+      if (tooltip !== null) removeTooltip();
+      return;
+    }
+    if (event.defaultPrevented || event.repeat) return;
+    if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.shiftKey) return;
+    if (event.code !== "KeyM" && event.key !== "m" && event.key !== "M") return;
+    event.preventDefault();
+    selectionSettledByKey();
+  }
+
+  /* -------------------------------------------------------- transport */
+
+  function createEndpoint() {
+    const endpoint = new URL("/api/threads", location.href);
+    endpoint.searchParams.set("doc", docId);
+    return endpoint;
+  }
+
+  /* `docId` comes from the document's own meta element and is the one value
+     here that reaches a URL *path* rather than a query parameter, so encode
+     it: `new URL` resolves `..` before the same-origin check below, which
+     would therefore not catch a traversal.  Nothing can currently deliver one
+     -- `validThread` refuses every thread unless `docId` matches P3-A's
+     six-hex grammar, so a malformed id renders no thread and no control to
+     press -- but that is an invariant two validators away from this line.
+     `threadId` is already grammar-checked by `THREAD_ID`. */
+  function threadEndpoint(threadId) {
+    return new URL(`/api/threads/${encodeURIComponent(docId)}/${threadId}`, location.href);
+  }
+
+  /* One mutation, one five-second deadline, no retry.  Only P3-A's exact
+     status and plain `{thread}` envelope are a success; 401 and 403 are the
+     one response that changes what this module will ever offer again. */
+  async function writeRequest(method, endpoint, payload, expected) {
+    if (endpoint.origin !== location.origin) return { ok: false, denied: false };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WRITE_DEADLINE_MS);
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (response.status === 401 || response.status === 403) return { ok: false, denied: true };
+      if (response.status !== expected) return { ok: false, denied: false };
+      const envelope = await response.json();
+      if (!exactKeys(envelope, ENVELOPE_KEYS)) return { ok: false, denied: false };
+      const thread = envelope.thread;
+      if (!validThread(thread)) return { ok: false, denied: false };
+      return { ok: true, denied: false, thread };
+    } catch (error) {
+      return { ok: false, denied: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function beginWrite(controls, host) {
+    writing = true;
+    if (host !== null) host.setAttribute("aria-busy", "true");
+    /* Disabling the control the reader just activated resets focus to the
+       document body, and the write may take the full five seconds -- so a
+       keyboard reader would lose their place, and Tab would restart from the
+       top of the document.  Move focus onto the host carrying `aria-busy`
+       before anything is disabled; the settlement paths move it on again. */
+    if (host !== null && controls.indexOf(document.activeElement) !== -1) {
+      if (!host.hasAttribute("tabindex")) host.setAttribute("tabindex", "-1");
+      host.focus();
+    }
+    for (const control of controls) control.disabled = true;
+    setStatus(WRITE_PENDING);
+  }
+
+  function endWrite(controls, host) {
+    writing = false;
+    for (const control of controls) if (control.isConnected) control.disabled = false;
+    if (host !== null && host.isConnected) host.removeAttribute("aria-busy");
+  }
+
+  /* The permission-loss path.  Page-lifetime by construction: only a fresh
+     navigation with a newly validated session can offer a write again. */
+  function denyWrites() {
+    writesDenied = true;
+    closeDraft();
+    removeTooltip();
+    render();
+    /* The repaint that suppresses every write control usually removes the very
+       button `closeDraft` just restored focus to -- a draft's invoker is itself
+       a create control -- which would drop the caret onto `body` and strand a
+       keyboard reader mid-document.  Land it on the panel instead. */
+    keepFocusInPanel();
+    setStatus(WRITE_DENIED);
+    refresh();
+  }
+
+  function keepFocusInPanel() {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && rendered(active)) return;
+    if (rendered(title)) title.focus();
+    else if (rendered(toggle)) toggle.focus();
+  }
+
+  function writeFailed(control) {
+    setStatus(WRITE_FAILED);
+    if (control !== null && rendered(control)) control.focus();
+  }
+
+  function sameAnchor(a, b) {
+    if (a === null || b === null) return a === b;
+    return a.block === b.block && a.exact === b.exact && a.prefix === b.prefix
+      && a.suffix === b.suffix && a.start === b.start;
+  }
+
+  function matchesCreate(thread, request) {
+    if (thread.kind !== request.kind) return false;
+    if (thread.section !== request.section) return false;
+    if (thread.docVersion !== request.docVersion) return false;
+    if (!sameAnchor(thread.anchor, request.kind === "comment" ? request.anchor : null)) return false;
+    if (thread.title !== (request.kind === "discussion" ? request.title : null)) return false;
+    return thread.comments[0].body === request.body;
+  }
+
+  /* Replace or insert one validated record and repaint.  The response is the
+     acknowledgement; nothing here waits for the list to agree. */
+  function integrate(record) {
+    const index = buildBlockIndex();
+    if (index === null) return false;
+    const entry = {
+      thread: record,
+      location: record.kind === "comment" ? locate(record.anchor, index) : null,
+    };
+    const at = model.findIndex((item) => item.thread.id === record.id);
+    const next = model.slice();
+    if (at === -1) next.push(entry);
+    else next[at] = entry;
+    model = next;
+    render();
+    return true;
+  }
+
+  /* ------------------------------------------------------------ drafts */
+
+  function detachDraft() {
+    if (draft === null) return null;
+    const closing = draft;
+    draft = null;
+    if (closing.form.parentNode !== null) closing.form.parentNode.removeChild(closing.form);
+    return closing;
+  }
+
+  function closeDraft() {
+    const closing = detachDraft();
+    if (closing === null) return;
+    const target = rendered(closing.invoker) ? closing.invoker : (rendered(toggle) ? toggle : null);
+    if (target !== null) target.focus();
+  }
+
+  function openDraft(kind, invoker, capture) {
+    if (panel === null || !mayComment()) return;
+    const version = headVersion();
+    if (version === null) return;
+    let options = null;
+    if (kind === "discussion") {
+      options = sectionInventory();
+      if (options === null) return;
+    }
+    closeDraft();
+    removeTooltip();
+
+    const form = el("form", { class: "doc-comments-draft" });
+    form.noValidate = true;
+    form.appendChild(el("h3", undefined, kind === "comment" ? "New comment" : "New discussion"));
+
+    let sectionSelect = null;
+    let titleInput = null;
+    if (kind === "comment") {
+      form.appendChild(el("blockquote", undefined, capture.anchor.exact));
+    } else {
+      const sectionId = "doc-comments-draft-section";
+      form.appendChild(el("label", { for: sectionId }, "Section"));
+      sectionSelect = el("select", { id: sectionId, required: "" });
+      for (const option of options) {
+        const node = el("option", { value: option.id }, option.label);
+        sectionSelect.appendChild(node);
+      }
+      sectionSelect.value = defaultSection(options);
+      form.appendChild(sectionSelect);
+
+      const titleId = "doc-comments-draft-title";
+      form.appendChild(el("label", { for: titleId }, "Title"));
+      titleInput = el("input", { id: titleId, type: "text", required: "" });
+      titleInput.maxLength = MAX_TITLE;
+      form.appendChild(titleInput);
+    }
+
+    const bodyId = "doc-comments-draft-body";
+    form.appendChild(el("label", { for: bodyId }, "Message"));
+    const body = el("textarea", { id: bodyId, required: "" });
+    body.maxLength = MAX_BODY;
+    form.appendChild(body);
+
+    const submit = el("button", { type: "submit" }, kind === "comment" ? "Add comment" : "Start discussion");
+    const cancel = el("button", { type: "button" }, "Cancel");
+    cancel.addEventListener("click", () => { closeDraft(); });
+    form.appendChild(submit);
+    form.appendChild(cancel);
+
+    const state = { form, invoker, kind, capture, sectionSelect, titleInput, body, submit, cancel };
+    const send = () => { submitDraft(state); };
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      send();
+    });
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeDraft();
+        return;
+      }
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        send();
+      }
+    });
+
+    panel.insertBefore(form, list);
+    draft = state;
+    body.focus();
+  }
+
+  function submitDraft(state) {
+    if (draft !== state || writing || !mayComment()) return;
+    const version = headVersion();
+    if (version === null) return;
+    const text = state.body.value;
+    /* The `trim()` test is ours, not the spec's: P3-A's body grammar rejects a
+       whitespace-only comment server-side, so sending one only burns the
+       five-second deadline to render a failure the reader can't act on. */
+    if (text.length === 0 || text.length > MAX_BODY || text.trim().length === 0) return;
+
+    let request;
+    if (state.kind === "comment") {
+      request = {
+        kind: "comment",
+        section: state.capture.section,
+        anchor: state.capture.anchor,
+        docVersion: version,
+        body: text,
+      };
+    } else {
+      const section = state.sectionSelect.value;
+      if (typeof section !== "string" || section.length > 64 || !SECTION.test(section)) return;
+      const heading = state.titleInput.value;
+      if (heading.length === 0 || heading.length > MAX_TITLE || heading.trim().length === 0) return;
+      request = {
+        kind: "discussion",
+        section,
+        anchor: null,
+        title: heading,
+        docVersion: version,
+        body: text,
+      };
+    }
+    runCreate(state, request);
+  }
+
+  async function runCreate(state, request) {
+    const controls = [state.submit, state.cancel];
+    beginWrite(controls, state.form);
+    const result = await writeRequest("POST", createEndpoint(), request, 201);
+    endWrite(controls, state.form);
+    if (result.denied) {
+      denyWrites();
+      return;
+    }
+    if (!result.ok || !matchesCreate(result.thread, request) || !integrate(result.thread)) {
+      writeFailed(draft === state ? state.body : null);
+      return;
+    }
+    /* Only the draft that was submitted is taken down: the reader may have
+       opened another one while this request was in flight. */
+    if (draft === state) detachDraft();
+    setStatus(WRITE_SAVED);
+    focusCard(result.thread.id);
+  }
+
+  /* --------------------------------------------- replies and status */
+
+  function replyForm(entry, host) {
+    const threadId = entry.thread.id;
+    const form = el("form", { class: "doc-comments-reply" });
+    form.noValidate = true;
+    const fieldId = `doc-comments-reply-${threadId}`;
+    form.appendChild(el("label", { for: fieldId }, "Reply"));
+    const body = el("textarea", { id: fieldId, required: "" });
+    body.maxLength = MAX_BODY;
+    form.appendChild(body);
+    const submit = el("button", { type: "submit" }, "Reply");
+    form.appendChild(submit);
+
+    const send = () => {
+      if (writing || !mayComment()) return;
+      const text = body.value;
+      if (text.length === 0 || text.length > MAX_BODY || text.trim().length === 0) return;
+      runReply(threadId, text, [submit, body], form, host, body);
+    };
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      send();
+    });
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        send();
+      }
+    });
+    return form;
+  }
+
+  async function runReply(threadId, text, controls, form, host, focusOnFailure) {
+    beginWrite(controls, form);
+    const result = await writeRequest("POST", threadEndpoint(threadId), { body: text }, 200);
+    endWrite(controls, form);
+    if (result.denied) {
+      denyWrites();
+      return;
+    }
+    if (!result.ok || session === null) {
+      writeFailed(focusOnFailure);
+      return;
+    }
+    const thread = result.thread;
+    const last = thread.comments[thread.comments.length - 1];
+    if (thread.id !== threadId || last.body !== text || last.author.sub !== session.sub) {
+      writeFailed(focusOnFailure);
+      return;
+    }
+    if (!integrate(thread)) {
+      writeFailed(focusOnFailure);
+      return;
+    }
+    setStatus(WRITE_SAVED);
+    focusMessage(thread.id, thread.comments.length - 1);
+  }
+
+  function statusButton(entry, host) {
+    const thread = entry.thread;
+    const next = thread.status === "open" ? "resolved" : "open";
+    const button = el("button", {
+      type: "button",
+      class: "doc-comments-status-action",
+    }, thread.status === "open" ? "Resolve" : "Reopen");
+    button.addEventListener("click", () => {
+      if (writing || !mayControl(thread)) return;
+      runStatus(thread.id, next, button, host);
+    });
+    return button;
+  }
+
+  async function runStatus(threadId, next, button, host) {
+    beginWrite([button], host);
+    const result = await writeRequest("PATCH", threadEndpoint(threadId), { status: next }, 200);
+    endWrite([button], host);
+    if (result.denied) {
+      denyWrites();
+      return;
+    }
+    if (!result.ok || result.thread.id !== threadId || result.thread.status !== next
+      || !integrate(result.thread)) {
+      writeFailed(button);
+      return;
+    }
+    setStatus(WRITE_SAVED);
+    focusCard(threadId);
+  }
+
+  /* A newly appended message is the thing the reader just wrote; the card
+     heading, then the panel heading, are the fallbacks when a filter hides
+     it. */
+  function focusMessage(threadId, index) {
+    const card = cards.get(threadId);
+    if (card === undefined) {
+      title.focus();
+      return;
+    }
+    const items = card.article.querySelectorAll(".doc-comments-messages > li");
+    const item = items[index];
+    if (item === undefined) {
+      focusCard(threadId);
+      return;
+    }
+    item.focus();
+    if (document.activeElement !== item) focusCard(threadId);
+  }
+
+  function renderActions() {
+    if (actions === null) return;
+    actions.replaceChildren();
+    if (!mayComment()) return;
+    if (headVersion() === null || sectionInventory() === null) return;
+    const start = el("button", { type: "button", id: "doc-comments-start" }, "Start discussion");
+    start.addEventListener("click", () => { openDraft("discussion", start, null); });
+    actions.appendChild(start);
+  }
+
   /* ------------------------------------------------------- lifecycle */
 
   document.addEventListener("session", (event) => {
     const detail = event.detail;
     if (detail === null || typeof detail !== "object") return;
     if (activated) return;
+    session = projectSession(detail);
     activated = true;
     refresh();
   }, { once: true });
@@ -2559,6 +4266,1894 @@ function buildBar(count, current, onMarkRead) {
 }
 
 runHistory();
+
+</script>
+<script type="module">
+// realtime.js — the optional client realtime transport.
+//
+// Dark by default. It activates only from P2-C's valid `session` event, asks
+// P2-F for a narrow one-hour token, subscribes to the document's two separated
+// Ably channels over one SSE connection, and publishes the four permitted
+// ephemeral client events over REST. Everything it exposes is one frozen
+// `window.doc.realtime.publish()` and validated `doc:event` details; no
+// credential, channel, or transport object ever leaves this closure.
+//
+// Realtime is a hint layer. Nothing durable waits on it, so every failure is a
+// silent, permanent degrade rather than a notice, retry loop, or thrown error.
+
+(() => {
+  "use strict";
+
+  const ABLY_ORIGIN = "https://main.realtime.ably.net";
+  const ABLY_VERSION = "1.2";
+  const TOKEN_TIMEOUT_MS = 7000;
+  const PUBLISH_TIMEOUT_MS = 5000;
+  const CLOCK_SKEW_MS = 60000;
+  const TOKEN_TTL_MS = 3600000;
+  const TOKEN_LIMIT = 8192;
+  const REST_LIMIT = 4096;
+  const MESSAGE_LIMIT = 4096;
+  const CURSOR_LIMIT = 512;
+  const AUTH_CODE_MIN = 40140;
+  const AUTH_CODE_MAX = 40149;
+
+  const DOC_ID_RE = /^[0-9a-f]{6}$/;
+  const CLIENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+  const AID_RE = /^a[0-9a-f]{8}$/;
+  const THREAD_ID_RE = /^t_[0-9a-z]{1,48}_[0-9a-f]{8}$/;
+  const HASH_RE = /^[0-9a-f]{64}$/;
+  const TOKEN_TEXT_RE = /^[\u0021-\u007e]{1,343}$/;
+  const CONTENT_LENGTH_RE = /^(?:0|[1-9][0-9]{0,3})$/;
+  const MEDIA_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+  const MEDIA_QUOTED_RE = /^"(?:[^"\\\u0000-\u001f]|\\[\u0020-\u007e])*"$/;
+  const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+  const CURSOR_INVALID_RE = /[\u0000\r\n]/;
+
+  // Gate 1: no EventSource, no transport, no listener, no global.
+  if (typeof window.EventSource !== "function") return;
+
+  // Gate 2: a `file:` artifact stops before anything observable happens.
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+
+  // P1-B owns `window.doc`. Never overwrite another owner's realtime surface.
+  const namespace = window.doc;
+  if (namespace === null || typeof namespace !== "object") return;
+  if (Object.prototype.hasOwnProperty.call(namespace, "realtime")) return;
+
+  const encoder = new TextEncoder();
+
+  let dark = false;
+  let started = false;
+  let activation = null;
+  let credential = null;
+  let refreshing = null;
+  let awaitingOpen = false;
+  let stream = null;
+  let streamHandlers = null;
+  let generation = 0;
+  let cursor = "";
+  let docId = "";
+  let serverChannel = "";
+  let clientChannel = "";
+  let tokenController = null;
+  let acquiring = false;
+  let suspended = false;
+  let suspendedAcquisition = false;
+  let restartNeeded = false;
+  const publishControllers = new Set();
+
+  // --- Reflection helpers -------------------------------------------------
+  //
+  // Every provider and caller value is inspected through descriptors inside a
+  // defensive boundary, so an exotic object fails closed instead of running an
+  // accessor or a proxy trap in our stead.
+
+  // Prototype identity is realm-scoped: a plain object handed over from another
+  // realm (an iframe, a worker, a test harness) carries a structurally
+  // identical but non-identical `Object.prototype`. Accept that shape and still
+  // reject a null, custom, or deeper prototype chain.
+  const ordinaryObject = (value) => {
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype) return true;
+    return (
+      proto !== null &&
+      Object.getPrototypeOf(proto) === null &&
+      Object.prototype.hasOwnProperty.call(proto, "hasOwnProperty") &&
+      Object.prototype.hasOwnProperty.call(proto, "isPrototypeOf")
+    );
+  };
+
+  const ownDataKeys = (value) => {
+    if (value === null || typeof value !== "object") return null;
+    try {
+      if (Array.isArray(value)) return null;
+      if (!ordinaryObject(value)) return null;
+      const names = [];
+      for (const key of Reflect.ownKeys(value)) {
+        if (typeof key !== "string") return null;
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor === undefined) return null;
+        if (!Object.prototype.hasOwnProperty.call(descriptor, "value")) return null;
+        if (
+          descriptor.enumerable !== true ||
+          descriptor.writable !== true ||
+          descriptor.configurable !== true
+        ) {
+          return null;
+        }
+        names.push(key);
+      }
+      return names;
+    } catch (ignored) {
+      return null;
+    }
+  };
+
+  const exactKeys = (names, expected) =>
+    names.length === expected.length && expected.every((key) => names.includes(key));
+
+  const matches = (pattern, value) => typeof value === "string" && pattern.test(value);
+
+  // A dense ordinary array holding each expected operation exactly once.
+  const operationList = (value, expected) => {
+    if (value === null || typeof value !== "object") return false;
+    try {
+      if (!Array.isArray(value)) return false;
+      if (Object.getPrototypeOf(value) !== Array.prototype) return false;
+      const keys = Reflect.ownKeys(value);
+      if (keys.length !== expected.length + 1) return false;
+      const found = [];
+      for (let index = 0; index < expected.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined) return false;
+        if (!Object.prototype.hasOwnProperty.call(descriptor, "value")) return false;
+        if (
+          descriptor.enumerable !== true ||
+          descriptor.writable !== true ||
+          descriptor.configurable !== true
+        ) {
+          return false;
+        }
+        found.push(descriptor.value);
+      }
+      if (value.length !== expected.length) return false;
+      return expected.every(
+        (operation) => found.filter((entry) => entry === operation).length === 1,
+      );
+    } catch (ignored) {
+      return false;
+    }
+  };
+
+  // --- Bounded response bodies --------------------------------------------
+
+  const jsonMedia = (response) => {
+    let raw;
+    try {
+      raw = response.headers.get("content-type");
+    } catch (ignored) {
+      return false;
+    }
+    if (typeof raw !== "string") return false;
+    const parts = raw.split(";");
+    if (parts[0].trim().toLowerCase() !== "application/json") return false;
+    for (let index = 1; index < parts.length; index += 1) {
+      const parameter = parts[index].trim();
+      const equals = parameter.indexOf("=");
+      if (equals <= 0) return false;
+      const name = parameter.slice(0, equals);
+      const value = parameter.slice(equals + 1);
+      if (!MEDIA_TOKEN_RE.test(name)) return false;
+      if (!MEDIA_TOKEN_RE.test(value) && !MEDIA_QUOTED_RE.test(value)) return false;
+    }
+    return true;
+  };
+
+  // The one body reader. Returns `{ value }` for a parsed body, or null. A
+  // declared length larger than the endpoint's limit fails before the stream is
+  // even touched, and no partial byte survives a failure.
+  const readBoundedJson = async (response, limit) => {
+    let declared;
+    try {
+      declared = response.headers.get("content-length");
+    } catch (ignored) {
+      return null;
+    }
+    if (declared !== null && declared !== undefined) {
+      if (!CONTENT_LENGTH_RE.test(declared)) return null;
+      if (Number(declared) > limit) return null;
+    }
+
+    let reader = null;
+    try {
+      const body = response.body;
+      if (body === null || body === undefined) return null;
+      reader = body.getReader();
+    } catch (ignored) {
+      return null;
+    }
+    if (reader === null || reader === undefined) return null;
+
+    let decoded = null;
+    let complete = false;
+    let ok = false;
+    try {
+      const parts = [];
+      let total = 0;
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done === true) break;
+        const value = chunk.value;
+        if (!(value instanceof Uint8Array)) throw new Error();
+        const size = value.byteLength;
+        if (!Number.isSafeInteger(size)) throw new Error();
+        const next = total + size;
+        if (!Number.isSafeInteger(next) || next > limit) throw new Error();
+        total = next;
+        parts.push(value);
+      }
+      complete = true;
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const part of parts) {
+        merged.set(part, offset);
+        offset += part.byteLength;
+      }
+      decoded = new TextDecoder("utf-8", { fatal: true }).decode(merged);
+      ok = true;
+    } catch (ignored) {
+      ok = false;
+      if (!complete) {
+        try {
+          await reader.cancel();
+        } catch (swallowed) {
+          // A cancellation rejection is folded into the same failure.
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch (ignored) {
+        ok = false;
+      }
+    }
+    if (!ok) return null;
+    try {
+      return { value: JSON.parse(decoded) };
+    } catch (ignored) {
+      return null;
+    }
+  };
+
+  // --- Credential acquisition ---------------------------------------------
+
+  const validCapability = (value) => {
+    if (typeof value !== "string") return false;
+    let parsed;
+    try {
+      parsed = JSON.parse(value);
+    } catch (ignored) {
+      return false;
+    }
+    const keys = ownDataKeys(parsed);
+    if (keys === null || !exactKeys(keys, [serverChannel, clientChannel])) return false;
+    return (
+      operationList(parsed[serverChannel], ["subscribe"]) &&
+      operationList(parsed[clientChannel], ["publish", "subscribe"])
+    );
+  };
+
+  const validToken = (value, requestTime, responseTime) => {
+    const keys = ownDataKeys(value);
+    if (keys === null) return null;
+    if (!exactKeys(keys, ["token", "issued", "expires", "capability", "clientId"])) return null;
+    const text = value.token;
+    const issued = value.issued;
+    const expires = value.expires;
+    const clientId = value.clientId;
+    if (typeof text !== "string" || !TOKEN_TEXT_RE.test(text)) return null;
+    if (!Number.isSafeInteger(issued) || !Number.isSafeInteger(expires)) return null;
+    if (issued < requestTime - CLOCK_SKEW_MS) return null;
+    if (issued > responseTime + CLOCK_SKEW_MS) return null;
+    if (expires <= responseTime) return null;
+    if (expires <= issued) return null;
+    if (expires - issued > TOKEN_TTL_MS) return null;
+    if (expires > responseTime + TOKEN_TTL_MS + CLOCK_SKEW_MS) return null;
+    if (!matches(CLIENT_ID_RE, clientId)) return null;
+    if (!validCapability(value.capability)) return null;
+    return {
+      token: text,
+      issued,
+      expires,
+      capability: value.capability,
+      clientId,
+    };
+  };
+
+  const acquireToken = async () => {
+    const controller = new AbortController();
+    tokenController = controller;
+    const timer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch (ignored) {
+        // An abort failure just leaves the fetch to its own outcome.
+      }
+    }, TOKEN_TIMEOUT_MS);
+    const requestTime = Date.now();
+    try {
+      const response = await fetch(`/api/realtime-token?doc=${docId}`, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (response.status !== 200) return null;
+      if (!jsonMedia(response)) return null;
+      const parsed = await readBoundedJson(response, TOKEN_LIMIT);
+      if (parsed === null) return null;
+      return validToken(parsed.value, requestTime, Date.now());
+    } catch (ignored) {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      if (tokenController === controller) tokenController = null;
+    }
+  };
+
+  // --- The stream ---------------------------------------------------------
+
+  const closeStream = () => {
+    generation += 1;
+    const current = stream;
+    const handlers = streamHandlers;
+    stream = null;
+    streamHandlers = null;
+    if (current === null || current === undefined) return;
+    if (handlers !== null) {
+      for (const type of ["message", "error", "open"]) {
+        try {
+          current.removeEventListener(type, handlers[type]);
+        } catch (ignored) {
+          // Detachment is best effort; close() below is the real guarantee.
+        }
+      }
+    }
+    try {
+      current.close();
+    } catch (ignored) {
+      // The platform closes an abandoned EventSource with the Document anyway.
+    }
+  };
+
+  const degrade = () => {
+    if (dark) return;
+    dark = true;
+    try {
+      document.removeEventListener("session", onSession);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    } catch (ignored) {
+      // Keep tearing the rest down even if listener removal throws.
+    }
+    closeStream();
+    if (tokenController !== null) {
+      try {
+        tokenController.abort();
+      } catch (ignored) {
+        // Ignored: the acquisition already resolves to a dark transport.
+      }
+      tokenController = null;
+    }
+    for (const controller of publishControllers) {
+      try {
+        controller.abort();
+      } catch (ignored) {
+        // Ignored: each publication settles false on its own.
+      }
+    }
+    publishControllers.clear();
+    credential = null;
+    activation = null;
+    refreshing = null;
+    cursor = "";
+    awaitingOpen = false;
+  };
+
+  const updateCursor = (value) => {
+    if (
+      typeof value === "string" &&
+      value.length <= CURSOR_LIMIT &&
+      !CURSOR_INVALID_RE.test(value)
+    ) {
+      cursor = value;
+      return;
+    }
+    cursor = "";
+  };
+
+  // Normalize one enveloped provider message into a frozen `doc:event` detail,
+  // or null. The channel is checked before the name, which is what keeps P2-F's
+  // server/client trust boundary intact after both channels share a transport.
+  const normalize = (raw) => {
+    if (typeof raw !== "string") return null;
+    let envelope;
+    try {
+      envelope = JSON.parse(raw);
+    } catch (ignored) {
+      return null;
+    }
+    const outer = ownDataKeys(envelope);
+    if (outer === null) return null;
+    if (
+      !outer.includes("channel") ||
+      !outer.includes("name") ||
+      !outer.includes("encoding") ||
+      !outer.includes("data")
+    ) {
+      return null;
+    }
+    const channel = envelope.channel;
+    const name = envelope.name;
+    const payload = envelope.data;
+    if (typeof channel !== "string" || typeof name !== "string") return null;
+    if (envelope.encoding !== "json" || typeof payload !== "string") return null;
+    if (encoder.encode(payload).byteLength > MESSAGE_LIMIT) return null;
+
+    let data;
+    try {
+      data = JSON.parse(payload);
+    } catch (ignored) {
+      return null;
+    }
+    const fields = ownDataKeys(data);
+    if (fields === null) return null;
+
+    if (channel === serverChannel) {
+      if (name === "thread.changed") {
+        if (!exactKeys(fields, ["threadId"])) return null;
+        if (!matches(THREAD_ID_RE, data.threadId)) return null;
+        return Object.freeze({ source: "server", t: "thread.changed", threadId: data.threadId });
+      }
+      if (name === "edit.saved") {
+        if (!exactKeys(fields, ["aid", "hash"])) return null;
+        if (!matches(AID_RE, data.aid) || !matches(HASH_RE, data.hash)) return null;
+        return Object.freeze({
+          source: "server",
+          t: "edit.saved",
+          aid: data.aid,
+          hash: data.hash,
+        });
+      }
+      return null;
+    }
+
+    if (channel !== clientChannel) return null;
+    if (!outer.includes("clientId")) return null;
+    const clientId = envelope.clientId;
+    if (!matches(CLIENT_ID_RE, clientId)) return null;
+
+    if (name === "beat") {
+      if (!exactKeys(fields, ["label", "act", "aid"])) return null;
+      const label = data.label;
+      const act = data.act;
+      const aid = data.aid;
+      if (typeof label !== "string" || label.length < 1 || label.length > 24) return null;
+      if (CONTROL_RE.test(label)) return null;
+      if (act !== "reading" && act !== "editing") return null;
+      if (aid !== null && !matches(AID_RE, aid)) return null;
+      return Object.freeze({ source: "client", t: "beat", clientId, label, act, aid });
+    }
+    if (name === "bye") {
+      if (!exactKeys(fields, [])) return null;
+      return Object.freeze({ source: "client", t: "bye", clientId });
+    }
+    if (name === "edit.claim" || name === "edit.release") {
+      if (!exactKeys(fields, ["aid"])) return null;
+      if (!matches(AID_RE, data.aid)) return null;
+      return Object.freeze({ source: "client", t: name, clientId, aid: data.aid });
+    }
+    return null;
+  };
+
+  const receive = (event) => {
+    updateCursor(event.lastEventId);
+    const detail = normalize(event.data);
+    if (detail === null) return;
+    document.dispatchEvent(new CustomEvent("doc:event", { detail }));
+  };
+
+  // Only a parseable Ably error body with an own safe-integer `code` is a
+  // refresh candidate; a bare browser reconnect carries no such body.
+  const sseErrorCode = (raw) => {
+    if (typeof raw !== "string") return null;
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (ignored) {
+      return null;
+    }
+    const keys = ownDataKeys(parsed);
+    if (keys === null || !keys.includes("code")) return null;
+    return Number.isSafeInteger(parsed.code) ? parsed.code : null;
+  };
+
+  const restErrorCode = (value) => {
+    const keys = ownDataKeys(value);
+    if (keys === null || !keys.includes("error")) return null;
+    const inner = value.error;
+    const innerKeys = ownDataKeys(inner);
+    if (innerKeys === null || !innerKeys.includes("code")) return null;
+    return Number.isSafeInteger(inner.code) ? inner.code : null;
+  };
+
+  const isAuthCode = (code) =>
+    code !== null && code >= AUTH_CODE_MIN && code <= AUTH_CODE_MAX;
+
+  const attach = (resume) => {
+    if (dark || credential === null) return;
+    // Never let two streams overlap: a `pageshow` landing during an in-flight
+    // refresh would otherwise attach beside the replacement it is racing.
+    closeStream();
+    const local = generation + 1;
+    generation = local;
+
+    const url = new URL(`${ABLY_ORIGIN}/sse`);
+    url.searchParams.set("v", ABLY_VERSION);
+    url.searchParams.set("channels", `${serverChannel},${clientChannel}`);
+    url.searchParams.set("enveloped", "true");
+    url.searchParams.set("accessToken", credential.token);
+    if (resume && cursor !== "") url.searchParams.set("lastEvent", cursor);
+
+    let source;
+    try {
+      source = new EventSource(url.href, { withCredentials: false });
+    } catch (ignored) {
+      degrade();
+      return;
+    }
+
+    const handlers = {
+      message: (event) => {
+        if (local === generation) receive(event);
+      },
+      error: (event) => {
+        if (local === generation) streamError(event, source);
+      },
+      open: () => {
+        if (local === generation) awaitingOpen = false;
+      },
+    };
+    stream = source;
+    streamHandlers = handlers;
+    try {
+      source.addEventListener("message", handlers.message);
+      source.addEventListener("error", handlers.error);
+      source.addEventListener("open", handlers.open);
+    } catch (ignored) {
+      degrade();
+    }
+  };
+
+  // One shared refresh: SSE expiry and a REST 401 racing each other must not
+  // mint two credentials or leave two streams live.
+  const refresh = () => {
+    if (refreshing !== null) return refreshing;
+    const run = (async () => {
+      closeStream();
+      const next = await acquireToken();
+      if (dark) return null;
+      if (next === null) {
+        degrade();
+        return null;
+      }
+      credential = next;
+      awaitingOpen = true;
+      attach(true);
+      return next;
+    })();
+    refreshing = run;
+    const clear = () => {
+      if (refreshing === run) refreshing = null;
+    };
+    run.then(clear, clear);
+    return run;
+  };
+
+  const streamError = (event, source) => {
+    if (dark) return;
+    const code = sseErrorCode(event === null || event === undefined ? null : event.data);
+    if (isAuthCode(code)) {
+      // A replacement that never opened and fails again is a loop, not a race.
+      if (awaitingOpen) {
+        degrade();
+        return;
+      }
+      refresh();
+      return;
+    }
+    if (code !== null) {
+      degrade();
+      return;
+    }
+    // A generic error while CONNECTING belongs to the browser's own reconnect
+    // and backoff algorithm. We neither close it nor time it.
+    let readyState;
+    try {
+      readyState = source.readyState;
+    } catch (ignored) {
+      readyState = EventSource.CLOSED;
+    }
+    if (readyState === EventSource.CONNECTING) return;
+    degrade();
+  };
+
+  // --- Activation ---------------------------------------------------------
+
+  const begin = async () => {
+    acquiring = true;
+    const next = await acquireToken();
+    acquiring = false;
+    if (dark) return false;
+    if (next !== null) {
+      credential = next;
+      attach(false);
+      return true;
+    }
+    // An abort caused by BFCache suspension is not a provider failure: the
+    // original acquisition is simply resumed on restore.
+    if (suspendedAcquisition) {
+      suspendedAcquisition = false;
+      if (suspended) restartNeeded = true;
+      else activation = begin();
+      return false;
+    }
+    degrade();
+    return false;
+  };
+
+  function onSession(event) {
+    if (dark || started) return;
+    const detail = event === null || event === undefined ? null : event.detail;
+    if (detail === null || typeof detail !== "object" || Array.isArray(detail)) return;
+
+    let mode;
+    let metas;
+    try {
+      mode = document.documentElement.getAttribute("data-session");
+      metas = document.querySelectorAll('meta[name="doc-id"]');
+    } catch (ignored) {
+      return;
+    }
+    if (mode !== "reader" && mode !== "editor") return;
+    if (metas === null || metas === undefined || metas.length !== 1) return;
+
+    let content;
+    try {
+      content = metas[0].getAttribute("content");
+    } catch (ignored) {
+      return;
+    }
+    if (!matches(DOC_ID_RE, content)) return;
+
+    started = true;
+    docId = content;
+    serverChannel = `doc:${docId}:server`;
+    clientChannel = `doc:${docId}:client`;
+    try {
+      document.removeEventListener("session", onSession);
+    } catch (ignored) {
+      // A stuck listener is harmless: `started` already makes it a no-op.
+    }
+    activation = begin();
+  }
+
+  function onPageHide() {
+    if (dark) return;
+    suspended = true;
+    closeStream();
+    if (acquiring) suspendedAcquisition = true;
+    if (tokenController !== null) {
+      try {
+        tokenController.abort();
+      } catch (ignored) {
+        // Ignored: the acquisition restarts from `pageshow` either way.
+      }
+    }
+  }
+
+  function onPageShow(event) {
+    if (dark) return;
+    const persisted = event === null || event === undefined ? false : event.persisted;
+    if (persisted !== true) return;
+    suspended = false;
+    if (!started) return;
+    if (credential !== null) {
+      attach(true);
+      return;
+    }
+    if (restartNeeded) {
+      restartNeeded = false;
+      activation = begin();
+    }
+  }
+
+  // --- The published surface ----------------------------------------------
+
+  const clientMessage = (event) => {
+    const keys = ownDataKeys(event);
+    if (keys === null) return null;
+    const t = event.t;
+    if (t === "beat") {
+      if (!exactKeys(keys, ["t", "label", "act", "aid"])) return null;
+      const label = event.label;
+      const act = event.act;
+      const aid = event.aid;
+      if (typeof label !== "string" || label.length < 1 || label.length > 24) return null;
+      if (CONTROL_RE.test(label)) return null;
+      if (act !== "reading" && act !== "editing") return null;
+      if (aid !== null && !matches(AID_RE, aid)) return null;
+      return { name: "beat", data: { label, act, aid } };
+    }
+    if (t === "bye") {
+      if (!exactKeys(keys, ["t"])) return null;
+      return { name: "bye", data: {} };
+    }
+    if (t === "edit.claim" || t === "edit.release") {
+      if (!exactKeys(keys, ["t", "aid"])) return null;
+      if (!matches(AID_RE, event.aid)) return null;
+      return { name: t, data: { aid: event.aid } };
+    }
+    return null;
+  };
+
+  const validAcknowledgement = (value) => {
+    const keys = ownDataKeys(value);
+    if (keys === null) return false;
+    if (value.channel !== clientChannel) return false;
+    return typeof value.messageId === "string" && value.messageId !== "";
+  };
+
+  const send = async (message, allowRefresh) => {
+    const used = credential;
+    if (dark || used === null) return false;
+
+    const controller = new AbortController();
+    publishControllers.add(controller);
+    const timer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch (ignored) {
+        // The publication settles false on its own if abort is unavailable.
+      }
+    }, PUBLISH_TIMEOUT_MS);
+
+    let outcome = false;
+    let authFailure = false;
+    try {
+      const response = await fetch(
+        `${ABLY_ORIGIN}/channels/${encodeURIComponent(clientChannel)}/messages?v=${ABLY_VERSION}`,
+        {
+          method: "POST",
+          mode: "cors",
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+          keepalive: true,
+          headers: {
+            Authorization: `Bearer ${btoa(used.token)}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: message.name,
+            data: message.data,
+            clientId: used.clientId,
+          }),
+          signal: controller.signal,
+        },
+      );
+      if (jsonMedia(response)) {
+        const parsed = await readBoundedJson(response, REST_LIMIT);
+        if (parsed !== null) {
+          if (response.status === 201) outcome = validAcknowledgement(parsed.value);
+          else authFailure = isAuthCode(restErrorCode(parsed.value));
+        }
+      }
+    } catch (ignored) {
+      outcome = false;
+    } finally {
+      clearTimeout(timer);
+      publishControllers.delete(controller);
+    }
+
+    if (outcome || !authFailure || !allowRefresh || dark) return outcome;
+
+    // Exactly one retry, on exactly one replacement credential. A caller that
+    // lost the race to another refresh reuses the current credential instead of
+    // minting a second one.
+    const replacement = credential !== null && credential !== used ? credential : await refresh();
+    if (replacement === null || dark) return false;
+    return await send(message, false);
+  };
+
+  async function publish(event) {
+    const message = clientMessage(event);
+    if (message === null) return false;
+    if (dark) return false;
+    const pending = activation;
+    if (pending === null) return false;
+    try {
+      await pending;
+    } catch (ignored) {
+      return false;
+    }
+    if (dark || credential === null) return false;
+    return await send(message, true);
+  }
+
+  window.doc.realtime = Object.freeze({ publish });
+
+  document.addEventListener("session", onSession);
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", onPageShow);
+})();
+
+</script>
+<script type="module">
+// presence.js — the optional, client-derived presence layer.
+//
+// Presence is decoration, never document state. Every tab derives it
+// independently from P3-F's authenticated client-channel `beat` and `bye`
+// events, so it may be incomplete, delayed, duplicated or briefly stale
+// without changing access, editing, comments or durable content.
+//
+// P3-F owns transport absolutely. This module reaches for exactly one frozen
+// method — `window.doc.realtime.publish()` — and one closed bus, `doc:event`.
+// It never learns a credential, a channel, or a connection state. A successful
+// publish or an accepted client event is the only proof that transport exists,
+// which is what keeps a realtime-disabled deployment visually dark without
+// asking P3-F for a state getter it deliberately does not expose.
+//
+// The one persisted fact is a local privacy preference. Storage that is
+// corrupt or unavailable fails closed toward silence: a reader who cannot be
+// proven visible-by-default is treated as hidden and gets only a recovery
+// toggle, so they can opt back in without first disclosing a client ID.
+
+(() => {
+  "use strict";
+
+  const BEAT_MS = 20000;
+  const LEASE_MS = 50000;
+  const SWEEP_MS = 5000;
+  const MAX_READERS = 200;
+  const STORAGE_KEY = "doc.presence.hidden.v1";
+  const CLIENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+  const AID_RE = /^a[0-9a-f]{8}$/;
+
+  const DOC_RE = /^[0-9a-f]{6}$/;
+  const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+  const WHITESPACE_RUN_RE = /\s+/gu;
+
+  const LABEL_LIMIT = 24;
+  const MAX_FACES = 5;
+  const MAX_MARKER_INITIALS = 3;
+  const MARKER_OFFSET_PX = 28;
+  const MARKER_GAP_PX = 20;
+  const RAIL_EDGE_PX = 4;
+  const COLOURS = 8;
+
+  const LEGACY_KEYS = ["sub", "email", "name", "roles", "canComment", "canEdit"];
+  const FINAL_KEYS = [
+    "sub", "email", "name", "roles", "canComment", "canEdit",
+    "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+  ];
+  const FINAL_BOOLEANS = ["shared", "canSuggest", "canAccept", "canShare", "canSeeMembers"];
+  const ROLE_VALUES = ["owner", "editor", "commenter", "viewer", "none"];
+  const BEAT_KEYS = ["source", "t", "clientId", "label", "act", "aid"];
+  const BYE_KEYS = ["source", "t", "clientId"];
+  const OWN_BEAT_KEYS = ["label", "act", "aid"];
+
+  const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+  const sameSequence = (actual, expected) => {
+    if (actual.length !== expected.length) return false;
+    for (let index = 0; index < expected.length; index += 1) {
+      if (actual[index] !== expected[index]) return false;
+    }
+    return true;
+  };
+
+  // Descriptor-shaped validation, never a read: an accessor must be rejected
+  // without ever being invoked.
+  const plainDataKey = (value, key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined) return false;
+    if (!own(descriptor, "value")) return false;
+    return descriptor.enumerable === true
+      && descriptor.writable === false
+      && descriptor.configurable === false;
+  };
+
+  // --- Predecessor surfaces -------------------------------------------------
+
+  // A missing predecessor is a gap to stay silent about, not one to fill in.
+  // Nothing observable — no listener, timer, storage read or clock read —
+  // happens when any of these is absent.
+  function prerequisites() {
+    try {
+      const protocol = location.protocol;
+      if (protocol !== "http:" && protocol !== "https:") return null;
+
+      const namespace = window.doc;
+      if (namespace === null || typeof namespace !== "object") return null;
+
+      const surface = namespace.realtime;
+      if (surface === null || typeof surface !== "object") return null;
+      if (!Object.isFrozen(surface)) return null;
+      if (Object.getOwnPropertySymbols(surface).length !== 0) return null;
+      const names = Object.getOwnPropertyNames(surface);
+      if (names.length !== 1 || names[0] !== "publish") return null;
+      const descriptor = Object.getOwnPropertyDescriptor(surface, "publish");
+      if (descriptor === undefined || !own(descriptor, "value")) return null;
+      if (typeof descriptor.value !== "function") return null;
+      if (descriptor.enumerable !== true) return null;
+      if (descriptor.writable !== false || descriptor.configurable !== false) return null;
+
+      // P1-D's generated anchor layer is proved, never called or copied.
+      const anchor = namespace.anchor;
+      if (anchor === null || typeof anchor !== "object") return null;
+      if (!own(anchor, "BLOCK") || !Array.isArray(anchor.BLOCK)) return null;
+      if (!own(anchor, "norm") || typeof anchor.norm !== "function") return null;
+      if (!own(anchor, "scanBlocks") || typeof anchor.scanBlocks !== "function") return null;
+
+      return surface;
+    } catch (ignored) {
+      return null;
+    }
+  }
+
+  const realtime = prerequisites();
+  if (realtime === null) return;
+
+  // --- Module state ---------------------------------------------------------
+
+  let activated = false;
+  let suspended = false;
+  let transportProved = false;
+  let hiddenByChoice = false;
+  let beatPending = false;
+  let localLabel = "";
+
+  let beatTimer = 0;
+  let sweepTimer = 0;
+  let frameId = 0;
+  let lastClock = -Infinity;
+  let nextOrder = 0;
+  let fontsBound = false;
+  let placementBound = false;
+
+  let headEl = null;
+  let themeEl = null;
+  let container = null;
+  let facesEl = null;
+  let toggleEl = null;
+  let railEl = null;
+
+  // clientId -> { label, act, aid, seen, order }. The key is the only identity
+  // this module knows, and it authorizes nothing.
+  const roster = new Map();
+
+  document.addEventListener("session", onSession);
+  document.addEventListener("doc:event", onDocEvent);
+
+  // --- Activation -----------------------------------------------------------
+
+  function onSession(event) {
+    if (activated) return;
+    const admitted = admitSession(event);
+    if (admitted === null) return;
+
+    document.removeEventListener("session", onSession);
+    activated = true;
+    headEl = admitted.head;
+    themeEl = admitted.theme;
+    localLabel = admitted.label;
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+
+    hiddenByChoice = readPreference();
+
+    // The deliberate exception to "no UI before proof": a fail-closed hidden
+    // reader needs a way back in that does not broadcast them first.
+    if (hiddenByChoice) {
+      if (!mountContainer()) return;
+      facesEl.setAttribute("hidden", "");
+      return;
+    }
+
+    if (isVisible()) sendBeat();
+  }
+
+  function admitSession(event) {
+    let head = null;
+    let theme = null;
+    try {
+      const root = document.documentElement;
+      if (root === null) return null;
+      const mode = root.getAttribute("data-session");
+      if (mode !== "reader" && mode !== "editor") return null;
+
+      const heads = document.querySelectorAll(".head-top");
+      if (heads.length !== 1) return null;
+      const themes = document.querySelectorAll("button#tt");
+      if (themes.length !== 1) return null;
+      head = heads[0];
+      theme = themes[0];
+      if (theme.parentElement !== head) return null;
+    } catch (ignored) {
+      return null;
+    }
+
+    const detail = readSessionDetail(event);
+    if (detail === null) return null;
+    return { head, theme, label: deriveLabel(detail) };
+  }
+
+  // The closed-record check. Every reflection happens inside one fail-closed
+  // boundary and completes before any field value is read, so a hostile
+  // accessor or trap is rejected rather than run.
+  function readSessionDetail(event) {
+    let detail;
+    try {
+      detail = event.detail;
+    } catch (ignored) {
+      return null;
+    }
+
+    let final = false;
+    try {
+      if (detail === null || typeof detail !== "object") return null;
+      if (Object.getPrototypeOf(detail) !== Object.prototype) return null;
+      if (!Object.isFrozen(detail)) return null;
+      if (Object.getOwnPropertySymbols(detail).length !== 0) return null;
+
+      const keys = Object.getOwnPropertyNames(detail);
+      if (sameSequence(keys, FINAL_KEYS)) final = true;
+      else if (!sameSequence(keys, LEGACY_KEYS)) return null;
+
+      for (let index = 0; index < keys.length; index += 1) {
+        if (!plainDataKey(detail, keys[index])) return null;
+      }
+    } catch (ignored) {
+      return null;
+    }
+
+    try {
+      if (typeof detail.sub !== "string") return null;
+      if (typeof detail.email !== "string") return null;
+      if (typeof detail.name !== "string") return null;
+      if (!validRoles(detail.roles)) return null;
+      if (typeof detail.canComment !== "boolean") return null;
+      if (typeof detail.canEdit !== "boolean") return null;
+
+      if (final) {
+        if (typeof detail.doc !== "string" || !DOC_RE.test(detail.doc)) return null;
+        if (!ROLE_VALUES.includes(detail.role)) return null;
+        for (const key of FINAL_BOOLEANS) {
+          if (typeof detail[key] !== "boolean") return null;
+        }
+      }
+      return detail;
+    } catch (ignored) {
+      return null;
+    }
+  }
+
+  // A frozen dense ordinary string array: exact index descriptors, the ordinary
+  // `length`, and nothing else. Checked by descriptor so an index accessor is
+  // never invoked.
+  function validRoles(roles) {
+    try {
+      if (!Array.isArray(roles)) return false;
+      if (Object.getPrototypeOf(roles) !== Array.prototype) return false;
+      if (!Object.isFrozen(roles)) return false;
+      if (Object.getOwnPropertySymbols(roles).length !== 0) return false;
+
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(roles, "length");
+      if (lengthDescriptor === undefined || !own(lengthDescriptor, "value")) return false;
+      if (lengthDescriptor.enumerable !== false) return false;
+      if (lengthDescriptor.writable !== false || lengthDescriptor.configurable !== false) return false;
+
+      const length = lengthDescriptor.value;
+      if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) return false;
+
+      const names = Object.getOwnPropertyNames(roles);
+      if (names.length !== length + 1) return false;
+      if (names[length] !== "length") return false;
+
+      for (let index = 0; index < length; index += 1) {
+        if (names[index] !== String(index)) return false;
+        const descriptor = Object.getOwnPropertyDescriptor(roles, names[index]);
+        if (descriptor === undefined || !own(descriptor, "value")) return false;
+        if (descriptor.enumerable !== true) return false;
+        if (descriptor.writable !== false || descriptor.configurable !== false) return false;
+        if (typeof descriptor.value !== "string") return false;
+      }
+      return true;
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  // Presentation only. The sole `member` role is the one shape that may carry a
+  // server-supplied name; everything else is privacy-conservatively external
+  // and broadcasts the literal `Guest`. There is no email, sub, role or domain
+  // fallback in either branch.
+  function deriveLabel(detail) {
+    const roles = detail.roles;
+    if (roles.length !== 1 || roles[0] !== "member") return "Guest";
+
+    const name = detail.name;
+    if (typeof name !== "string" || CONTROL_RE.test(name)) return "Member";
+
+    const collapsed = name.trim().replace(WHITESPACE_RUN_RE, " ");
+    let label = "";
+    for (const point of collapsed) {
+      if (label.length + point.length > LABEL_LIMIT) break;
+      label += point;
+    }
+    return label === "" ? "Member" : label;
+  }
+
+  // Absent means visible. Every other outcome — an unexpected value, or a read
+  // that throws — fails closed against broadcasting.
+  function readPreference() {
+    let stored = null;
+    try {
+      stored = localStorage.getItem(STORAGE_KEY);
+    } catch (ignored) {
+      return true;
+    }
+    return stored !== null;
+  }
+
+  // --- Publishing -----------------------------------------------------------
+
+  // The P4-I amendment seam. P3-G itself never publishes an aid or an editing
+  // activity; a later owner amends this one function once it has a proven
+  // editable focus, and every timer, privacy and validation rule here still
+  // applies to what it returns.
+  function currentBeat() {
+    return { label: localLabel, act: "reading", aid: null };
+  }
+
+  function sendBeat() {
+    if (beatPending) return;
+    const beat = currentBeat();
+    if (!validOwnBeat(beat)) return;
+    beatPending = true;
+    settleOutcome(attempt(Object.assign({ t: "beat" }, beat)), true);
+  }
+
+  function sendBye() {
+    settleOutcome(attempt({ t: "bye" }), false);
+  }
+
+  function validOwnBeat(beat) {
+    try {
+      if (beat === null || typeof beat !== "object") return false;
+      if (Object.getOwnPropertySymbols(beat).length !== 0) return false;
+      if (!sameSequence(Object.getOwnPropertyNames(beat), OWN_BEAT_KEYS)) return false;
+      const label = beat.label;
+      if (typeof label !== "string" || label.length < 1 || label.length > LABEL_LIMIT) return false;
+      if (CONTROL_RE.test(label)) return false;
+      if (beat.act !== "reading" && beat.act !== "editing") return false;
+      const aid = beat.aid;
+      if (aid !== null && !(typeof aid === "string" && AID_RE.test(aid))) return false;
+      return true;
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  // P3-F's publish always settles, but a synchronous throw is contained here
+  // too: a transport failure is a dropped beat, never an escaping error, a
+  // blocked navigation, or a retry storm.
+  function attempt(event) {
+    try {
+      return realtime.publish(event);
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  function settleOutcome(result, isBeat) {
+    let settled;
+    try {
+      settled = Promise.resolve(result);
+    } catch (ignored) {
+      if (isBeat) beatPending = false;
+      return;
+    }
+    settled.then(
+      (value) => {
+        if (isBeat) beatPending = false;
+        if (value === true) proveTransport();
+      },
+      () => {
+        if (isBeat) beatPending = false;
+      },
+    );
+  }
+
+  // --- Transport proof ------------------------------------------------------
+
+  // Monotonic until terminal cleanup. It is the single place decoration turns
+  // on, so an inbound event repairs a schedule that a failed publish never
+  // created, and a later failed publish can never regress it.
+  function proveTransport() {
+    if (transportProved || suspended || !activated) return;
+    if (!mountContainer()) return;
+    transportProved = true;
+    facesEl.removeAttribute("hidden");
+    createRail();
+    startSweep();
+    if (isVisible() && !hiddenByChoice) startBeat();
+    repaint();
+    bindFonts();
+  }
+
+  function startSweep() {
+    if (sweepTimer !== 0) return;
+    try {
+      sweepTimer = setInterval(sweep, SWEEP_MS);
+    } catch (ignored) {
+      sweepTimer = 0;
+    }
+  }
+
+  function stopSweep() {
+    if (sweepTimer === 0) return;
+    clearInterval(sweepTimer);
+    sweepTimer = 0;
+  }
+
+  function startBeat() {
+    stopBeat();
+    try {
+      beatTimer = setInterval(onBeatTick, BEAT_MS);
+    } catch (ignored) {
+      beatTimer = 0;
+    }
+  }
+
+  function stopBeat() {
+    if (beatTimer === 0) return;
+    clearInterval(beatTimer);
+    beatTimer = 0;
+  }
+
+  function onBeatTick() {
+    if (suspended || hiddenByChoice || !isVisible()) return;
+    sendBeat();
+  }
+
+  function isVisible() {
+    try {
+      return document.visibilityState === "visible";
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  // --- Roster ---------------------------------------------------------------
+
+  function onDocEvent(event) {
+    if (!activated || suspended) return;
+    const detail = readClientDetail(event);
+    if (detail === null) return;
+
+    // An accepted client event proves transport even when it changes nothing.
+    proveTransport();
+    if (detail.t === "beat") applyBeat(detail);
+    else removeReader(detail.clientId);
+  }
+
+  // Only P3-F's two frozen flat client shapes. Server projections and
+  // claim/release events are ignored, and every rejection is descriptor-shaped
+  // so no getter runs.
+  function readClientDetail(event) {
+    let detail;
+    try {
+      detail = event.detail;
+    } catch (ignored) {
+      return null;
+    }
+
+    try {
+      if (detail === null || typeof detail !== "object") return null;
+      if (Object.getPrototypeOf(detail) !== Object.prototype) return null;
+      if (!Object.isFrozen(detail)) return null;
+      if (Object.getOwnPropertySymbols(detail).length !== 0) return null;
+
+      const keys = Object.getOwnPropertyNames(detail);
+      const isBeat = sameSequence(keys, BEAT_KEYS);
+      const isBye = !isBeat && sameSequence(keys, BYE_KEYS);
+      if (!isBeat && !isBye) return null;
+
+      for (let index = 0; index < keys.length; index += 1) {
+        if (!plainDataKey(detail, keys[index])) return null;
+      }
+
+      if (detail.source !== "client") return null;
+      const clientId = detail.clientId;
+      if (typeof clientId !== "string" || !CLIENT_ID_RE.test(clientId)) return null;
+
+      if (isBye) {
+        if (detail.t !== "bye") return null;
+        return { t: "bye", clientId };
+      }
+
+      if (detail.t !== "beat") return null;
+      const label = detail.label;
+      if (typeof label !== "string" || label.length < 1 || label.length > LABEL_LIMIT) return null;
+      if (CONTROL_RE.test(label)) return null;
+      const act = detail.act;
+      if (act !== "reading" && act !== "editing") return null;
+      const aid = detail.aid;
+      if (aid !== null && !(typeof aid === "string" && AID_RE.test(aid))) return null;
+      return { t: "beat", clientId, label, act, aid };
+    } catch (ignored) {
+      return null;
+    }
+  }
+
+  function applyBeat(detail) {
+    const now = stamp();
+    if (now === null) return;
+
+    const existing = roster.get(detail.clientId);
+    if (existing === undefined) {
+      // The cap protects first sight, not recency: a full roster drops the new
+      // ID rather than evicting a reader who was already here.
+      if (roster.size >= MAX_READERS) return;
+      roster.set(detail.clientId, {
+        label: detail.label,
+        act: detail.act,
+        aid: detail.aid,
+        seen: now,
+        order: nextOrder,
+      });
+      nextOrder += 1;
+      repaint();
+      return;
+    }
+
+    const material = existing.label !== detail.label
+      || existing.act !== detail.act
+      || existing.aid !== detail.aid;
+    existing.seen = now;
+    if (!material) return;
+    existing.label = detail.label;
+    existing.act = detail.act;
+    existing.aid = detail.aid;
+    repaint();
+  }
+
+  function removeReader(clientId) {
+    if (!roster.delete(clientId)) return;
+    repaint();
+  }
+
+  function sweep() {
+    if (!transportProved || suspended) return;
+    const now = clockSample();
+    if (now === null) return;
+    let changed = false;
+    for (const entry of roster) {
+      if (now - entry[1].seen >= LEASE_MS) {
+        roster.delete(entry[0]);
+        changed = true;
+      }
+    }
+    if (changed) repaint();
+  }
+
+  function stamp() {
+    let now;
+    try {
+      now = Date.now();
+    } catch (ignored) {
+      return null;
+    }
+    return typeof now === "number" && Number.isFinite(now) ? now : null;
+  }
+
+  // Expiry needs a clock that only moves forward. A backwards or non-finite
+  // sample deletes nothing, and the next usable sample resumes normal expiry.
+  // A backwards reading still re-baselines: an NTP correction moves the clock
+  // back for good, and holding the pre-correction peak as a floor would
+  // suspend every future expiry until wall-clock time caught back up.
+  function clockSample() {
+    const now = stamp();
+    if (now === null) return null;
+    if (now < lastClock) {
+      lastClock = now;
+      return null;
+    }
+    lastClock = now;
+    return now;
+  }
+
+  function sortedRoster() {
+    const rows = [];
+    for (const entry of roster) {
+      rows.push({
+        id: entry[0],
+        label: entry[1].label,
+        act: entry[1].act,
+        aid: entry[1].aid,
+        order: entry[1].order,
+      });
+    }
+    rows.sort((left, right) => left.order - right.order);
+    return rows;
+  }
+
+  // --- Masthead -------------------------------------------------------------
+
+  function mountContainer() {
+    if (container !== null) return true;
+    try {
+      const node = document.createElement("div");
+      node.id = "doc-presence";
+      node.className = "doc-presence";
+      node.setAttribute("role", "group");
+      node.setAttribute("aria-label", "Live presence");
+
+      const faces = document.createElement("div");
+      faces.className = "doc-presence-faces";
+      faces.setAttribute("role", "list");
+      faces.setAttribute("aria-live", "polite");
+      faces.setAttribute("aria-atomic", "true");
+      faces.setAttribute("aria-label", summary(0));
+
+      const toggle = document.createElement("button");
+      toggle.id = "doc-presence-toggle";
+      toggle.className = "doc-presence-toggle";
+      toggle.setAttribute("type", "button");
+      toggle.addEventListener("click", onToggle);
+
+      node.append(faces, toggle);
+      headEl.insertBefore(node, themeEl);
+
+      container = node;
+      facesEl = faces;
+      toggleEl = toggle;
+      applyToggleState();
+      return true;
+    } catch (ignored) {
+      teardown();
+      return false;
+    }
+  }
+
+  // The pressed state never rests on colour alone: both the visible text and
+  // the accessible name change with it.
+  function applyToggleState() {
+    if (toggleEl === null) return;
+    if (hiddenByChoice) {
+      toggleEl.textContent = "Show me";
+      toggleEl.setAttribute("aria-label", "Show me in live presence");
+      toggleEl.setAttribute("aria-pressed", "true");
+      return;
+    }
+    toggleEl.textContent = "Hide me";
+    toggleEl.setAttribute("aria-label", "Hide me from live presence");
+    toggleEl.setAttribute("aria-pressed", "false");
+  }
+
+  function onToggle() {
+    if (!activated || toggleEl === null) return;
+    if (hiddenByChoice) showMe();
+    else hideMe();
+  }
+
+  // Only a successful removal changes the in-memory preference: storage that
+  // cannot be cleared keeps this reader silent rather than broadcasting a
+  // choice the next load would forget.
+  function showMe() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (ignored) {
+      return;
+    }
+    hiddenByChoice = false;
+    applyToggleState();
+    if (!suspended && isVisible()) sendBeat();
+    // Proof outranks this opt-in's own publish: an already-decorated tab keeps
+    // its faces, rail and sweep, and gains the beat schedule, even if the
+    // immediate call settles false.
+    if (transportProved && !suspended && isVisible()) startBeat();
+  }
+
+  function hideMe() {
+    try {
+      localStorage.setItem(STORAGE_KEY, "1");
+    } catch (ignored) {
+      // The current tab hides regardless; a future load re-reads and, with
+      // storage still unavailable, fails closed to hidden anyway.
+    }
+    hiddenByChoice = true;
+    applyToggleState();
+    stopBeat();
+    sendBye();
+  }
+
+  function repaint() {
+    if (facesEl === null) return;
+    try {
+      const rows = sortedRoster();
+      const nodes = [];
+      const shown = rows.length < MAX_FACES ? rows.length : MAX_FACES;
+      for (let index = 0; index < shown; index += 1) nodes.push(avatarNode(rows[index]));
+      if (rows.length > MAX_FACES) {
+        const extra = rows.length - MAX_FACES;
+        const more = document.createElement("span");
+        more.className = "doc-presence-more";
+        more.setAttribute("role", "listitem");
+        more.textContent = `+${extra}`;
+        more.setAttribute("aria-label", `${extra} more readers`);
+        nodes.push(more);
+      }
+      facesEl.replaceChildren(...nodes);
+      facesEl.setAttribute("aria-label", summary(rows.length));
+    } catch (ignored) {
+      return;
+    }
+    requestPlacement();
+  }
+
+  function avatarNode(row) {
+    const node = document.createElement("span");
+    node.className = `doc-presence-avatar doc-presence-colour-${colourIndex(row.id)}`;
+    node.setAttribute("role", "listitem");
+    node.textContent = initials(row.label);
+    node.title = row.label;
+    node.setAttribute("aria-label", `${row.label}, ${row.act}`);
+    return node;
+  }
+
+  function summary(count) {
+    if (count === 0) return "No readers present";
+    if (count === 1) return "1 reader present";
+    return `${count} readers present`;
+  }
+
+  // 32-bit FNV-1a over the exact validated client ID's UTF-16 code units. The
+  // ID itself never reaches the DOM; only this index does.
+  function colourIndex(clientId) {
+    let hash = 2166136261;
+    for (let index = 0; index < clientId.length; index += 1) {
+      hash ^= clientId.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash % COLOURS;
+  }
+
+  function initials(label) {
+    const words = label.trim().split(WHITESPACE_RUN_RE).filter((word) => word !== "");
+    if (words.length === 0) return "?";
+    const first = firstPoint(words[0]);
+    const last = words.length > 1 ? firstPoint(words[words.length - 1]) : "";
+    const text = `${first}${last}`;
+    return text === "" ? "?" : text;
+  }
+
+  function firstPoint(word) {
+    for (const point of word) return point;
+    return "";
+  }
+
+  // --- Block markers --------------------------------------------------------
+
+  function createRail() {
+    if (railEl !== null) return;
+    try {
+      const rail = document.createElement("div");
+      rail.id = "doc-presence-rail";
+      rail.setAttribute("aria-label", "Reader locations");
+      document.body.append(rail);
+      railEl = rail;
+    } catch (ignored) {
+      railEl = null;
+      return;
+    }
+    if (placementBound) return;
+    placementBound = true;
+    window.addEventListener("resize", requestPlacement);
+    document.addEventListener("toggle", requestPlacement, true);
+  }
+
+  function bindFonts() {
+    if (fontsBound) return;
+    fontsBound = true;
+    try {
+      const fonts = document.fonts;
+      if (fonts === null || typeof fonts !== "object") return;
+      const ready = fonts.ready;
+      if (ready === null || typeof ready !== "object") return;
+      if (typeof ready.then !== "function") return;
+      ready.then(onFontsReady, onFontsReady);
+    } catch (ignored) {
+      // A missing FontFaceSet or a rejected ready promise is not a failure.
+    }
+  }
+
+  function onFontsReady() {
+    requestPlacement();
+  }
+
+  function requestPlacement() {
+    if (railEl === null || suspended || frameId !== 0) return;
+    try {
+      frameId = requestAnimationFrame(runPlacement);
+    } catch (ignored) {
+      frameId = 0;
+    }
+  }
+
+  function cancelPlacement() {
+    if (frameId === 0) return;
+    try {
+      cancelAnimationFrame(frameId);
+    } catch (ignored) {
+      // The frame is abandoned either way; `frameId` is cleared below.
+    }
+    frameId = 0;
+  }
+
+  function runPlacement() {
+    frameId = 0;
+    try {
+      place();
+    } catch (ignored) {
+      // Keep the last good rail rather than tearing decoration down.
+    }
+  }
+
+  // Scrolling needs no listener: subtracting the rail rectangle from the block
+  // rectangle already yields document coordinates.
+  function place() {
+    if (railEl === null || suspended) return;
+
+    const blocks = blockIndex();
+    const order = new Map();
+    let position = 0;
+    for (const aid of blocks.keys()) {
+      order.set(aid, position);
+      position += 1;
+    }
+
+    const groups = new Map();
+    for (const row of sortedRoster()) {
+      if (row.aid === null || !blocks.has(row.aid)) continue;
+      const rows = groups.get(row.aid);
+      if (rows === undefined) groups.set(row.aid, [row]);
+      else rows.push(row);
+    }
+
+    const railRect = railEl.getBoundingClientRect();
+    const candidates = [];
+    for (const entry of groups) {
+      const block = blocks.get(entry[0]);
+      if (!eligible(block)) continue;
+      candidates.push({ aid: entry[0], rows: entry[1], rect: block.getBoundingClientRect(), node: null });
+    }
+    candidates.sort((left, right) => order.get(left.aid) - order.get(right.aid));
+
+    const nodes = [];
+    for (const candidate of candidates) {
+      candidate.node = markerNode(candidate.rows);
+      nodes.push(candidate.node);
+    }
+    railEl.replaceChildren(...nodes);
+
+    // Measure every marker first, then write every position, the way the
+    // comment rail's own placement pass does. Interleaving an `offsetWidth`
+    // read with the previous marker's style write forces one synchronous
+    // reflow per marker.
+    const scrollWidth = document.documentElement.scrollWidth;
+    const placements = [];
+    let previousTop = null;
+    for (const candidate of candidates) {
+      let top = candidate.rect.top - railRect.top;
+      if (previousTop !== null && top < previousTop + MARKER_GAP_PX) top = previousTop + MARKER_GAP_PX;
+      previousTop = top;
+
+      const desired = candidate.rect.right - railRect.left + MARKER_OFFSET_PX;
+      const ceiling = scrollWidth - candidate.node.offsetWidth - RAIL_EDGE_PX;
+      placements.push({
+        node: candidate.node,
+        top,
+        left: Math.max(RAIL_EDGE_PX, Math.min(desired, ceiling)),
+      });
+    }
+    for (const placement of placements) {
+      placement.node.style.top = `${placement.top}px`;
+      placement.node.style.left = `${placement.left}px`;
+    }
+  }
+
+  // A duplicated ID names no single block, so it names none.
+  function blockIndex() {
+    const found = new Map();
+    const duplicated = [];
+    for (const element of document.querySelectorAll("[data-aid]")) {
+      const aid = element.getAttribute("data-aid");
+      if (typeof aid !== "string" || !AID_RE.test(aid)) continue;
+      if (found.has(aid)) {
+        duplicated.push(aid);
+        continue;
+      }
+      found.set(aid, element);
+    }
+    for (const aid of duplicated) found.delete(aid);
+    return found;
+  }
+
+  function eligible(block) {
+    try {
+      if (block === null || block === undefined) return false;
+      if (block.isConnected !== true) return false;
+      const details = block.closest("details");
+      if (details !== null && details !== undefined && details.open === false) return false;
+      const rect = block.getBoundingClientRect();
+      return rect.width !== 0 || rect.height !== 0;
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  function markerNode(rows) {
+    const node = document.createElement("div");
+    node.className = "doc-presence-marker";
+    node.setAttribute("role", "img");
+
+    const children = [];
+    const shown = rows.length < MAX_MARKER_INITIALS ? rows.length : MAX_MARKER_INITIALS;
+    for (let index = 0; index < shown; index += 1) {
+      const initial = document.createElement("span");
+      initial.className = `doc-presence-initial doc-presence-colour-${colourIndex(rows[index].id)}`;
+      initial.textContent = initials(rows[index].label);
+      children.push(initial);
+    }
+    if (rows.length > MAX_MARKER_INITIALS) {
+      const extra = document.createElement("span");
+      extra.className = "doc-presence-initial doc-presence-marker-more";
+      extra.textContent = `+${rows.length - MAX_MARKER_INITIALS}`;
+      children.push(extra);
+    }
+    node.append(...children);
+
+    const phrases = [];
+    for (const row of rows) phrases.push(`${row.label}, ${row.act}`);
+    node.setAttribute("aria-label", phrases.join("; "));
+    return node;
+  }
+
+  // --- Page lifecycle -------------------------------------------------------
+
+  function onVisibility() {
+    if (!activated || suspended) return;
+    if (!isVisible()) {
+      // Peers remove this reader by lease. Going to another tab is not leaving.
+      stopBeat();
+      return;
+    }
+    sweep();
+    if (hiddenByChoice) return;
+    sendBeat();
+    if (transportProved) startBeat();
+  }
+
+  function onOnline() {
+    if (!activated || suspended || transportProved) return;
+    if (hiddenByChoice || !isVisible()) return;
+    sendBeat();
+  }
+
+  // P3-F's earlier listener has already closed SSE and explicitly permits this
+  // later keepalive publish. A reader who already chose Hide sends nothing, so
+  // a peer that never saw the transition never learns their client ID.
+  function onPageHide() {
+    if (!activated) return;
+    if (!hiddenByChoice) sendBye();
+    stopBeat();
+    stopSweep();
+    cancelPlacement();
+    roster.clear();
+    if (railEl !== null) {
+      try {
+        railEl.replaceChildren();
+      } catch (ignored) {
+        // Nothing durable depends on the rail being emptied.
+      }
+    }
+    if (facesEl !== null) {
+      try {
+        facesEl.replaceChildren();
+        facesEl.setAttribute("aria-label", summary(0));
+      } catch (ignored) {
+        // Same: the page is going away or being persisted.
+      }
+    }
+    // Release the in-flight beat with every other handle. P3-F aborts its
+    // publish controllers on its own earlier pagehide, so nothing is still
+    // travelling; leaving the flag set would swallow the immediate beat a
+    // BFCache restore owes its peers until the abandoned call settled.
+    beatPending = false;
+    suspended = true;
+  }
+
+  function onPageShow(event) {
+    if (!activated) return;
+    let persisted = false;
+    try {
+      persisted = event.persisted === true;
+    } catch (ignored) {
+      return;
+    }
+    if (!persisted) return;
+
+    suspended = false;
+    if (transportProved) startSweep();
+    sweep();
+    repaint();
+    if (hiddenByChoice || !isVisible()) return;
+    sendBeat();
+    if (transportProved) startBeat();
+  }
+
+  // Only for a fatal failure during setup: normal Document destruction is the
+  // terminal boundary in every other case.
+  function teardown() {
+    document.removeEventListener("session", onSession);
+    document.removeEventListener("doc:event", onDocEvent);
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", onOnline);
+    window.removeEventListener("pagehide", onPageHide);
+    window.removeEventListener("pageshow", onPageShow);
+    if (placementBound) {
+      window.removeEventListener("resize", requestPlacement);
+      document.removeEventListener("toggle", requestPlacement, true);
+      placementBound = false;
+    }
+    stopBeat();
+    stopSweep();
+    cancelPlacement();
+    roster.clear();
+    try {
+      if (railEl !== null) railEl.remove();
+      if (container !== null) container.remove();
+    } catch (ignored) {
+      // Nothing else depends on the nodes being gone.
+    }
+    railEl = null;
+    container = null;
+    facesEl = null;
+    toggleEl = null;
+    activated = false;
+    suspended = true;
+  }
+})();
 
 </script>
 <script type="module">

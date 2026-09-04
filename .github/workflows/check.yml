@@ -27,8 +27,32 @@ jobs:
       - name: root lockfile is in sync
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # notify() runs after the authoritative write, so a body it rejects that
+      # the store accepted is a 500 for a comment that already landed. The two
+      # grammars are only kept in step by being asserted against each other.
+      - name: notify() accepts what the store accepts
+        run: node netlify/lib/notify.test.mjs
+
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
+
+      - name: Check inline converter parity
+        run: node scripts/check-inline-md.mjs
+
+      # The unit tests were written before anything ran them, and a test that
+      # never executes cannot hold a regression out. Every file is named
+      # explicitly rather than globbed: `node --test` treats an unmatched
+      # pattern as a glob that matches nothing and exits 0, and a glob that
+      # still matches some other test file would go green with this one
+      # silently dropped. A literal path that stops being emitted fails loudly.
+      # Add new test files to this list.
+      - name: unit tests
+        run: |
+          npm --prefix templates/docbuild run build
+          node --test \
+            templates/docbuild/dist/index.test.js \
+            templates/docbuild/dist/anchors.test.js
+          node --test scripts/connect.test.mjs
 
       - name: edge gate config is fail-closed
         run: |
