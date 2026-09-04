@@ -29,10 +29,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  guardedTempRoot,
+  installSignalCleanup,
+  removeTempRoots,
+  sweepStaleTempRoots,
+} from "./lib/temp-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -371,7 +376,7 @@ function fail(label, result) {
     if (result.stdout !== "") process.stderr.write(`      stdout: ${result.stdout.slice(0, 4000)}\n`);
     if (result.stderr !== "") process.stderr.write(`      stderr: ${result.stderr.slice(0, 4000)}\n`);
   }
-  process.exit(1);
+  throw new Error(label);
 }
 
 async function proveSupervision(self) {
@@ -423,9 +428,10 @@ async function supervise(self) {
   await proveSupervision(self);
   process.stdout.write("PASS  P4-A supervisor signals and deadline\n");
 
-  const root = mkdtempSync(join(tmpdir(), "p4a-"));
-  chmodSync(root, 0o700);
-  let ok = false;
+  sweepStaleTempRoots(["p4a-"]);
+  const root = guardedTempRoot("p4a-");
+  const roots = [root];
+  const uninstallSignalCleanup = installSignalCleanup(roots, { exitAfterCleanup: false });
   try {
     await installPlaywright(root);
     const env = { P4A_ROOT: root, PLAYWRIGHT_BROWSERS_PATH: join(root, "browsers") };
@@ -438,11 +444,11 @@ async function supervise(self) {
       if (result.orphaned) fail(`P4-A worker ${flag} left its process group behind`, result);
       process.stdout.write(`${line}\n`);
     }
-    ok = true;
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    uninstallSignalCleanup();
+    removeTempRoots(roots);
   }
-  if (ok) process.stdout.write("PASS  P4-A fixture cleaned\n");
+  process.stdout.write("PASS  P4-A fixture cleaned\n");
 }
 
 function probeSignal() {

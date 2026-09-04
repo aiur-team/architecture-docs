@@ -12,8 +12,8 @@
  * deadline, caps captured output, forwards HUP/INT/TERM, escalates TERM to
  * KILL, reaps the child, proves the child's process group is gone, and removes
  * the guarded root before it can report success. Cleanup it cannot prove exits
- * 125, prints no PASS line, and retains the mode-0700 root plus a mode-0600
- * locator.
+ * 125, prints no PASS line, and retains a distinctly named mode-0700 evidence
+ * root plus a mode-0600 locator. Only the three newest evidence roots are kept.
  *
  * The runtime matrix drives the *real* `netlify/functions/threads.mjs`,
  * `thread.mjs`, and `edit.mjs`. The two thread modules import their
@@ -41,18 +41,21 @@
 
 import { spawn } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { registerHooks } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  guardedTempRoot,
+  installSignalCleanup,
+  retainEvidenceRoot,
+  sweepStaleTempRoots,
+} from "./lib/temp-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -188,10 +191,8 @@ function waitForReady(directory) {
  * that cannot be proved is never reported as success. */
 function unproven(root, detail) {
   try {
-    const locator = join(tmpdir(), `p4m-unresolved-${process.pid}.txt`);
-    writeFileSync(locator, `${detail}\n${root}\n`, { mode: 0o600 });
-    chmodSync(locator, 0o600);
-    process.stderr.write(`UNPROVEN ${detail}\n  retained ${root}\n  locator  ${locator}\n`);
+    const retained = retainEvidenceRoot(root, detail, { prefix: "p4m-evidence-", maxCount: 3 });
+    process.stderr.write(`UNPROVEN ${detail}\n  retained ${retained.root}\n  locator  ${retained.locator}\n`);
   } catch (error) {
     process.stderr.write(`UNPROVEN ${detail} (locator failed: ${String(error)})\n`);
   }
@@ -199,8 +200,9 @@ function unproven(root, detail) {
 }
 
 async function supervise(hosted) {
-  const root = mkdtempSync(join(tmpdir(), "p4m-"));
-  chmodSync(root, 0o700);
+  sweepStaleTempRoots(["p4m-"], { excludePrefixes: ["p4m-evidence-"] });
+  const root = guardedTempRoot("p4m-run-");
+  const uninstallSignalCleanup = installSignalCleanup([root], { exitAfterCleanup: false });
 
   try {
     // 1. Signals. Each probe installs its own handler and exits 128 + signum.
@@ -267,10 +269,12 @@ async function supervise(hosted) {
       process.stdout.write("PASS  P4-M hosted enforcement audit and fan-out\n");
     }
   } catch (error) {
+    uninstallSignalCleanup();
     rmSync(root, { recursive: true, force: true });
     throw error;
   }
 
+  uninstallSignalCleanup();
   rmSync(root, { recursive: true, force: true });
   if (existsSync(root)) {
     unproven(root, "guarded fixture root survived removal");
