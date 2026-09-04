@@ -90,6 +90,7 @@ jobs:
           # with #124. Every other runner is invoked directly.
           node scripts/allow-known-runner-failure.mjs scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
+          node scripts/test-p4-m.mjs
 
       - name: edge gate config is fail-closed
         run: |
