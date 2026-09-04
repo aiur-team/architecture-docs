@@ -812,7 +812,8 @@ async function gateMatrix(ts, gateRoot, accessLib) {
      `isProxy()` from `node:util/types`, but `gate.ts` has no equivalent — Deno
      exposes no such predicate — so a `new Proxy(validRow, {})` is served. The
      shared validator cannot close this on its own, and the asymmetry is filed
-     rather than pinned, because asserting the current 200 would enshrine it. */
+     as #157 rather than pinned here, because asserting the current 200 would
+     enshrine it. */
 
   for (const [label, table] of unusableTables(accessLib.capabilitiesFor)) {
     const response = await run({ capabilitiesFor: table });
