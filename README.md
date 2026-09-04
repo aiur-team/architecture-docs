@@ -59,6 +59,13 @@ links only once some other tree has been built does not link in production. Its 
 table is the visible, dated list of known-broken modules, each naming the issue that deletes it; the gate
 fails when an entry stops describing the code it was granted for.
 
+`allow-known-runner-failure.mjs` is the other half of that bargain. Wiring the runners in found real
+defects in already-merged code, and a runner that is dropped or taught to skip a matrix protects nothing, so
+each known failure is written down instead: named, dated, linked to the issue that deletes it, printed as an
+`ALLOW` line on every run, and scoped so tightly that a second failure in the same worker still fails CI.
+Each entry stops applying the moment its defect leaves the source, and the wrapper then fails until the
+entry is removed.
+
 `check-test-inventory.mjs` is why the literal test list in `check.yml` can stay literal. It fails when a
 tracked test file exists that no run step names, so **adding a test file and forgetting to wire it up is
 now a red build rather than a silent no-op.**
