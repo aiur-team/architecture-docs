@@ -138,6 +138,7 @@ jobs:
           fi
           node scripts/test-p4-m.mjs
           node scripts/test-p4-n.mjs
+          node scripts/test-p4-p.mjs
           node scripts/test-p4-q.mjs
           # The four paths #125 left holding hand copies of the access-row
           # validator had no test of any kind before #128. This runner drives

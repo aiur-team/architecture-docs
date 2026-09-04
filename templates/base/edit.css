@@ -1,10 +1,11 @@
 /* Direct-edit controls and the pending-overlay decoration.
 
-   Every selector here is `.doc-edit-*` or `[data-editable].doc-edit-*`: the
-   document's own type scale, colours and spacing are untouched, so a page
-   built without edit.js is byte-for-byte what it was. State is never carried
-   by colour alone — each state also has status text the client writes — and
-   print keeps the applied overlay text while dropping the transient chrome. */
+   Every selector in this direct-edit section is `.doc-edit-*` or
+   `[data-editable].doc-edit-*`: the document's own type scale, colours and
+   spacing are untouched, so a page built without edit.js is byte-for-byte
+   what it was. State is never carried by colour alone — each state also has
+   status text the client writes — and print keeps the applied overlay text
+   while dropping the transient chrome. */
 
 .doc-edit-controls {
   display: flex;
@@ -97,4 +98,250 @@
     margin-left: 0;
     margin-right: 0;
   }
+}
+
+/* Suggestions extend the existing editor and shared comments panel.  These
+   local variables keep readable fallbacks when an instance omits theme.css. */
+.doc-suggest-button,
+.doc-suggest-chip,
+.doc-suggest-draft,
+.doc-suggest-card {
+  --doc-suggest-bg: var(--surface, #ffffff);
+  --doc-suggest-soft: var(--surface-2, #eef1f4);
+  --doc-suggest-ink: var(--ink, #15181e);
+  --doc-suggest-muted: var(--ink-2, #49525f);
+  --doc-suggest-border: var(--border-strong, #697380);
+  --doc-suggest-accent: #9b1730;
+  --doc-suggest-accent-ink: #ffffff;
+}
+
+.doc-suggest-button {
+  font: inherit;
+  color: var(--doc-suggest-accent-ink);
+  background: var(--doc-suggest-accent);
+  border: 1px solid var(--doc-suggest-accent);
+  border-radius: 4px;
+  padding: .15rem .55rem;
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+
+.doc-suggest-button:hover { background: #741124; border-color: #741124; }
+.doc-suggest-button[disabled] { cursor: default; opacity: .6; }
+
+.doc-suggest-button:focus-visible,
+.doc-suggest-draft :focus-visible,
+.doc-suggest-card :focus-visible,
+.doc-suggest-button:focus,
+.doc-suggest-draft :focus,
+.doc-suggest-card :focus {
+  outline: 2px solid var(--doc-suggest-accent);
+  outline-offset: 2px;
+}
+
+/* One count represents every open proposal for this whole block. */
+[data-suggest] {
+  border-inline-start: 3px solid #9b1730;
+  padding-inline-start: .65rem;
+}
+
+.doc-suggest-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin: -.5rem 0 1rem;
+  padding: .2rem .55rem;
+  color: var(--doc-suggest-ink);
+  background: var(--doc-suggest-soft);
+  border: 1px solid var(--doc-suggest-border);
+  border-radius: 999px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: .7rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.doc-suggest-draft,
+.doc-suggest-card {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  color: var(--doc-suggest-ink);
+  background: var(--doc-suggest-bg);
+  border: 1px solid var(--doc-suggest-border);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.doc-suggest-draft { border-inline-start: 3px solid var(--doc-suggest-accent); }
+.doc-suggest-draft label,
+.doc-suggest-label {
+  display: block;
+  margin: 0 0 .3rem;
+  color: var(--doc-suggest-ink);
+  font-weight: 600;
+}
+
+.doc-suggest-draft textarea,
+.doc-suggest-reason {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 .75rem;
+  padding: .5rem .6rem;
+  color: var(--doc-suggest-ink);
+  background: var(--doc-suggest-bg);
+  border: 1px solid var(--doc-suggest-border);
+  border-radius: 4px;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.doc-suggest-card h4 {
+  margin: 0 0 .35rem;
+  color: var(--doc-suggest-ink);
+  overflow-wrap: anywhere;
+}
+
+.doc-suggest-meta,
+.doc-suggest-status,
+.doc-suggest-note {
+  margin: 0 0 .55rem;
+  color: var(--doc-suggest-muted);
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+.doc-suggest-state {
+  margin: 0 0 .55rem;
+  color: var(--doc-suggest-ink);
+  font-weight: 700;
+}
+
+.doc-suggest-state-superseded {
+  color: var(--doc-suggest-muted);
+  text-decoration: line-through;
+}
+
+.doc-suggest-card details { max-width: 100%; margin: 0 0 .65rem; }
+.doc-suggest-card summary { color: var(--doc-suggest-ink); cursor: pointer; }
+
+.doc-suggest-current,
+.doc-suggest-proposed {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: .35rem 0 .75rem;
+  padding: .55rem .65rem;
+  color: var(--doc-suggest-ink);
+  background: var(--doc-suggest-soft);
+  border-inline-start: 3px solid var(--doc-suggest-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.doc-suggest-proposed { border-inline-start-color: var(--doc-suggest-accent); }
+.doc-suggest-empty { font-style: italic; color: var(--doc-suggest-muted); }
+
+.doc-suggest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.doc-suggest-actions button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .doc-suggest-button,
+  :root:not([data-theme="light"]) .doc-suggest-chip,
+  :root:not([data-theme="light"]) .doc-suggest-draft,
+  :root:not([data-theme="light"]) .doc-suggest-card {
+    --doc-suggest-bg: var(--surface, #14181e);
+    --doc-suggest-soft: var(--surface-2, #1b212a);
+    --doc-suggest-ink: var(--ink, #e7eaee);
+    --doc-suggest-muted: var(--ink-2, #a6aeba);
+    --doc-suggest-border: var(--border-strong, #697789);
+    --doc-suggest-accent: #ff8c96;
+    --doc-suggest-accent-ink: #14181e;
+  }
+
+  :root:not([data-theme="light"]) [data-suggest] { border-inline-start-color: #ff8c96; }
+  :root:not([data-theme="light"]) .doc-suggest-button:hover { background: #ffb3ba; border-color: #ffb3ba; }
+}
+
+:root[data-theme="dark"] .doc-suggest-button,
+:root[data-theme="dark"] .doc-suggest-chip,
+:root[data-theme="dark"] .doc-suggest-draft,
+:root[data-theme="dark"] .doc-suggest-card {
+  --doc-suggest-bg: var(--surface, #14181e);
+  --doc-suggest-soft: var(--surface-2, #1b212a);
+  --doc-suggest-ink: var(--ink, #e7eaee);
+  --doc-suggest-muted: var(--ink-2, #a6aeba);
+  --doc-suggest-border: var(--border-strong, #697789);
+  --doc-suggest-accent: #ff8c96;
+  --doc-suggest-accent-ink: #14181e;
+}
+
+:root[data-theme="dark"] [data-suggest] { border-inline-start-color: #ff8c96; }
+:root[data-theme="dark"] .doc-suggest-button:hover { background: #ffb3ba; border-color: #ffb3ba; }
+
+@media (max-width: 640px) {
+  .doc-suggest-draft,
+  .doc-suggest-card { padding: 10px; }
+
+  .doc-suggest-actions { align-items: stretch; }
+  .doc-suggest-actions button { flex: 1 1 auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-suggest-button,
+  .doc-suggest-chip,
+  .doc-suggest-draft,
+  .doc-suggest-card { animation-duration: 0s; transition-duration: 0s; }
+}
+
+@media (forced-colors: active) {
+  [data-suggest] { border-inline-start: 3px solid CanvasText; }
+  .doc-suggest-button,
+  .doc-suggest-chip,
+  .doc-suggest-draft,
+  .doc-suggest-card,
+  .doc-suggest-draft textarea,
+  .doc-suggest-reason,
+  .doc-suggest-current,
+  .doc-suggest-proposed { border-color: CanvasText; forced-color-adjust: auto; }
+  .doc-suggest-button:focus-visible,
+  .doc-suggest-draft :focus-visible,
+  .doc-suggest-card :focus-visible { outline: 2px solid Highlight; }
+}
+
+@media print {
+  [data-suggest] { border-inline-start: 0; padding-inline-start: 0; }
+  .doc-suggest-button,
+  .doc-suggest-chip,
+  .doc-suggest-draft,
+  .doc-suggest-actions,
+  .doc-suggest-status,
+  .doc-suggest-state,
+  .doc-suggest-meta,
+  .doc-suggest-note,
+  .doc-suggest-note-text { display: none !important; }
+  .doc-suggest-card {
+    margin: 0 0 1rem;
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: 0;
+  }
+  .doc-suggest-current,
+  .doc-suggest-proposed { color: inherit; background: none; }
 }

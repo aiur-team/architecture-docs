@@ -144,11 +144,20 @@ function installEdit() {
   const SUB = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
   const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   const SUGGESTION_ID = /^s_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
+  const HASH = /^[0-9a-f]{64}$/;
+  const SECTION = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+  const DOC_VERSION = /^[0-9a-f]{7,64}$/;
+  const EMAIL_LOCAL = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+  const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
   const MAX_TEXT = 4000;
+  const MAX_NOTE = 280;
   const MAX_NAME = 200;
   const OVERLAY_TIMEOUT_MS = 5000;
   const SAVE_TIMEOUT_MS = 5000;
+  const READ_LIMIT = 67_108_864;
+  const MAX_SUGGESTIONS = 10_000;
+  const VISIBILITY_WINDOW_MS = 30_000;
   const BATCH = 50;
 
   const PENDING_CLASS = "doc-edit-pending";
@@ -159,13 +168,19 @@ function installEdit() {
   const BUSY_MESSAGE = "Another block is saving. Try again in a moment.";
   const EDITING_MESSAGE = "Editing. Ctrl+Enter saves, Escape cancels.";
 
-  const RESERVED_FINAL_FIELDS = [
-    "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
-  ];
   const ROLES = ["owner", "editor", "commenter", "viewer", "none"];
 
   const ENTRY_KEYS = ["text", "by", "at", "pr"];
   const ACTOR_KEYS = ["sub", "name", "email"];
+  const SESSION_KEYS = [
+    "sub", "email", "name", "roles", "canComment", "canEdit", "doc", "role",
+    "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+  ];
+  const SUGGESTION_KEYS = [
+    "v", "id", "docId", "aid", "section", "text", "note", "by", "at",
+    "baseHash", "baseText", "docVersion",
+  ];
+  const SUGGESTION_LIST_KEYS = SUGGESTION_KEYS.concat(["state"]);
 
   /* ------------------------------------------------------------- the blocks */
 
@@ -174,7 +189,7 @@ function installEdit() {
   const byAid = new Map();
   for (const element of found) {
     const aid = element.getAttribute("data-aid");
-    if (typeof aid !== "string" || !AID.test(aid)) return;
+    if (!anchor.BLOCK.includes(element.localName) || typeof aid !== "string" || !AID.test(aid)) return;
     if (byAid.has(aid)) return;
     byAid.set(aid, element);
     blocks.push({ aid, element });
@@ -191,8 +206,36 @@ function installEdit() {
   function exactKeys(value, keys) {
     if (!isRecord(value)) return false;
     const names = Object.keys(value);
-    if (names.length !== keys.length) return false;
-    return keys.every((key) => hasOwn(value, key));
+    if (names.length !== keys.length || Object.getOwnPropertySymbols(value).length !== 0) return false;
+    return keys.every((key, index) => names[index] === key && hasOwn(value, key));
+  }
+
+  function exactFrozen(value, keys) {
+    if (!exactKeys(value, keys) || Object.getPrototypeOf(value) !== Object.prototype ||
+        !Object.isFrozen(value)) return false;
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !hasOwn(descriptor, "value") ||
+          descriptor.enumerable !== true || descriptor.writable !== false ||
+          descriptor.configurable !== false) return false;
+    }
+    return true;
+  }
+
+  function safeScalar(value, max) {
+    if (typeof value !== "string" || value.length > max) return false;
+    for (let at = 0; at < value.length; at += 1) {
+      const unit = value.charCodeAt(at);
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        if (at + 1 >= value.length) return false;
+        const low = value.charCodeAt(at + 1);
+        if (low < 0xdc00 || low > 0xdfff) return false;
+        at += 1;
+      } else if (unit >= 0xdc00 && unit <= 0xdfff) return false;
+      else if ((unit < 0x20 && unit !== 0x09 && unit !== 0x0a && unit !== 0x0d) ||
+          (unit >= 0x7f && unit <= 0x9f)) return false;
+    }
+    return true;
   }
 
   function isTimestamp(value) {
@@ -207,8 +250,23 @@ function installEdit() {
   function isActor(value) {
     if (!exactKeys(value, ACTOR_KEYS)) return false;
     return typeof value.sub === "string" && SUB.test(value.sub) &&
-      typeof value.name === "string" && value.name.length <= MAX_NAME &&
-      typeof value.email === "string";
+      safeScalar(value.name, MAX_NAME) && isEmail(value.email);
+  }
+
+  function sameActor(left, right) {
+    return left.sub === right.sub && left.name === right.name && left.email === right.email;
+  }
+
+  function isEmail(value) {
+    if (typeof value !== "string") return false;
+    if (value === "") return true;
+    if (value.length > 254 || !safeScalar(value, 254)) return false;
+    const at = value.indexOf("@");
+    if (at < 1 || value.indexOf("@", at + 1) !== -1) return false;
+    const local = value.slice(0, at);
+    const labels = value.slice(at + 1).split(".");
+    return local.length <= 64 && EMAIL_LOCAL.test(local) && labels.length >= 2 &&
+      labels.every((label) => DNS_LABEL.test(label));
   }
 
   /** Text is displayable only when the twin converters reproduce it exactly:
@@ -217,6 +275,29 @@ function installEdit() {
     if (typeof value !== "string" || value.length > MAX_TEXT) return false;
     const html = toHtml(value);
     return toMd(html) === value && toHtml(toMd(html)) === html;
+  }
+
+  function isSuggestionText(value) {
+    return safeScalar(value, MAX_TEXT) && isEditableText(value);
+  }
+
+  function isNote(value) {
+    return safeScalar(value, MAX_NOTE);
+  }
+
+  async function hashText(text) {
+    const bytes = new TextEncoder().encode(toHtml(text));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    if (!(digest instanceof ArrayBuffer) || digest.byteLength !== 32) throw new Error("invalid digest");
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (!HASH.test(hash)) throw new Error("invalid digest");
+    return hash;
+  }
+
+  async function effectiveBase(element) {
+    const text = editableText(element);
+    if (!isSuggestionText(text)) throw new Error("invalid base");
+    return { text, hash: await hashText(text) };
   }
 
   /** Pure content-type grammar for `application/json` with an optional
@@ -232,33 +313,122 @@ function installEdit() {
     return parameter === "charset=utf-8" || parameter === 'charset="utf-8"';
   }
 
+  function validSuggestion(value, withState) {
+    const keys = withState ? SUGGESTION_LIST_KEYS : SUGGESTION_KEYS;
+    if (!exactKeys(value, keys) || Object.getPrototypeOf(value) !== Object.prototype) return null;
+    if (value.v !== 1 || typeof value.id !== "string" || !SUGGESTION_ID.test(value.id) ||
+        value.docId !== docId || typeof value.aid !== "string" || !AID.test(value.aid) ||
+        typeof value.section !== "string" || !SECTION.test(value.section) ||
+        !isSuggestionText(value.text) || !isNote(value.note) || !isActor(value.by) ||
+        !isTimestamp(value.at) || typeof value.baseHash !== "string" || !HASH.test(value.baseHash) ||
+        !isSuggestionText(value.baseText) || typeof value.docVersion !== "string" ||
+        !DOC_VERSION.test(value.docVersion)) return null;
+    if (withState && value.state !== "open" && value.state !== "superseded") return null;
+    return value;
+  }
+
+  function compareSuggestions(left, right) {
+    if (left.at !== right.at) return left.at < right.at ? -1 : 1;
+    if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+    if (left.aid !== right.aid) return left.aid < right.aid ? -1 : 1;
+    return 0;
+  }
+
+  function validSuggestionList(value) {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
+        value.length > MAX_SUGGESTIONS || Object.keys(value).length !== value.length) return null;
+    const seen = new Set();
+    let previous = null;
+    for (let at = 0; at < value.length; at += 1) {
+      if (!hasOwn(value, at)) return null;
+      const record = validSuggestion(value[at], true);
+      if (record === null) return null;
+      const tuple = `${record.id}\u0000${record.aid}`;
+      if (seen.has(tuple) || (previous !== null && compareSuggestions(previous, record) >= 0)) return null;
+      seen.add(tuple);
+      previous = record;
+    }
+    return value;
+  }
+
+  async function boundedJson(response, limit, active) {
+    if (!isJsonContentType(response.headers.get("content-type"))) throw new Error("invalid content type");
+    const body = response.body;
+    if (body === null || typeof body !== "object" || typeof body.getReader !== "function") {
+      throw new Error("unbounded body");
+    }
+    const reader = body.getReader();
+    active.reader = reader;
+    const chunks = [];
+    let length = 0;
+    let done = false;
+    try {
+      for (;;) {
+        const item = await reader.read();
+        if (item === null || typeof item !== "object" || typeof item.done !== "boolean") {
+          throw new Error("invalid stream");
+        }
+        if (item.done) {
+          done = true;
+          break;
+        }
+        if (!(item.value instanceof Uint8Array)) throw new Error("invalid stream");
+        length += item.value.byteLength;
+        if (length > limit) throw new Error("oversized body");
+        chunks.push(item.value);
+      }
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    } finally {
+      if (!done) {
+        try { await reader.cancel(); } catch (error) { /* contained */ }
+      }
+      try { reader.releaseLock(); } catch (error) { /* contained */ }
+      if (active.reader === reader) active.reader = null;
+    }
+  }
+
+  function abortRead(active) {
+    if (active === null) return;
+    try { active.controller.abort(); } catch (error) { /* contained */ }
+    if (active.reader !== null) {
+      try { Promise.resolve(active.reader.cancel()).catch(ignore); } catch (error) { /* contained */ }
+    }
+  }
+
   function freezeDetail(aids) {
     return Object.freeze({ aids: Object.freeze(aids) });
   }
 
   /* ------------------------------------------------------------- the session */
 
-  /** The complete session projection. Presence of any reserved final field
-     commits to the whole P3-H shape; zero reserved fields selects the legacy
-     shape. Only `canEdit` is ever read, and only as a presentation hint. */
+  /** P4-P consumes only the complete recursively frozen P3-H projection. */
   function validSession(body) {
-    if (!isRecord(body)) return null;
-    let reservedPresent = 0;
-    for (const field of RESERVED_FINAL_FIELDS) {
-      if (hasOwn(body, field)) reservedPresent += 1;
-    }
+    if (!exactFrozen(body, SESSION_KEYS)) return null;
     if (typeof body.sub !== "string") return null;
     if (typeof body.email !== "string") return null;
     if (typeof body.name !== "string") return null;
-    if (!Array.isArray(body.roles)) return null;
-    for (const entry of body.roles) {
-      if (typeof entry !== "string") return null;
-    }
+    const roleNames = Array.isArray(body.roles) ? Object.getOwnPropertyNames(body.roles) : [];
+    if (!Array.isArray(body.roles) || !Object.isFrozen(body.roles) ||
+        Object.getPrototypeOf(body.roles) !== Array.prototype ||
+        Object.getOwnPropertySymbols(body.roles).length !== 0 || body.roles.length !== 1 ||
+        roleNames.length !== 2 || roleNames[0] !== "0" || roleNames[1] !== "length") return null;
+    const roleDescriptor = Object.getOwnPropertyDescriptor(body.roles, "0");
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(body.roles, "length");
+    if (roleDescriptor === undefined || !hasOwn(roleDescriptor, "value") ||
+        roleDescriptor.enumerable !== true || roleDescriptor.writable !== false ||
+        roleDescriptor.configurable !== false ||
+        (roleDescriptor.value !== "member" && roleDescriptor.value !== "guest")) return null;
+    if (lengthDescriptor === undefined || !hasOwn(lengthDescriptor, "value") ||
+        lengthDescriptor.value !== 1 || lengthDescriptor.enumerable !== false ||
+        lengthDescriptor.writable !== false || lengthDescriptor.configurable !== false) return null;
     if (typeof body.canComment !== "boolean") return null;
     if (typeof body.canEdit !== "boolean") return null;
-    if (reservedPresent === 0) return body;
-
-    if (reservedPresent !== RESERVED_FINAL_FIELDS.length) return null;
     if (body.doc !== docId) return null;
     if (!ROLES.includes(body.role)) return null;
     if (typeof body.shared !== "boolean") return null;
@@ -266,9 +436,12 @@ function installEdit() {
     if (typeof body.canAccept !== "boolean") return null;
     if (typeof body.canShare !== "boolean") return null;
     if (typeof body.canSeeMembers !== "boolean") return null;
-    if (body.roles.length !== 1) return null;
-    if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
-    return body;
+    return Object.freeze({
+      sub: body.sub,
+      canSuggest: body.canSuggest,
+      canEdit: body.canEdit,
+      canAccept: body.canAccept,
+    });
   }
 
   /* -------------------------------------------------------- pending overlays */
@@ -294,6 +467,24 @@ function installEdit() {
       if (!isActor(value.acceptedBy)) return null;
       if (!isTimestamp(value.acceptedAt)) return null;
     }
+    return value;
+  }
+
+  function validDirectReceipt(value, aid) {
+    if (!exactKeys(value, ["aid", "text", "by", "at", "pr", "via"])) return null;
+    if (value.aid !== aid || !isEditableText(value.text) || !isActor(value.by) ||
+        !isTimestamp(value.at) || !(value.pr === null || (Number.isSafeInteger(value.pr) && value.pr > 0)) ||
+        value.via !== "edit") return null;
+    return value;
+  }
+
+  function validApplyReceipt(value, aid) {
+    const keys = ["v", "aid", "text", "by", "at", "baseHash", "pr", "via", "sugId", "acceptedBy", "acceptedAt"];
+    if (!exactKeys(value, keys) || value.v !== 1 || value.aid !== aid || !isEditableText(value.text) ||
+        !isActor(value.by) || !isTimestamp(value.at) || typeof value.baseHash !== "string" ||
+        !HASH.test(value.baseHash) || !(value.pr === null || (Number.isSafeInteger(value.pr) && value.pr > 0)) ||
+        value.via !== "suggestion" || typeof value.sugId !== "string" || !SUGGESTION_ID.test(value.sugId) ||
+        !isActor(value.acceptedBy) || !isTimestamp(value.acceptedAt)) return null;
     return value;
   }
 
@@ -327,45 +518,97 @@ function installEdit() {
     }
   }
 
-  async function loadOverlays() {
-    const endpoint = new URL("/api/pending", location.href);
-    endpoint.searchParams.set("doc", docId);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OVERLAY_TIMEOUT_MS);
-    let overlay = null;
-    try {
-      const response = await fetch(endpoint, {
-        method: "GET",
-        mode: "same-origin",
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "error",
-        headers: { Accept: "application/json" },
-        signal: controller.signal,
-      });
-      if (response.status !== 200) return { applied: [], available: false };
-      if (!isJsonContentType(response.headers.get("content-type"))) {
-        return { applied: [], available: false };
-      }
-      overlay = validOverlay(await response.json());
-    } catch (error) {
-      return { applied: [], available: false };
-    } finally {
-      clearTimeout(timer);
-    }
-    if (overlay === null) return { applied: [], available: false };
+  let pendingActive = null;
+  let pendingDirty = false;
+  let pendingGeneration = 0;
+  let pendingDeferred = false;
+  let pendingApplied = [];
+  let suspended = false;
+  const writingAids = new Map();
 
-    // DOM order, so a reader watching the page sees one top-to-bottom pass.
-    const applied = [];
-    for (const block of blocks) {
-      const entry = overlay.get(block.aid);
-      if (entry === undefined) continue;
-      paint(block.element, entry.text);
-      block.element.classList.add(PENDING_CLASS);
-      applied.push(block.aid);
+  function beginWrite(aid) {
+    writingAids.set(aid, (writingAids.get(aid) || 0) + 1);
+  }
+
+  function endWrite(aid) {
+    const count = writingAids.get(aid) || 0;
+    if (count <= 1) writingAids.delete(aid);
+    else writingAids.set(aid, count - 1);
+  }
+
+  /** Repeatable, bounded and single-flight. Every call settles to a boolean. */
+  function refreshPending() {
+    if (suspended) return Promise.resolve(false);
+    if (pendingActive !== null) {
+      pendingDirty = true;
+      return pendingActive.promise;
     }
-    applied.sort();
-    return { applied, available: true };
+    const generation = ++pendingGeneration;
+    const controller = new AbortController();
+    const active = { controller, reader: null, promise: null };
+    pendingActive = active;
+    active.promise = (async () => {
+      let timer = null;
+      try {
+        const endpoint = new URL("/api/pending", location.href);
+        endpoint.searchParams.set("doc", docId);
+        timer = setTimeout(() => controller.abort(), OVERLAY_TIMEOUT_MS);
+        const response = await fetch(endpoint, {
+          method: "GET",
+          mode: "same-origin",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (response.status !== 200) return false;
+        const overlay = validOverlay(await boundedJson(response, READ_LIMIT, active));
+        if (overlay === null || generation !== pendingGeneration || suspended) return false;
+
+        const changed = [];
+        for (const block of blocks) {
+          const entry = overlay.get(block.aid);
+          if (entry === undefined || !block.element.isConnected) continue;
+          if (activeEditor === block.aid || writingAids.has(block.aid)) {
+            pendingDeferred = true;
+            continue;
+          }
+          if (editableText(block.element) === entry.text) continue;
+          paint(block.element, entry.text);
+          block.element.classList.add(PENDING_CLASS);
+          changed.push(block.aid);
+        }
+        changed.sort();
+        pendingApplied = changed;
+        for (const aid of changed) {
+          try {
+            const base = await effectiveBase(byAid.get(aid));
+            if (generation === pendingGeneration && !suspended) applyLocalBase(aid, base.hash);
+          } catch (error) {
+            // A later authoritative suggestion read repairs local state.
+          }
+        }
+        if (generation !== pendingGeneration || suspended) return false;
+        if (changed.length > 0) announce(changed);
+        return true;
+      } catch (error) {
+        return false;
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+        if (pendingActive === active) pendingActive = null;
+        const trailing = pendingDirty;
+        pendingDirty = false;
+        if (trailing && !suspended) queueMicrotask(() => { void refreshPending(); });
+      }
+    })();
+    return active.promise;
+  }
+
+  function finishDeferredPending() {
+    if (!pendingDeferred || suspended) return;
+    pendingDeferred = false;
+    void refreshPending();
   }
 
   /* ------------------------------------------------------------ the soft lock */
@@ -461,7 +704,10 @@ function installEdit() {
   // this runs ahead of P3-G's own `pagehide` listener and peers see the
   // release before the bye. No `unload` or `beforeunload` listener is added.
   try {
-    window.addEventListener("pagehide", () => releaseBlock(null));
+    window.addEventListener("pagehide", () => {
+      releaseBlock(null);
+      suspendReconciliation();
+    });
     // The mirror of that release. Only a genuine BFCache restore re-claims: a
     // normal navigation builds a fresh page whose editors are all closed.
     window.addEventListener("pageshow", (event) => {
@@ -471,8 +717,8 @@ function installEdit() {
       } catch (error) {
         return;
       }
-      if (!persisted || activeEditor === null || claimedAid !== null) return;
-      claimBlock(activeEditor);
+      if (persisted && activeEditor !== null && claimedAid === null) claimBlock(activeEditor);
+      resumeReconciliation(event);
     });
   } catch (error) {
     // A host without the page lifecycle simply never fires it.
@@ -493,20 +739,31 @@ function installEdit() {
     return false;
   }
 
-  function makeControls(block) {
+  function makeControls(block, wantSuggest, wantEdit) {
     const controls = document.createElement("div");
     controls.className = "doc-edit-controls";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "doc-edit-button";
-    button.textContent = "Edit";
+    let suggestButton = null;
+    let editButton = null;
+    if (wantSuggest) {
+      suggestButton = document.createElement("button");
+      suggestButton.type = "button";
+      suggestButton.className = "doc-suggest-button";
+      suggestButton.textContent = "Suggest";
+      controls.appendChild(suggestButton);
+    }
+    if (wantEdit) {
+      editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "doc-edit-button";
+      editButton.textContent = "Edit";
+      controls.appendChild(editButton);
+    }
     const status = document.createElement("span");
     status.className = "doc-edit-status";
     status.setAttribute("role", "status");
-    controls.appendChild(button);
     controls.appendChild(status);
     block.element.insertAdjacentElement("afterend", controls);
-    return { controls, button, status };
+    return { controls, suggestButton, editButton, status };
   }
 
   function editableText(element) {
@@ -514,9 +771,9 @@ function installEdit() {
     return md === null ? element.textContent : md;
   }
 
-  function attach(block) {
+  function attachDirect(block, controlSet) {
     const { element, aid } = block;
-    const { controls, button, status } = makeControls(block);
+    const { controls, editButton: button, status } = controlSet;
 
     let priorHtml = "";
     let priorMd = null;
@@ -524,6 +781,7 @@ function installEdit() {
     let startText = "";
     let editing = false;
     let plaintextOnly = false;
+    let entryBaseHash = null;
 
     const setStatus = (text) => {
       status.textContent = text;
@@ -564,6 +822,7 @@ function installEdit() {
       stopEditing();
       restore();
       setStatus("");
+      finishDeferredPending();
     };
 
     async function save() {
@@ -579,6 +838,7 @@ function installEdit() {
         return;
       }
       const text = element.textContent;
+      beginWrite(aid);
       stopEditing();
       saving = true;
       button.disabled = true;
@@ -598,7 +858,7 @@ function installEdit() {
           cache: "no-store",
           redirect: "error",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ docId, aid, text }),
+          body: JSON.stringify({ docId, aid, text, baseHash: entryBaseHash }),
           signal: controller.signal,
         });
         if (isJsonContentType(response.headers.get("content-type"))) {
@@ -609,13 +869,15 @@ function installEdit() {
       } finally {
         clearTimeout(timer);
         saving = false;
+        endWrite(aid);
         button.disabled = false;
         controls.classList.remove("doc-edit-saving");
+        finishDeferredPending();
       }
 
       if (response !== null && response.status === 200 && isRecord(body) &&
           exactKeys(body, ["receipt"])) {
-        const receipt = validEntry(body.receipt);
+        const receipt = validDirectReceipt(body.receipt, aid);
         // The receipt carries no document id: the request's already validated
         // context is what binds this response to this block.
         if (receipt !== null && receipt.text === text) {
@@ -623,9 +885,15 @@ function installEdit() {
           element.classList.add(PENDING_CLASS);
           setStatus("");
           announce([aid]);
+          try {
+            const next = await effectiveBase(element);
+            applyLocalBase(aid, next.hash);
+          } catch (error) {
+            // The durable edit stays applied; the next list read repairs state.
+          }
           return;
         }
-        restore();
+        if (editableText(element) === startText) restore();
         setStatus(FAILED_MESSAGE);
         controls.classList.add("doc-edit-failed");
         return;
@@ -634,13 +902,13 @@ function installEdit() {
       if (response !== null && response.status === 409) {
         const current = isRecord(body) && hasOwn(body, "current") ? body.current : null;
         if (isEditableText(current)) paint(element, current);
-        else restore();
+        else if (editableText(element) === startText) restore();
         setStatus(CONFLICT_MESSAGE);
         controls.classList.add("doc-edit-conflict");
         return;
       }
 
-      restore();
+      if (editableText(element) === startText) restore();
       setStatus(FAILED_MESSAGE);
       controls.classList.add("doc-edit-failed");
     }
@@ -690,23 +958,702 @@ function installEdit() {
 
     button.addEventListener("click", () => {
       if (editing || saving) return;
-      priorHtml = element.innerHTML;
-      priorMdPresent = element.hasAttribute("data-md");
-      priorMd = priorMdPresent ? element.getAttribute("data-md") : null;
-      startText = editableText(element);
-      element.textContent = startText;
-      plaintextOnly = probePlaintextOnly(element);
-      element.classList.add(EDITING_CLASS);
-      controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
-      editing = true;
-      activeEditor = aid;
-      claimBlock(aid);
-      element.addEventListener("keydown", onKeyDown);
-      element.addEventListener("paste", onPaste);
-      element.addEventListener("blur", onBlur);
-      setStatus(EDITING_MESSAGE);
-      element.focus();
+      button.disabled = true;
+      void (async () => {
+        try {
+          let captured = null;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            const before = editableText(element);
+            captured = await effectiveBase(element);
+            if (element.isConnected && before === captured.text && editableText(element) === before) break;
+            captured = null;
+          }
+          if (captured === null) throw new Error("moving base");
+          priorHtml = element.innerHTML;
+          priorMdPresent = element.hasAttribute("data-md");
+          priorMd = priorMdPresent ? element.getAttribute("data-md") : null;
+          startText = captured.text;
+          entryBaseHash = captured.hash;
+          element.textContent = startText;
+          plaintextOnly = probePlaintextOnly(element);
+          element.classList.add(EDITING_CLASS);
+          controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
+          editing = true;
+          activeEditor = aid;
+          claimBlock(aid);
+          element.addEventListener("keydown", onKeyDown);
+          element.addEventListener("paste", onPaste);
+          element.addEventListener("blur", onBlur);
+          setStatus(EDITING_MESSAGE);
+          element.focus();
+        } catch (error) {
+          setStatus("Editing is unavailable for this block.");
+        } finally {
+          if (!editing) button.disabled = false;
+        }
+      })();
     });
+  }
+
+  /* ---------------------------------------------------------- suggestions */
+
+  let currentSession = null;
+  let railSurface = null;
+  let panelSurface = null;
+  let suggestionOpen = false;
+  let suggestionActive = null;
+  let suggestionDirty = false;
+  let suggestionGeneration = 0;
+  let suggestionEpoch = 0;
+  let suggestions = [];
+  let suggestionMessage = "";
+  let draft = null;
+  let draftOpening = false;
+  let rejectDraft = null;
+  let mutationActive = null;
+  let lastVisibilityRefresh = null;
+  const controlSets = new Map();
+  const railTokens = new Map();
+  const chips = new Map();
+
+  function callableSurface(value, keys) {
+    if (!exactFrozen(value, keys)) return null;
+    for (const key of keys) {
+      if (typeof value[key] !== "function" || !Object.isFrozen(value[key])) return null;
+    }
+    return value;
+  }
+
+  function suggestionSurfaces() {
+    try {
+      const rail = callableSurface(window.doc.rail, ["add", "remove", "place"]);
+      const panel = callableSurface(window.doc.panel, ["register", "refresh", "open"]);
+      return rail === null || panel === null ? null : { rail, panel };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function node(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className !== "") element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+
+  function setSuggestionMessage(text) {
+    suggestionMessage = text;
+    repaintSuggestions();
+  }
+
+  function removeSuggestionChrome() {
+    for (const [aid, token] of railTokens) {
+      try { railSurface.remove(token); } catch (error) { /* contained */ }
+      railTokens.delete(aid);
+    }
+    for (const [aid, chip] of chips) {
+      if (chip.parentNode !== null) chip.parentNode.removeChild(chip);
+      chips.delete(aid);
+    }
+    for (const block of blocks) block.element.removeAttribute("data-suggest");
+  }
+
+  function repaintSuggestions() {
+    if (railSurface === null || panelSurface === null) return;
+    removeSuggestionChrome();
+    if (suggestionOpen) {
+      const counts = new Map();
+      for (const record of suggestions) {
+        if (record.state === "open") counts.set(record.aid, (counts.get(record.aid) || 0) + 1);
+      }
+      for (const block of blocks) {
+        const count = counts.get(block.aid) || 0;
+        if (count === 0 || !block.element.isConnected) continue;
+        const label = count === 1 ? "1 suggestion" : `${count} suggestions`;
+        block.element.setAttribute("data-suggest", String(count));
+        const chip = node("span", "doc-suggest-chip", label);
+        const controls = controlSets.get(block.aid);
+        if (controls !== undefined && controls.controls.isConnected) {
+          controls.controls.insertAdjacentElement("afterend", chip);
+        } else {
+          block.element.insertAdjacentElement("afterend", chip);
+        }
+        chips.set(block.aid, chip);
+        try {
+          const token = railSurface.add("suggestion", block.aid, label, () => panelSurface.open(block.aid));
+          if (token !== null) railTokens.set(block.aid, token);
+        } catch (error) {
+          // A marker is optional presentation; the panel model remains usable.
+        }
+      }
+    }
+    try { railSurface.place(); } catch (error) { /* contained */ }
+    try { panelSurface.refresh(); } catch (error) { /* contained */ }
+  }
+
+  function appendField(parent, label, value, empty, extraClass = "") {
+    const field = node("div", "doc-suggest-field");
+    if (extraClass !== "") field.classList.add(extraClass);
+    field.appendChild(node("strong", "doc-suggest-label", label));
+    if (value === "" && empty) field.appendChild(node("em", "doc-suggest-empty", "Empty block"));
+    else field.appendChild(node("div", "doc-suggest-text", value));
+    parent.appendChild(field);
+  }
+
+  function renderDraft(extension) {
+    if (draft === null) return;
+    const form = node("div", "doc-suggest-draft");
+    const heading = node("h4", "doc-suggest-draft-title", draft.reproposal ? "Re-propose suggestion" : "New suggestion");
+    form.appendChild(heading);
+    const textLabel = node("label", "doc-suggest-label", "Proposed text");
+    const text = node("textarea", "doc-suggest-textarea");
+    text.maxLength = MAX_TEXT;
+    text.value = draft.text;
+    textLabel.appendChild(text);
+    form.appendChild(textLabel);
+    const noteLabel = node("label", "doc-suggest-label", "Note (optional)");
+    const note = node("textarea", "doc-suggest-note");
+    note.maxLength = MAX_NOTE;
+    note.value = draft.note;
+    noteLabel.appendChild(note);
+    form.appendChild(noteLabel);
+    const status = node("div", "doc-suggest-status", draft.message || "");
+    status.setAttribute("aria-live", "polite");
+    form.appendChild(status);
+    const actions = node("div", "doc-suggest-actions");
+    const save = node("button", "doc-suggest-save", "Save");
+    save.type = "button";
+    const cancel = node("button", "doc-suggest-cancel", "Cancel");
+    cancel.type = "button";
+    const busy = mutationActive !== null && mutationActive.target === "draft";
+    save.disabled = busy;
+    text.disabled = busy;
+    note.disabled = busy;
+    text.addEventListener("input", () => { draft.text = text.value; });
+    note.addEventListener("input", () => { draft.note = note.value; });
+    const rememberFocus = (name, element) => {
+      draft.focus = name;
+      draft.selectionStart = element.selectionStart;
+      draft.selectionEnd = element.selectionEnd;
+    };
+    text.addEventListener("focus", () => rememberFocus("text", text));
+    note.addEventListener("focus", () => rememberFocus("note", note));
+    const keys = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeDraft(true);
+      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void submitDraft();
+      }
+    };
+    text.addEventListener("keydown", keys);
+    note.addEventListener("keydown", keys);
+    save.addEventListener("click", () => { draft.text = text.value; draft.note = note.value; void submitDraft(); });
+    cancel.addEventListener("click", () => closeDraft(true));
+    actions.appendChild(save);
+    actions.appendChild(cancel);
+    if (draft.stale) {
+      const retry = node("button", "doc-suggest-retry", "Try again");
+      retry.type = "button";
+      retry.addEventListener("click", () => { void retryDraft(); });
+      actions.appendChild(retry);
+    }
+    form.appendChild(actions);
+    extension.appendChild(form);
+    if (draft.focus === "text" || draft.focus === "note") {
+      const target = draft.focus === "text" ? text : note;
+      queueMicrotask(() => {
+        if (!target.isConnected) return;
+        target.focus();
+        try { target.setSelectionRange(draft.selectionStart, draft.selectionEnd); } catch (error) { /* contained */ }
+      });
+    }
+  }
+
+  function renderSuggestions(extension, aidFilter) {
+    const heading = node("h3", "doc-suggest-heading", "Suggestions");
+    heading.tabIndex = -1;
+    extension.appendChild(heading);
+    const status = node("div", "doc-suggest-status", suggestionMessage);
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    extension.appendChild(status);
+    if (draft !== null && (aidFilter === null || draft.aid === aidFilter)) renderDraft(extension);
+    let shown = 0;
+    for (const record of suggestions) {
+      if (aidFilter !== null && record.aid !== aidFilter) continue;
+      shown += 1;
+      const card = node("article", `doc-suggest-card doc-suggest-${record.state}`);
+      card.setAttribute("data-suggestion-id", record.id);
+      const title = node("h4", "doc-suggest-card-title", `Suggestion for ${record.section}`);
+      title.tabIndex = -1;
+      card.appendChild(title);
+      const by = record.by.name === "" ? "Reader" : record.by.name;
+      const meta = node("p", "doc-suggest-meta");
+      meta.appendChild(document.createTextNode(`${by} · `));
+      const time = node("time", "", record.at);
+      time.dateTime = record.at;
+      meta.appendChild(time);
+      card.appendChild(meta);
+      if (record.note !== "") card.appendChild(node("p", "doc-suggest-note-text", record.note));
+      card.appendChild(node("p", `doc-suggest-state doc-suggest-state-${record.state}`,
+        record.state === "open" ? "Open" : "Superseded"));
+      const details = node("details", "doc-suggest-current");
+      details.appendChild(node("summary", "", "Current text"));
+      appendField(details, "Current text", record.baseText, true);
+      card.appendChild(details);
+      appendField(card, "Proposed text", record.text, true, "doc-suggest-proposed");
+      renderCardActions(card, record);
+      extension.appendChild(card);
+    }
+    if (shown === 0 && draft === null) extension.appendChild(node("p", "doc-suggest-empty-model", "No suggestions."));
+  }
+
+  function renderCardActions(card, record) {
+    const actions = node("div", "doc-suggest-actions");
+    const add = (label, action) => {
+      const button = node("button", `doc-suggest-${action}`, label);
+      button.type = "button";
+      button.disabled = mutationActive !== null && mutationActive.target === record.id;
+      button.addEventListener("click", () => {
+        if (action === "reject") {
+          rejectDraft = { id: record.id, reason: "" };
+          repaintSuggestions();
+        } else if (action === "repropose") void openDraft(record.aid, button, record);
+        else void runAction(record, action, "");
+      });
+      actions.appendChild(button);
+    };
+    if (record.state === "open" && currentSession.canAccept) {
+      add("Accept", "accept");
+      add("Reject", "reject");
+    }
+    if (record.by.sub === currentSession.sub) add("Withdraw", "withdraw");
+    if (record.state === "superseded" && currentSession.canSuggest) add("Re-propose", "repropose");
+    if (rejectDraft !== null && rejectDraft.id === record.id) {
+      const label = node("label", "doc-suggest-label", "Reason for rejection");
+      const reason = node("textarea", "doc-suggest-reason");
+      reason.maxLength = MAX_NOTE;
+      reason.value = rejectDraft.reason;
+      reason.addEventListener("input", () => { rejectDraft.reason = reason.value; });
+      reason.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault(); event.stopPropagation(); rejectDraft = null; repaintSuggestions();
+        } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault(); event.stopPropagation(); void runAction(record, "reject", reason.value);
+        }
+      });
+      label.appendChild(reason);
+      actions.appendChild(label);
+      const confirm = node("button", "doc-suggest-reject-confirm", "Reject suggestion");
+      confirm.type = "button";
+      confirm.addEventListener("click", () => { void runAction(record, "reject", reason.value); });
+      actions.appendChild(confirm);
+    }
+    if (actions.childNodes.length > 0) card.appendChild(actions);
+  }
+
+  function closeDraft(restoreFocus) {
+    if (draft === null) return;
+    const invoker = draft.invoker;
+    draft = null;
+    repaintSuggestions();
+    if (restoreFocus && invoker !== null && invoker.isConnected) {
+      try { invoker.focus(); } catch (error) { /* contained */ }
+    }
+  }
+
+  async function openDraft(aid, invoker, record = null) {
+    if (!suggestionOpen || mutationActive !== null || draftOpening || draft !== null) return;
+    draftOpening = true;
+    if (invoker !== null) invoker.disabled = true;
+    try {
+      const base = await effectiveBase(byAid.get(aid));
+      if (!suggestionOpen || editableText(byAid.get(aid)) !== base.text) return;
+      if (panelSurface.open(aid) !== true) {
+        terminalSuggestions();
+        return;
+      }
+      draft = {
+        aid,
+        text: record === null ? base.text : record.text,
+        note: record === null ? "" : record.note,
+        baseText: base.text,
+        baseHash: base.hash,
+        invoker,
+        reproposal: record !== null,
+        stale: false,
+        message: "",
+        focus: "text",
+        selectionStart: 0,
+        selectionEnd: record === null ? base.text.length : record.text.length,
+      };
+      repaintSuggestions();
+    } catch (error) {
+      const controls = controlSets.get(aid);
+      if (controls !== undefined) controls.status.textContent = "Editing is unavailable for this block.";
+    } finally {
+      draftOpening = false;
+      if (invoker !== null && invoker.isConnected) invoker.disabled = false;
+    }
+  }
+
+  async function retryDraft() {
+    if (draft === null || mutationActive !== null) return;
+    const target = draft;
+    try {
+      const base = await effectiveBase(byAid.get(target.aid));
+      if (draft !== target) return;
+      target.baseText = base.text;
+      target.baseHash = base.hash;
+      target.stale = false;
+      target.message = "";
+      repaintSuggestions();
+    } catch (error) {
+      if (draft !== target) return;
+      target.message = "Editing is unavailable for this block.";
+      repaintSuggestions();
+    }
+  }
+
+  async function mutationFetch(path, body, target) {
+    const controller = new AbortController();
+    const active = { controller, reader: null, target };
+    mutationActive = active;
+    repaintSuggestions();
+    const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+    try {
+      const response = await fetch(new URL(path, location.href), {
+        method: "POST",
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      let value = null;
+      try { value = await boundedJson(response, READ_LIMIT, active); } catch (error) { value = null; }
+      return { response, value };
+    } catch (error) {
+      return { response: null, value: null };
+    } finally {
+      clearTimeout(timer);
+      if (mutationActive === active) mutationActive = null;
+    }
+  }
+
+  async function submitDraft() {
+    if (draft === null || mutationActive !== null || !suggestionOpen) return;
+    if (!isSuggestionText(draft.text) || !isNote(draft.note)) {
+      draft.message = "The suggestion was not saved.";
+      repaintSuggestions();
+      return;
+    }
+    if (draft.text === draft.baseText) {
+      draft.message = "Change the text before saving.";
+      repaintSuggestions();
+      return;
+    }
+    const captured = draft;
+    beginWrite(captured.aid);
+    const result = await mutationFetch("/api/suggestions", {
+      docId, aid: captured.aid, text: captured.text, note: captured.note,
+      baseHash: captured.baseHash, baseText: captured.baseText,
+    }, "draft");
+    endWrite(captured.aid);
+    finishDeferredPending();
+    if (!suggestionOpen || draft !== captured) return;
+    if (result.response !== null && terminalResponse(result.response.status, result.value)) {
+      terminalSuggestions();
+      return;
+    }
+    if (result.response !== null && result.response.status === 201) {
+      const record = validSuggestion(result.value, false);
+      if (record !== null && record.aid === captured.aid && record.text === captured.text &&
+          record.note === captured.note && record.baseHash === captured.baseHash &&
+          record.baseText === captured.baseText && record.by.sub === currentSession.sub &&
+          !suggestions.some((entry) => entry.id === record.id)) {
+        suggestions.push({ ...record, state: "open" });
+        suggestions.sort(compareSuggestions);
+        suggestionEpoch += 1;
+        draft = null;
+        suggestionMessage = "";
+        repaintSuggestions();
+        focusSuggestion(record.id);
+        return;
+      }
+    }
+    if (result.response !== null && result.response.status === 409 &&
+        exactError(result.value, "conflict", "The block changed since this document was built", true)) {
+      if (await applyConflictCurrent(captured.aid, result.value)) {
+        captured.stale = true;
+        captured.message = "The block changed. Try again against the current text.";
+      } else captured.message = "The suggestion was not saved.";
+    } else if (result.response !== null && result.response.status === 409 &&
+        exactError(result.value, "suggestion-limit", "Decide the open suggestions first", false)) {
+      captured.message = "Decide the open suggestions first.";
+    } else captured.message = "The suggestion was not saved.";
+    repaintSuggestions();
+  }
+
+  function exactError(body, code, message, withCurrent) {
+    const keys = withCurrent ? ["error", "current"] : ["error"];
+    return exactKeys(body, keys) && exactKeys(body.error, ["code", "message"]) &&
+      body.error.code === code && body.error.message === message;
+  }
+
+  function terminalResponse(status, body) {
+    if (status === 401) return exactError(body, "unauthenticated", "Authentication required", false);
+    if (status === 403) return exactError(body, "forbidden", "Suggestion access denied", false);
+    return false;
+  }
+
+  async function applyConflictCurrent(aid, body) {
+    if (!exactError(body, "conflict", "The block changed since this document was built", true) ||
+        !exactKeys(body.current, ["hash", "text"])) return false;
+    const current = body.current;
+    if (typeof current.hash !== "string" || !HASH.test(current.hash)) return false;
+    if (current.text === null) return true;
+    if (!isSuggestionText(current.text)) return false;
+    try {
+      if (await hashText(current.text) !== current.hash) return false;
+    } catch (error) {
+      return false;
+    }
+    const element = byAid.get(aid);
+    if (element === undefined || !element.isConnected || activeEditor === aid) return false;
+    paint(element, current.text);
+    element.classList.add(PENDING_CLASS);
+    applyLocalBase(aid, current.hash);
+    announce([aid]);
+    return true;
+  }
+
+  function applyLocalBase(aid, hash) {
+    let changed = false;
+    for (const record of suggestions) {
+      if (record.aid === aid && record.baseHash !== hash && record.state !== "superseded") {
+        record.state = "superseded";
+        changed = true;
+      }
+    }
+    if (draft !== null && draft.aid === aid && draft.baseHash !== hash) {
+      draft.stale = true;
+      draft.message = "The block changed. Try again against the current text.";
+      changed = true;
+    }
+    if (changed) {
+      suggestionEpoch += 1;
+      repaintSuggestions();
+    }
+  }
+
+  function focusSuggestion(id) {
+    queueMicrotask(() => {
+      const cards = document.querySelectorAll(".doc-suggest-card");
+      for (const card of cards) {
+        const heading = card.querySelector(".doc-suggest-card-title");
+        if (card.getAttribute("data-suggestion-id") === id && heading !== null) {
+          heading.focus(); return;
+        }
+      }
+      const heading = document.querySelector(".doc-suggest-heading");
+      if (heading !== null) heading.focus();
+    });
+  }
+
+  function nextSuggestionId(id) {
+    const index = suggestions.findIndex((record) => record.id === id);
+    return index >= 0 && index + 1 < suggestions.length ? suggestions[index + 1].id : null;
+  }
+
+  async function runAction(record, action, reason) {
+    if (mutationActive !== null || !suggestionOpen) return;
+    if (action === "reject" && (!isNote(reason) || reason.length === 0)) {
+      setSuggestionMessage("Enter a reason before rejecting.");
+      return;
+    }
+    beginWrite(record.aid);
+    const result = await mutationFetch("/api/suggestion", {
+      docId, aid: record.aid, sugId: record.id, action, reason,
+    }, record.id);
+    endWrite(record.aid);
+    finishDeferredPending();
+    if (!suggestionOpen) return;
+    if (result.response !== null && terminalResponse(result.response.status, result.value)) {
+      terminalSuggestions(); return;
+    }
+    if (result.response !== null && result.response.status === 200) {
+      if ((action === "reject" || action === "withdraw") && exactKeys(result.value, ["ok"]) && result.value.ok === true) {
+        const nextId = nextSuggestionId(record.id);
+        removeSuggestion(record.id);
+        suggestionMessage = "";
+        rejectDraft = null;
+        repaintSuggestions();
+        focusSuggestion(nextId);
+        return;
+      }
+      if (action === "accept" && await applyAcceptance(record, result.value)) return;
+    }
+    if (result.response !== null && result.response.status === 404) {
+      const nextId = nextSuggestionId(record.id);
+      removeSuggestion(record.id);
+      suggestionMessage = "This suggestion is no longer available.";
+      repaintSuggestions();
+      focusSuggestion(nextId);
+      return;
+    } else if (result.response !== null && result.response.status === 409 &&
+        exactError(result.value, "conflict", "The block changed since this document was built", true)) {
+      if (await applyConflictCurrent(record.aid, result.value)) {
+        record.state = "superseded";
+        suggestionEpoch += 1;
+        suggestionMessage = "The block changed. Re-propose against the current text.";
+      } else suggestionMessage = "The suggestion change was not saved.";
+    } else suggestionMessage = "The suggestion change was not saved.";
+    repaintSuggestions();
+    focusSuggestion(record.id);
+  }
+
+  function removeSuggestion(id) {
+    const next = suggestions.filter((record) => record.id !== id);
+    if (next.length !== suggestions.length) {
+      suggestions = next;
+      suggestionEpoch += 1;
+    }
+  }
+
+  async function applyAcceptance(record, body) {
+    if (!exactKeys(body, ["receipt", "pr"])) return false;
+    const receipt = validApplyReceipt(body.receipt, record.aid);
+    if (receipt === null || receipt.sugId !== record.id || receipt.text !== record.text ||
+        body.pr !== receipt.pr || !sameActor(receipt.by, record.by)) return false;
+    const element = byAid.get(record.aid);
+    if (element === undefined || !element.isConnected || activeEditor === record.aid) return false;
+    paint(element, receipt.text);
+    element.classList.add(PENDING_CLASS);
+    removeSuggestion(record.id);
+    try { applyLocalBase(record.aid, (await effectiveBase(element)).hash); } catch (error) { /* next GET repairs */ }
+    suggestionMessage = body.pr === null ? "Applied" : "Pending repository review";
+    announce([record.aid]);
+    repaintSuggestions();
+    focusSuggestion(record.id);
+    return true;
+  }
+
+  function terminalSuggestions() {
+    if (!suggestionOpen) return;
+    suggestionOpen = false;
+    suggestionGeneration += 1;
+    pendingGeneration += 1;
+    suggestionEpoch += 1;
+    suggestionDirty = false;
+    pendingDirty = false;
+    pendingDeferred = false;
+    abortRead(suggestionActive);
+    abortRead(pendingActive);
+    abortRead(mutationActive);
+    suggestions = [];
+    draft = null;
+    rejectDraft = null;
+    removeSuggestionChrome();
+    for (const controls of controlSets.values()) {
+      if (controls.suggestButton !== null && controls.suggestButton.parentNode !== null) {
+        controls.suggestButton.parentNode.removeChild(controls.suggestButton);
+      }
+    }
+    try { panelSurface.refresh(); } catch (error) { /* contained */ }
+  }
+
+  function refreshSuggestions() {
+    if (!suggestionOpen || suspended) return Promise.resolve(false);
+    if (suggestionActive !== null) {
+      suggestionDirty = true;
+      return suggestionActive.promise;
+    }
+    const generation = ++suggestionGeneration;
+    const epoch = suggestionEpoch;
+    const controller = new AbortController();
+    const active = { controller, reader: null, promise: null };
+    suggestionActive = active;
+    active.promise = (async () => {
+      const timer = setTimeout(() => controller.abort(), OVERLAY_TIMEOUT_MS);
+      try {
+        const endpoint = new URL("/api/suggestions", location.href);
+        endpoint.searchParams.set("doc", docId);
+        const response = await fetch(endpoint, {
+          method: "GET", mode: "same-origin", credentials: "same-origin", cache: "no-store",
+          redirect: "error", headers: { Accept: "application/json" }, signal: controller.signal,
+        });
+        const body = await boundedJson(response, READ_LIMIT, active);
+        if (terminalResponse(response.status, body)) {
+          terminalSuggestions();
+          return false;
+        }
+        if (response.status !== 200) throw new Error("read failed");
+        const model = validSuggestionList(body);
+        if (model === null) throw new Error("invalid model");
+        if (!suggestionOpen || suspended || generation !== suggestionGeneration || epoch !== suggestionEpoch) return false;
+        suggestions = model;
+        suggestionMessage = "";
+        repaintSuggestions();
+        return true;
+      } catch (error) {
+        if (suggestionOpen && !suspended && generation === suggestionGeneration) {
+          suggestionMessage = "Suggestions could not be loaded.";
+          repaintSuggestions();
+        }
+        return false;
+      } finally {
+        clearTimeout(timer);
+        if (suggestionActive === active) suggestionActive = null;
+        const trailing = suggestionDirty;
+        suggestionDirty = false;
+        if (trailing && suggestionOpen && !suspended) queueMicrotask(() => { void refreshSuggestions(); });
+      }
+    })();
+    return active.promise;
+  }
+
+  function validServerEvent(event) {
+    try {
+      const detail = event === null ? null : event.detail;
+      return exactFrozen(detail, ["source", "t", "aid", "hash"]) &&
+        detail.source === "server" && detail.t === "edit.saved" &&
+        typeof detail.aid === "string" && AID.test(detail.aid) &&
+        typeof detail.hash === "string" && HASH.test(detail.hash);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function reconcile() {
+    if (suspended || !suggestionOpen) return;
+    void refreshPending();
+    void refreshSuggestions();
+  }
+
+  function suspendReconciliation() {
+    suspended = true;
+    pendingGeneration += 1;
+    suggestionGeneration += 1;
+    pendingDirty = false;
+    pendingDeferred = false;
+    suggestionDirty = false;
+    abortRead(pendingActive);
+    abortRead(suggestionActive);
+  }
+
+  function resumeReconciliation(event) {
+    let persisted = false;
+    try { persisted = event.persisted === true; } catch (error) { return; }
+    if (!persisted) return;
+    suspended = false;
+    if (document.visibilityState === "visible") reconcile();
   }
 
   /* ------------------------------------------------------------ composition */
@@ -727,7 +1674,8 @@ function installEdit() {
   let started = false;
   document.addEventListener("session", (event) => {
     if (started) return;
-    const session = validSession(event === null ? null : event.detail);
+    let session = null;
+    try { session = validSession(event === null ? null : event.detail); } catch (error) { session = null; }
     if (session === null) {
       // The reveal happened but this module cannot read it. Staying pending
       // would strand P4-Q on a promise nothing will ever settle, so the pass
@@ -737,19 +1685,63 @@ function installEdit() {
       return;
     }
     started = true;
+    currentSession = session;
     void (async () => {
-      let result = { applied: [], available: false };
+      pendingApplied = [];
+      let available = false;
       try {
-        result = await loadOverlays();
+        available = await refreshPending();
       } catch (error) {
-        result = { applied: [], available: false };
+        available = false;
       }
       // The barrier settles before anything else observes the pass, and it
       // never rejects: a failed read is an empty overlay, not a broken page.
-      finish(result.applied, result.available);
-      if (result.applied.length > 0) announce(result.applied);
-      if (session.canEdit === true) {
-        for (const block of blocks) attach(block);
+      finish(pendingApplied, available);
+
+      const sharedReady = typeof TextEncoder === "function" && typeof crypto === "object" &&
+        crypto !== null && crypto.subtle !== null &&
+        typeof crypto.subtle === "object" && typeof crypto.subtle.digest === "function";
+      if (!sharedReady) return;
+
+      const surfaces = typeof TextDecoder === "function" ? suggestionSurfaces() : null;
+      if (surfaces !== null) {
+        railSurface = surfaces.rail;
+        panelSurface = surfaces.panel;
+        try {
+          suggestionOpen = panelSurface.register("suggestion", renderSuggestions) === true;
+        } catch (error) {
+          suggestionOpen = false;
+        }
+      }
+
+      for (const block of blocks) {
+        if (!block.element.isConnected || !isSuggestionText(editableText(block.element))) continue;
+        const wantSuggest = suggestionOpen && session.canSuggest;
+        const wantEdit = session.canEdit;
+        if (!wantSuggest && !wantEdit) continue;
+        const controls = makeControls(block, wantSuggest, wantEdit);
+        controlSets.set(block.aid, controls);
+        if (controls.editButton !== null) attachDirect(block, controls);
+        if (controls.suggestButton !== null) {
+          controls.suggestButton.addEventListener("click", () => {
+            if (draft !== null || mutationActive !== null) return;
+            void openDraft(block.aid, controls.suggestButton);
+          });
+        }
+      }
+
+      if (suggestionOpen) {
+        document.addEventListener("doc:event", (hint) => {
+          if (validServerEvent(hint)) reconcile();
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (!suggestionOpen || suspended || document.visibilityState !== "visible") return;
+          const now = performance.now();
+          if (lastVisibilityRefresh !== null && now - lastVisibilityRefresh < VISIBILITY_WINDOW_MS) return;
+          lastVisibilityRefresh = now;
+          reconcile();
+        });
+        await refreshSuggestions();
       }
     })();
   });
