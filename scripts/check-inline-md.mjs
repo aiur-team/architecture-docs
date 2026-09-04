@@ -10,6 +10,15 @@
  * render and edit pending text. Two copies of one algorithm drift silently;
  * this check turns that drift into a deterministic CI failure.
  *
+ * P4-B also runs the converter server-side, from the vendored deploy-tree copy
+ * at `netlify/lib/inline-md.mjs` (#117). That copy is generated rather than
+ * hand-written, so it is selected with `--module` and imported whole instead of
+ * being extracted declaration by declaration: there is no hand-maintained
+ * browser module to parse, and the same fixture equalities are what the copy
+ * has to satisfy. `scripts/vendor-netlify-lib.mjs` separately holds its bytes
+ * to the canonical build; this check is what proves the vendored bytes still
+ * convert like P2-D.
+ *
  * Deliberately absent: a normaliser twin. P1-D publishes one compiled `norm()`
  * that both the builder and `window.doc.anchor.norm` execute, so there is no
  * second implementation to compare and no `scripts/check-normalise.mjs`.
@@ -118,27 +127,32 @@ function fail(reason) {
 // ---------------------------------------------------------------------------
 
 /**
- * The argument grammar is closed: either no arguments, or `--fixture` and
- * `--client` exactly once each with a usable path. Anything else exits 2
- * before a single byte of fixture or source is read.
+ * The argument grammar is closed: either no arguments, or `--fixture` exactly
+ * once together with exactly one of `--client` (a hand-written browser module,
+ * parsed and partially evaluated) or `--module` (a generated ESM copy,
+ * imported whole), each with a usable path. Anything else exits 2 before a
+ * single byte of fixture or source is read.
  */
 function parseArguments(argv) {
   if (argv.length === 0) {
-    return { fixture: CANONICAL_FIXTURE, client: DEFAULT_CLIENT };
+    return { fixture: CANONICAL_FIXTURE, client: DEFAULT_CLIENT, module: null };
   }
   if (argv.length !== 4) return null;
 
-  const selected = { fixture: null, client: null };
+  const selected = { fixture: null, client: null, module: null };
   for (let index = 0; index < argv.length; index += 2) {
     const option = argv[index];
-    if (option !== "--fixture" && option !== "--client") return null;
+    if (option !== "--fixture" && option !== "--client" && option !== "--module") return null;
     const key = option.slice(2);
     if (selected[key] !== null) return null;
     const value = resolveArgumentPath(argv[index + 1]);
     if (value === null) return null;
     selected[key] = value;
   }
-  if (selected.fixture === null || selected.client === null) return null;
+  if (selected.fixture === null) return null;
+  // Exactly one copy under test: naming both would leave it ambiguous which
+  // one the single PASS line spoke for.
+  if ((selected.client === null) === (selected.module === null)) return null;
   return selected;
 }
 
@@ -656,6 +670,32 @@ function instantiateClient(sources) {
   return client;
 }
 
+/**
+ * Import a generated ESM copy whole and take its two exports.
+ *
+ * The extraction-and-sandbox path above exists because `edit.js` is a large
+ * hand-written browser module whose other statements must never run here. A
+ * `--module` copy is neither: `scripts/vendor-netlify-lib.mjs` holds its bytes
+ * equal to the canonical compiled converter and separately proves that nothing
+ * under `netlify/` reaches outside the deploy tree, so importing it is exactly
+ * as safe as importing `BUILDER_MODULE` — which this check already does — and
+ * reads the same functions the endpoint calls rather than a reconstruction of
+ * them.
+ */
+async function instantiateModule(path) {
+  let loaded;
+  try {
+    loaded = await import(pathToFileURL(path).href);
+  } catch {
+    fail("client module is unavailable");
+  }
+  const client = { toMd: loaded.toMd, toHtml: loaded.toHtml };
+  for (const direction of ["toMd", "toHtml"]) {
+    if (typeof client[direction] !== "function") fail(`client ${direction} is not callable`);
+  }
+  return client;
+}
+
 // ---------------------------------------------------------------------------
 // Parity
 // ---------------------------------------------------------------------------
@@ -706,8 +746,10 @@ async function main(argv) {
       }
     });
 
-    const ts = loadTypeScript();
-    const client = instantiateClient(extractConverterSources(ts, paths.client));
+    const client =
+      paths.module === null
+        ? instantiateClient(extractConverterSources(loadTypeScript(), paths.client))
+        : await instantiateModule(paths.module);
 
     rows.forEach((row, index) => {
       const number = index + 1;

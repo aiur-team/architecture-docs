@@ -49,8 +49,32 @@ jobs:
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
+      # A function that imports `templates/docbuild/dist/` cannot load: `dist/`
+      # is gitignored, and the P4-S connect tool copies only the deploy tree
+      # into a connected site. The two modules `netlify/functions/edit.mjs`
+      # needs are therefore vendored into `netlify/lib/` as generated, tracked
+      # copies, and this step holds those copies equal to the canonical build.
+      # It also asserts the invariant behind them — no relative import anywhere
+      # under `netlify/` may leave `netlify/` — so the defect cannot come back
+      # by a route other than the one it arrived by.
+      #
+      # It runs after the typecheck step, whose `npm ci` prepare build is what
+      # emits the canonical `dist/` the copies are compared against.
+      - name: the deploy tree is self-contained
+        run: node scripts/vendor-netlify-lib.mjs
+
+      # Both copies of the converter, against the same 12 canonical rows: the
+      # hand-written browser twin in `templates/base/edit.js`, and the vendored
+      # server copy the edit endpoint imports. The second run is implied by the
+      # step above while that step exists — equal bytes convert equally — and is
+      # kept so the acceptance property is asserted directly rather than
+      # inferred from the order of two other gates.
       - name: Check inline converter parity
-        run: node scripts/check-inline-md.mjs
+        run: |
+          node scripts/check-inline-md.mjs
+          node scripts/check-inline-md.mjs \
+            --fixture templates/fixtures/inline.json \
+            --module netlify/lib/inline-md.mjs
 
       # The unit tests were written before anything ran them, and a test that
       # never executes cannot hold a regression out. Every file is named
@@ -98,6 +122,7 @@ jobs:
           node scripts/test-p4-b.mjs
           node scripts/test-p4-j.mjs contract
           node scripts/test-p4-m.mjs
+          node scripts/test-p4-q.mjs
 
       - name: edge gate config is fail-closed
         run: |

@@ -33,8 +33,12 @@
  * `package-lock.json`. A module that links only on a machine where some other
  * tree happens to have been built does not link in production. Moving this step
  * later so that build output exists would make the gate pass by arranging the
- * one condition a deploy never provides -- see `ALLOWED_LOAD_FAILURES` for the
- * one module that this currently catches.
+ * one condition a deploy never provides. That was not hypothetical: the module
+ * this gate was added to catch imported gitignored build output, and #117
+ * vendored those modules into `netlify/lib/` so the deploy tree carries them.
+ * `scripts/vendor-netlify-lib.mjs` is the static counterpart, refusing any
+ * relative import under `netlify/` that resolves outside it; this gate is the
+ * dynamic one, and catches what a specifier alone cannot say.
  *
  * Output contract: one `PASS` line on stdout and exit 0, or one
  * `FAIL netlify modules:` line per broken module on stderr and exit 1. Every
@@ -63,39 +67,19 @@ const ROUTED_PREFIX = "/api/";
  * Load failures this gate reports without failing on, each naming the issue
  * that removes it and the date it was granted.
  *
- * `netlify/functions/edit.mjs` imports `templates/docbuild/dist/anchor-core.js`
- * and `inline_md.js`. That directory is gitignored and untracked, and the
- * connect tool does not copy `templates/` into a site, so the edit endpoint
- * fails at import time on a clean checkout and in every connected deploy. This
- * gate found that in already-merged code, which is the job it was added for; the
- * fix is owned by #117 and deliberately not made here.
+ * Empty, and meant to stay that way. The one entry this table was created with
+ * covered `netlify/functions/edit.mjs` importing gitignored docbuild build
+ * output; #117 vendored those modules into `netlify/lib/`, the module links, and
+ * the allowance went stale exactly as it was designed to. `scripts/vendor-netlify-lib.mjs`
+ * now also refuses any relative import under `netlify/` that resolves outside
+ * `netlify/`, so that particular defect has a gate of its own upstream of this
+ * one.
  *
- * The allowance is visible rather than silent, and self-removing rather than
- * remembered: once #117 lands, `edit.mjs` loads, the entry below stops being
- * exercised, and this gate fails until it is deleted. An exclusion nobody is
- * forced to remove is the mechanism by which a gate quietly stops being one.
+ * An allowance is a hole held open on a promise. Add one only with the issue
+ * that closes it, and expect this gate to fail the moment the entry stops
+ * describing real code.
  */
-const ALLOWED_LOAD_FAILURES = new Map([
-  [
-    "netlify/functions/edit.mjs",
-    {
-      since: "2026-09-04",
-      issue: 117,
-      /* The allowance covers exactly one defect and is scoped to its cause: the
-         import of gitignored docbuild build output. Tying it to the source
-         rather than to the load outcome is what keeps it honest in both
-         directions -- a developer whose `templates/docbuild/dist` happens to
-         exist does not get a spurious "stale allowance" failure, and #117
-         landing does not leave the entry quietly excusing something else. */
-      whileSourceMatches: /templates\/docbuild\/dist\//,
-      /* Linking reports one error and stops, so an allowance that excuses "this
-         module failed" would also excuse the next unrelated broken import in
-         the same file. It has to name the failure it was granted for, not the
-         file it was granted on. */
-      excusesErrorMatching: /templates\/docbuild\/dist\//,
-    },
-  ],
-]);
+const ALLOWED_LOAD_FAILURES = new Map([]);
 
 /**
  * Whether an allowance still describes the code it was granted for. A stale
