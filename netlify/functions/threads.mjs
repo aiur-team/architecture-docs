@@ -20,8 +20,14 @@ import { notify } from "../lib/notify.mjs";
  * authorized through P2-G's non-consuming `canRead` result before thread
  * storage is opened. P4-M adds the matching `canComment` gate to `POST`, the
  * post-commit `comment.create` audit append, and the `thread.created`
- * fan-out. `thread.mjs` duplicates the private validators below on purpose:
- * the ticket forbids a shared third helper file.
+ * fan-out.
+ *
+ * The access-row check is *not* one of the private validators below: it is
+ * `validateAccessRow()` from `../lib/access.mjs`, shared with every other path
+ * that resolves a role. This header used to say that duplicating it here was
+ * deliberate and that a shared helper was forbidden; that was the reason the
+ * copies drifted until one of them stopped being covered at all (#125, #128).
+ * Do not reintroduce a local copy.
  */
 
 const MAX_REQUEST_BYTES = 65_536;
