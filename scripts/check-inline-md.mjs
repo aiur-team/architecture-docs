@@ -256,6 +256,12 @@ function extractConverterSources(ts, path) {
     if (!found.has(name)) fail(`missing ${name} declaration`);
   }
 
+  // Extracting the declaration is only proof of what the browser runs while
+  // the declaration is still what the name resolves to. `edit.js` is one
+  // module, so a single later `toHtml = ...` silently swaps the function the
+  // page calls while leaving this checker looking at the original bytes.
+  requireNoConverterWrites(ts, source);
+
   const sources = [];
   for (const name of CONVERTERS) {
     const declaration = found.get(name);
@@ -270,6 +276,183 @@ function extractConverterSources(ts, path) {
     sources.push(text.slice(declaration.getStart(source), declaration.getEnd()));
   }
   return sources;
+}
+
+/** True for every node that opens a new variable scope for parameters and vars. */
+function isFunctionLike(ts, node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  );
+}
+
+/**
+ * Names bound directly in one scope, deliberately not descending into nested
+ * functions: a `toHtml` declared inside some other function shadows the module
+ * one only within that function, and crediting it any wider would hide a real
+ * rebinding.
+ */
+function scopeBindings(ts, scope) {
+  const names = new Set();
+
+  const addName = (name) => {
+    if (name === undefined) return;
+    if (ts.isIdentifier(name)) {
+      names.add(name.text);
+      return;
+    }
+    if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) addName(element.name);
+      }
+    }
+  };
+
+  if (isFunctionLike(ts, scope)) {
+    for (const parameter of scope.parameters) addName(parameter.name);
+  }
+
+  const visit = (node) => {
+    if (isFunctionLike(ts, node)) {
+      // The name of a nested function declaration binds out here; its insides
+      // belong to its own scope.
+      if (ts.isFunctionDeclaration(node) && node.name !== undefined) names.add(node.name.text);
+      return;
+    }
+    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) addName(node.name);
+    if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.name !== undefined) {
+      names.add(node.name.text);
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
+      addName(node.variableDeclaration.name);
+    }
+    if (ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportSpecifier(node)) {
+      addName(node.name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(scope, visit);
+
+  return names;
+}
+
+/**
+ * Reject any write to one of the four converter names anywhere in the browser
+ * module, unless the enclosing scope declares its own binding of that name.
+ *
+ * Without this the check is bypassable by one line. `function toHtml(...) {}`
+ * followed later by `toHtml = function (t) { return evil(t); }` parses clean,
+ * extracts the honest declaration, passes every fixture row, and ships a page
+ * whose editor runs the replacement. That is precisely the drift this gate
+ * exists to make impossible, so a rebinding fails closed.
+ */
+function requireNoConverterWrites(ts, source) {
+  const isAssignment = (kind) =>
+    kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+
+  /** Report an assignment target, walking destructuring patterns. */
+  const reportTarget = (node, shadowed) => {
+    if (node === undefined) return;
+    if (ts.isIdentifier(node)) {
+      if (CONVERTERS.includes(node.text) && !shadowed.has(node.text)) {
+        fail(`${node.text} declaration is rebound`);
+      }
+      return;
+    }
+    if (ts.isParenthesizedExpression(node)) {
+      reportTarget(node.expression, shadowed);
+      return;
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) reportTarget(element, shadowed);
+      return;
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isPropertyAssignment(property)) reportTarget(property.initializer, shadowed);
+        else if (ts.isShorthandPropertyAssignment(property)) {
+          reportTarget(property.name, shadowed);
+          reportTarget(property.objectAssignmentInitializer, shadowed);
+        } else if (ts.isSpreadAssignment(property)) reportTarget(property.expression, shadowed);
+      }
+      return;
+    }
+    if (ts.isSpreadElement(node)) {
+      reportTarget(node.expression, shadowed);
+      return;
+    }
+    // `[a = 1] = xs`: the default is a value, the left half is the target.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      reportTarget(node.left, shadowed);
+    }
+  };
+
+  const visit = (node, shadowed) => {
+    let scope = shadowed;
+    if (isFunctionLike(ts, node)) {
+      scope = new Set(shadowed);
+      for (const name of scopeBindings(ts, node)) scope.add(name);
+    }
+
+    if (ts.isBinaryExpression(node) && isAssignment(node.operatorToken.kind)) {
+      reportTarget(node.left, scope);
+    }
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      reportTarget(node.operand, scope);
+    }
+    if (ts.isDeleteExpression(node)) reportTarget(node.expression, scope);
+
+    ts.forEachChild(node, (child) => visit(child, scope));
+  };
+
+  // At module scope the four names are the declarations themselves, so nothing
+  // shadows them there.
+  ts.forEachChild(source, (child) => visit(child, new Set()));
+
+  /**
+   * A second module-scope binding is the same swap without an assignment
+   * expression: `var toHtml = evil` after the declaration is a legal
+   * redeclaration that simply overwrites it.
+   */
+  const visitBinding = (node) => {
+    // A nested function's parameters and locals are shadows, not rebindings.
+    if (isFunctionLike(ts, node)) return;
+
+    const flag = (name) => {
+      if (name === undefined) return;
+      if (ts.isIdentifier(name)) {
+        if (CONVERTERS.includes(name.text)) fail(`${name.text} declaration is rebound`);
+        return;
+      }
+      if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const element of name.elements) {
+          if (ts.isBindingElement(element)) flag(element.name);
+        }
+      }
+    };
+
+    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) flag(node.name);
+    if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.name !== undefined) {
+      flag(node.name);
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
+      flag(node.variableDeclaration.name);
+    }
+    if (ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportSpecifier(node)) {
+      flag(node.name);
+    }
+    ts.forEachChild(node, visitBinding);
+  };
+  ts.forEachChild(source, visitBinding);
 }
 
 /**
