@@ -441,6 +441,9 @@ async function serverMatrix() {
   const { createEditHandler } = await import(
     pathToFileURL(join(ROOT, "netlify/functions/edit.mjs")).href
   );
+  const access = await import(
+    pathToFileURL(join(ROOT, "netlify/lib/access.mjs")).href
+  );
 
   const fixture = join(process.env.P4B_ROOT, "fixture");
   mkdirSync(fixture, { recursive: true });
@@ -488,6 +491,15 @@ async function serverMatrix() {
       now: () => options.now ?? NOW_MS,
       sha256Hex: sha256,
       getEnv: (name) => ({ ...env, ...(options.env ?? {}) })[name],
+      // P4-M replaced the temporary `isOrg` gate with the P2-G document role.
+      // The P4-B matrix is about the apply path, so the default double grants
+      // an owner; `options.role` selects a denial for the gate cases below.
+      resolveRole: async () => ({
+        role: options.role ?? "owner",
+        shared: true,
+        ...access.capabilitiesFor(options.role ?? "owner"),
+      }),
+      capabilitiesFor: access.capabilitiesFor,
     };
     return { handle: createEditHandler(deps), blobs, github, counters };
   }
@@ -510,6 +522,7 @@ async function serverMatrix() {
   const keys = [
     "requireOrigin", "identify", "docState", "editKey", "read", "mutate", "upgrade",
     "StoreError", "scanBlocks", "toMd", "toHtml", "fetch", "now", "sha256Hex", "getEnv",
+    "resolveRole", "capabilitiesFor",
   ];
   ok(typeof build().handle === "function", "the factory returns a handler");
   for (const bad of [null, undefined, [], "x", 1, Object.create(null)]) {
@@ -528,6 +541,7 @@ async function serverMatrix() {
       upgrade: store.upgrade, StoreError: store.StoreError,
       scanBlocks: core.scanBlocks, toMd: md.toMd, toHtml: md.toHtml,
       fetch: () => {}, now: () => 0, sha256Hex: () => "", getEnv: () => undefined,
+      resolveRole: async () => ({}), capabilitiesFor: () => ({}),
     };
     for (const key of keys) {
       const partial = { ...complete };
@@ -616,13 +630,18 @@ async function serverMatrix() {
     eq(built.github.calls.length, 0, `identity with ${label} performs no provider work`);
   }
   {
-    const built = build({ identity: identityFor({ isOrg: false }) });
-    const response = await built.handle(post(valid));
-    eq(response.status, 403, "a non-org identity is 403");
+    // P4-M owns the write gate now: `isOrg` no longer decides anything, and a
+    // document role without `canEdit` is the denial P4-B's apply path must
+    // never see. The full capability matrix lives in scripts/test-p4-m.mjs.
+    const built = build({ identity: identityFor({ isOrg: false }), role: "owner" });
+    eq((await built.handle(post(valid))).status, 200, "isOrg no longer gates the write");
+    const denied = build({ role: "viewer" });
+    const response = await denied.handle(post(valid));
+    eq(response.status, 403, "a role without canEdit is 403");
     eq((await readJson(response)).error,
       { code: "forbidden", message: "Document edit denied" }, "403 body");
-    eq(built.github.calls.length, 0, "403 performs no provider work");
-    eq(built.counters.docState, 0, "403 performs no store work");
+    eq(denied.github.calls.length, 0, "403 performs no provider work");
+    eq(denied.counters.docState, 0, "403 performs no store work");
   }
 
   /* ---- URL and body ---------------------------------------------------- */
