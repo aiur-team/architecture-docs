@@ -1172,12 +1172,11 @@ function installComments() {
     if (block === null || !BLOCK.includes(block.localName)) return null;
     const aid = block.getAttribute("data-aid");
     if (aid === null || !AID.test(aid)) return null;
-    let seen = 0;
-    for (const candidate of document.querySelectorAll("[data-aid]")) {
-      if (candidate.getAttribute("data-aid") !== aid) continue;
-      seen += 1;
-      if (seen > 1) return null;
-    }
+    /* A duplicated anchor id is ambiguous and refused.  `AID` has already
+       constrained the value to `a` plus eight hex digits, so it is safe to ask
+       the engine for just that id rather than walking every `[data-aid]` in the
+       document on each of the two boundary resolutions per selection. */
+    if (document.querySelectorAll(`[data-aid="${aid}"]`).length !== 1) return null;
     const section = block.closest("section[id]");
     if (section === null) return null;
     const id = section.getAttribute("id");
@@ -1617,6 +1616,9 @@ function installComments() {
     const version = headVersion();
     if (version === null) return;
     const text = state.body.value;
+    /* The `trim()` test is ours, not the spec's: P3-A's body grammar rejects a
+       whitespace-only comment server-side, so sending one only burns the
+       five-second deadline to render a failure the reader can't act on. */
     if (text.length === 0 || text.length > MAX_BODY || text.trim().length === 0) return;
 
     let request;

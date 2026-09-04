@@ -1279,6 +1279,33 @@ async function denialMatrix(browser, host) {
     assert.equal(await page.inputValue("#doc-comments-draft-body"), request.body, "an aborted create never discards the reader's text");
   });
 
+  /* An in-flight create disables submit and cancel but deliberately leaves the
+     message textarea usable, and its keydown handler routes Ctrl/Meta+Enter
+     straight to submitDraft. The `writing` flag is the only thing standing
+     between the keyboard and a second concurrent create. */
+  await withThread(browser, host, async (page) => {
+    await plan(page, [{ mode: "hang" }]);
+    await page.click("#doc-comments-start");
+    await page.waitForSelector("#doc-comments-draft-body");
+    await page.fill("#doc-comments-draft-title", "Clarify the rollout boundary");
+    await page.fill("#doc-comments-draft-body", "An invented question.");
+    await page.click(".doc-comments-draft button[type=submit]");
+    await page.waitForFunction(() => window.__calls.some((call) => call.method === "POST"));
+
+    assert.deepEqual(await page.evaluate(() => ({
+      body: document.getElementById("doc-comments-draft-body").disabled,
+      submit: document.querySelector(".doc-comments-draft button[type=submit]").disabled,
+    })), { body: false, submit: true }, "the message stays typable while its submit control is disabled");
+
+    await page.press("#doc-comments-draft-body", "Control+Enter");
+    await page.press("#doc-comments-draft-body", "Meta+Enter");
+    assert.equal(await page.evaluate(() => window.__calls.filter((call) => call.method === "POST").length), 1,
+      "the keyboard path cannot start a second create while one is in flight");
+
+    await page.waitForFunction(() => document.getElementById("doc-comments-status").textContent === "The comment change was not saved.", null, { timeout: 15000 });
+    assert.equal(await page.evaluate(() => window.__calls.filter((call) => call.method === "POST").length), 1, "and never retries the aborted one");
+  });
+
   /* -- draft keyboard and focus behaviour ---------------------------- */
   await withThread(browser, host, async (page) => {
     await page.click("#doc-comments-start");
