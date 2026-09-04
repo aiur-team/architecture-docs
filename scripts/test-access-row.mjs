@@ -1,117 +1,457 @@
 #!/usr/bin/env node
 /**
- * Drive the capability matrix against the four paths that #125 left behind.
+ * The permanent gate on the shared access-row validator.
  *
- * #125 unified the access-row validator across the three write paths and
- * proved each one with a mutation. It left four copies standing —
- * `netlify/functions/access.mjs`, `session.mjs`, `pending.mjs`, and the one in
- * `events.mjs` that had drifted far enough to be called `assertResolvedAccess`
- * and so never matched that ticket's acceptance grep at all. #128 folds those
- * into `validateAccessRow()`; this runner is the gate that folding needs.
+ *   node scripts/test-access-row.mjs
  *
- * The reason it exists is the defect #125 found: `thread.mjs` carried a copy
- * that no test ever exercised, so neutering it left the suite green. All four
- * paths converted here were in the same position — before this file, none of
+ * `validateAccessRow()` (#132) is the single definition of "is this a
+ * complete, internally consistent resolved access row?". A hand-duplicated
+ * security validator only has to drift in one file to open a hole the other
+ * copies still close, and whichever copy no gate happens to exercise is the
+ * one that drifts (#125). The duplication kept coming back because each new
+ * copy arrived under a new name — `validateAccess`, `assertResolvedAccess`,
+ * `validResolvedAccess`, `accessDecision` — so a grep for the previous name
+ * found nothing.
+ *
+ * The reason this file exists is the defect #125 found: `thread.mjs` carried a
+ * copy that no test ever exercised, so neutering it left the suite green. Every
+ * path converted since was in the same position — before this runner, none of
  * them had a single test of any kind. Sharing one validator makes them all
  * depend on one function; only a matrix that runs through each handler proves
  * that each one actually reaches it.
  *
- * Every row of the matrix is a mutation of a *complete owner* row, chosen so
- * that a validator which wrongly accepted it would produce a status this file
+ * This runner replaces the grep with three things a new copy cannot slip past:
+ *
+ *   1. A static inventory. Every module under `netlify/` that imports
+ *      `resolveRole` must also import `validateAccessRow`, unless it is named
+ *      in `KNOWN_BYPASSES` below. The list is asserted *exactly*: a new
+ *      bypassing module fails, and so does leaving a name on the list after
+ *      its module has been folded in. Closing one of the remaining surfaces
+ *      means deleting its entry, and this runner fails until you do. The
+ *      inventory is read off the import graph with the repository's pinned
+ *      TypeScript rather than grepped, because naming is not the invariant:
+ *      #125's acceptance check was `grep "function validateAccess"`, which
+ *      `events.mjs` escaped by calling its copy `assertResolvedAccess` and
+ *      `gate.ts` escaped again as `validResolvedAccess`.
+ *
+ *   2. A runtime matrix for the four paths #128 converted —
+ *      `netlify/functions/access.mjs`, `session.mjs`, `pending.mjs`, and the
+ *      copy in `events.mjs` that had drifted far enough to be called
+ *      `assertResolvedAccess`.
+ *
+ *   3. A runtime matrix for the two surfaces #135 folded in — the realtime
+ *      token endpoint and the edge document gate. Each is driven with the same
+ *      table of malformed and matrix-inconsistent rows, and each must refuse
+ *      every one of them. `netlify/edge-functions/gate.ts` had no test harness
+ *      of its own before this file; it is transpiled with the repository's
+ *      pinned TypeScript and run on Node against stubbed collaborators, which
+ *      is the closest executable proof available without a Deno toolchain.
+ *
+ * Every row of the matrix is a mutation of a *complete* row, chosen so that a
+ * validator which wrongly accepted it would produce a status this file
  * distinguishes from the rejection. Each path therefore asserts three
  * outcomes, not one:
  *
  *   - a broken row is the handler's own "impossible server state" status,
- *     with no store work attempted;
+ *     with no store work attempted and nothing minted;
  *   - a well-formed row for an under-privileged role reaches that handler's
  *     authorization decision, which is a different status;
- *   - a well-formed owner row runs past the check into the work behind it.
+ *   - a well-formed privileged row runs past the check into the work behind it.
  *
  * Without the second and third assertions, "broken rows are rejected" would
  * also hold for a handler that rejected everything.
  *
- * `access.mjs` and `session.mjs` import their collaborators statically, so
- * their specifiers — and only theirs — are bound to stubs through a resolve
- * hook. `pending.mjs` and `events.mjs` expose dependency-injecting factories
- * and are driven directly. In every case the validator under test is the real
- * `validateAccessRow()` from `netlify/lib/access.mjs`: the stub re-exports the
- * genuine function and controls only `capabilitiesFor` and `resolveRole`, so
- * the assertions run against production logic rather than a double.
+ * `access.mjs`, `session.mjs` and `realtime-token.mjs` import their
+ * collaborators statically, so their specifiers — and only theirs — are bound
+ * to stubs through a resolve hook. `pending.mjs` and `events.mjs` expose
+ * dependency-injecting factories and are driven directly. `gate.ts` resolves
+ * its stubs as siblings under a temporary root. In every case the validator
+ * under test is the real `validateAccessRow()` from `netlify/lib/access.mjs`:
+ * each stub re-exports the genuine function and controls only `capabilitiesFor`
+ * and `resolveRole`, so the assertions run against production logic rather than
+ * a double.
+ *
+ * Nothing here reads a credential, a real repository, a remote provider, or a
+ * private fixture. Every actor, document, and host is invented.
  *
  * Output contract: one `PASS` line per section on stdout and exit 0, or one
- * `FAIL` line on stderr and exit 1.
- *
- *   node scripts/test-access-row.mjs
+ * `FAIL` line per failed assertion on stderr and exit 1.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { guardedTempRoot, installSignalCleanup, removeTempRoots } from "./lib/temp-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
 
-let failures = 0;
-
-function ok(condition, label) {
-  if (condition) return;
-  failures += 1;
-  process.stderr.write(`FAIL  ${label}\n`);
-}
-
-function eq(actual, expected, label) {
-  ok(Object.is(actual, expected), `${label} (expected ${expected}, got ${actual})`);
-}
-
 const real = (path) => pathToFileURL(join(ROOT, path)).href;
 
 /* ========================================================================= */
-/* fixtures                                                                  */
+/* assertions                                                                */
 /* ========================================================================= */
 
-const DOC_ID = "4b7d2a";
+let checks = 0;
+let failures = 0;
+
+/** A setup failure leaves nothing meaningful to assert, so it stops the run. */
+function bail(message) {
+  process.stderr.write(`FAIL  access-row: ${message}\n`);
+  process.exit(1);
+}
+
+function ok(condition, message) {
+  checks += 1;
+  if (condition) return;
+  failures += 1;
+  process.stderr.write(`FAIL  ${message}\n`);
+}
+
+function eq(actual, expected, message) {
+  ok(Object.is(actual, expected), `${message} (expected ${String(expected)}, got ${String(actual)})`);
+}
+
+function deepEq(actual, expected, message) {
+  const a = JSON.stringify(actual);
+  const b = JSON.stringify(expected);
+  ok(a === b, `${message}\n  expected ${b}\n  actual   ${a}`);
+}
+
+/** Print a section's PASS line only when that section added no failures. */
+function section(before, line) {
+  if (failures === before) process.stdout.write(`PASS  ${line}\n`);
+}
+
+/* ========================================================================= */
+/* section 1 — the static inventory                                          */
+/* ========================================================================= */
+
+/**
+ * The role-resolving modules that still validate their own access rows, each
+ * with the name its private copy goes by. Removing a module from this list is
+ * the acceptance step for closing it.
+ *
+ * The list is empty: #128 folded `access.mjs`, `session.mjs`, `pending.mjs` and
+ * `events.mjs` in, and #135 closed the last two — `realtime-token.mjs`, which
+ * never validated the row against the matrix at all, and `gate.ts`, whose copy
+ * went by the third name `validResolvedAccess()`. An entry added here needs a
+ * ticket reference and a reason the fold cannot happen in the same change.
+ */
+const KNOWN_BYPASSES = Object.freeze([]);
+
+const ACCESS_LIB = /(^|\/)lib\/access\.mjs$/;
+
+async function loadTypeScript() {
+  const entry = join(ROOT, "templates/docbuild/node_modules/typescript/lib/typescript.js");
+  let loaded;
+  try {
+    loaded = await import(pathToFileURL(entry).href);
+  } catch {
+    bail(
+      "the docbuild TypeScript install is missing; run " +
+        "`npm --prefix templates/docbuild ci` before this runner",
+    );
+  }
+  return loaded.default ?? loaded;
+}
+
+/**
+ * Every tracked module under `netlify/`, as sorted repository-relative paths.
+ * Tracked files are the honest definition of what the deploy tree owns: an
+ * installed dependency or a stray scratch file cannot join the inventory, and
+ * a module that is added to the tree cannot stay out of it.
+ */
+function netlifyModules() {
+  return execFileSync("git", ["-C", ROOT, "ls-files", "-z", "netlify"], { encoding: "utf8" })
+    .split("\0")
+    .filter((path) => /^netlify\/.+\.(mjs|ts)$/.test(path) && !/\.test\.mjs$/.test(path))
+    .sort();
+}
+
+/** The named bindings each module imports, keyed by module specifier. */
+function importedNames(ts, source, fileName) {
+  const file = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.ESNext,
+    true,
+    fileName.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS,
+  );
+  const found = new Map();
+  for (const statement of file.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.importClause?.namedBindings === undefined ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      continue;
+    }
+    const specifier = statement.moduleSpecifier.text;
+    const names = found.get(specifier) ?? new Set();
+    for (const element of statement.importClause.namedBindings.elements) {
+      names.add((element.propertyName ?? element.name).text);
+    }
+    found.set(specifier, names);
+  }
+  return found;
+}
+
+async function staticInventory(ts) {
+  const before = failures;
+  const resolving = [];
+  const bypassing = [];
+  for (const path of netlifyModules()) {
+    const source = readFileSync(join(ROOT, path), "utf8");
+    const imports = importedNames(ts, source, path);
+    let resolvesRole = false;
+    let validates = false;
+    for (const [specifier, names] of imports) {
+      if (!ACCESS_LIB.test(specifier)) continue;
+      if (names.has("resolveRole")) resolvesRole = true;
+      if (names.has("validateAccessRow")) validates = true;
+    }
+    if (!resolvesRole) continue;
+    resolving.push(path);
+    if (!validates) bypassing.push(path);
+  }
+
+  ok(
+    resolving.length >= 8,
+    `expected the role-resolving inventory to be found, saw ${resolving.length}`,
+  );
+  /* The modules this runner drives at runtime must still be in the inventory:
+     if one stops resolving a role the matrices below would silently cover
+     nothing. */
+  for (const path of [
+    "netlify/edge-functions/gate.ts",
+    "netlify/functions/access.mjs",
+    "netlify/functions/events.mjs",
+    "netlify/functions/pending.mjs",
+    "netlify/functions/realtime-token.mjs",
+    "netlify/functions/session.mjs",
+  ]) {
+    ok(resolving.includes(path), `${path} must still be counted as a role-resolving module`);
+  }
+  deepEq(
+    bypassing,
+    [...KNOWN_BYPASSES],
+    "the set of role-resolving modules bypassing validateAccessRow changed;\n" +
+      "  fold the new module onto validateAccessRow(), or -- if it genuinely\n" +
+      "  needs its own staged ticket -- add it to KNOWN_BYPASSES with the name\n" +
+      "  its private copy goes by",
+  );
+
+  // One definition, not one plus a re-export chain that could diverge.
+  const definitions = netlifyModules().filter((path) =>
+    /export function validateAccessRow\b/.test(readFileSync(join(ROOT, path), "utf8")),
+  );
+  deepEq(
+    definitions,
+    ["netlify/lib/access.mjs"],
+    "validateAccessRow() must be defined exactly once, in netlify/lib/access.mjs",
+  );
+
+  /* The two names #135 removed must not come back in the modules it fixed.
+     The names #128 converted are deliberately not listed: `validateAccess()` in
+     `session.mjs` and `pending.mjs`, and `assertResolvedAccess()` in
+     `events.mjs`, still exist as thin wrappers that delegate to the shared
+     validator and map its answer onto the handler's own error. Keeping the
+     name is fine; keeping a second implementation is not, and the import-graph
+     assertion above is what covers that. */
+  for (const [path, name] of [
+    ["netlify/functions/realtime-token.mjs", "accessDecision"],
+    ["netlify/edge-functions/gate.ts", "validResolvedAccess"],
+  ]) {
+    ok(
+      !readFileSync(join(ROOT, path), "utf8").includes(`function ${name}(`),
+      `${path} must not reintroduce ${name}()`,
+    );
+  }
+
+  section(
+    before,
+    `static inventory: ${resolving.length} role-resolving modules, ` +
+      `${bypassing.length} known bypasses`,
+  );
+}
+
+/* ========================================================================= */
+/* the shared row matrix                                                     */
+/* ========================================================================= */
+
+const ROW_KEYS = Object.freeze([
+  "role",
+  "shared",
+  "canRead",
+  "canComment",
+  "threadControl",
+  "canSuggest",
+  "canEdit",
+  "canAccept",
+  "canShare",
+  "canSeeMembers",
+]);
+
+/** A well-formed row for `role`, in matrix key order. */
+function row(capabilitiesFor, role, shared = false) {
+  const out = { role, shared };
+  const capabilities = capabilitiesFor(role);
+  for (const key of ROW_KEYS.slice(2)) out[key] = capabilities[key];
+  return out;
+}
+
+/**
+ * Rows a role-resolving path must refuse. Every entry is either malformed or
+ * inconsistent with the capability matrix; none of them may be read as a falsy
+ * capability and quietly denied, because a caller that denies a malformed row
+ * is one edit away from allowing one.
+ *
+ * The list is the union of the two matrices this runner grew from. Where the
+ * same shape was covered on both sides under different names, one entry
+ * survives and its label names the shape rather than either original.
+ */
+function brokenRows(capabilitiesFor) {
+  const valid = () => row(capabilitiesFor, "editor");
+  const owner = () => row(capabilitiesFor, "owner");
+  return [
+    // The hole #135 names: `role: "none"` cannot carry `canRead: true`. Before
+    // this ticket the realtime endpoint minted a token for exactly this row.
+    ["a none role claiming canRead", { ...row(capabilitiesFor, "none"), canRead: true }],
+    ["a capability contradicting the matrix", { ...valid(), canShare: true }],
+    ["a capability withheld from the role", { ...owner(), canComment: false }],
+    ["an unknown role", { ...valid(), role: "admin" }],
+    ["an unknown threadControl", { ...valid(), threadControl: "some" }],
+    ["a non-boolean capability", { ...valid(), canEdit: "yes" }],
+    ["a non-boolean shared", { ...valid(), shared: "no" }],
+    ["a missing capability", (() => {
+      const partial = valid();
+      delete partial.canSeeMembers;
+      return partial;
+    })()],
+    ["a missing capability at the end of the matrix", (() => {
+      const partial = owner();
+      delete partial.canShare;
+      return partial;
+    })()],
+    ["an extra key", { ...valid(), canPublish: true }],
+    ["an accessor-backed capability", Object.defineProperty(valid(), "canRead", {
+      get: () => true,
+      enumerable: true,
+      configurable: true,
+    })],
+    ["a non-enumerable capability", Object.defineProperty(valid(), "canRead", {
+      value: true,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    })],
+    ["a symbol-keyed extra", Object.assign(valid(), { [Symbol("canPublish")]: true })],
+    ["a null-prototype row", Object.assign(Object.create(null), valid())],
+    ["a non-ordinary prototype", Object.assign(Object.create({ ping: 1 }), valid())],
+    ["a class instance", Object.assign(new (class Access {})(), valid())],
+    ["an array", Object.assign([], valid())],
+    ["null", null],
+    ["a string", "owner"],
+    ["undefined", undefined],
+    /* The key-order requirement `pending.mjs` had grown and the other copies
+       had not. A resolved row is always `role`, `shared`, then the frozen
+       matrix spread in order, so any other order was assembled elsewhere. */
+    ["keys out of matrix order", (() => {
+      const { role, shared, ...rest } = valid();
+      return { shared, role, ...rest };
+    })()],
+  ];
+}
+
+/**
+ * Capability tables no row can be validated against. An unusable table is
+ * invalid server state, never an implicit denial: a path that fell back to
+ * "deny" here would report the same status for a broken table as for a
+ * legitimately unprivileged caller, and the two need different answers.
+ */
+function unusableTables(canonical) {
+  return [
+    ["a table that throws", () => { throw new Error("no row"); }],
+    ["a table answering null", () => null],
+    ["a table answering a callable", () => () => true],
+    ["a table answering a short row", (role) => {
+      const short = { ...canonical(role) };
+      delete short.canShare;
+      return short;
+    }],
+    ["a table answering an extra key", (role) => ({ ...canonical(role), canPublish: true })],
+    ["a table answering out of order", (role) => {
+      const { canRead, ...rest } = canonical(role);
+      return { ...rest, canRead };
+    }],
+    ["a table answering an accessor", (role) => Object.defineProperty(
+      { ...canonical(role) }, "canRead", { get: () => true, enumerable: true, configurable: true },
+    )],
+  ];
+}
+
+/* ========================================================================= */
+/* fixtures and the shared control channel                                   */
+/* ========================================================================= */
+
+const DOC_ID = "a1b2c3";
 /* `sub, email, name, isOrg`, in that order: every identity validator on these
    paths requires the exact key order, so a fixture written in another order
    fails as an invalid identity before the access row is ever looked at. */
-const USER = Object.freeze({
-  sub: "u_fixture_auditor_58",
-  email: "marin@example.com",
-  name: "Marin Cleave",
+const SESSION = Object.freeze({
+  sub: "sub_realtime_0001",
+  email: "sample.reader@example.com",
+  name: "Sample Reader",
   isOrg: true,
 });
+const TOKEN = Object.freeze({ keyName: "invented.key", token: "invented-token" });
 
-/** The control surface both stubs and both factories read. */
+/**
+ * The one control surface every stub and factory reads. The sections run in
+ * sequence and each assigns the collaborators it needs, so a single channel
+ * serves all of them without the stubs having to know which section is live.
+ */
 const control = {
-  identify: () => ({ ...USER }),
-  isOrgEmail: (email) => email === USER.email,
+  identify: () => ({ ...SESSION }),
+  isOrgEmail: (email) => email === SESSION.email,
   resolveRole: null,
   capabilitiesFor: null,
+  mintToken: () => ({ ...TOKEN }),
   storeCalls: 0,
+  minted: 0,
 };
 globalThis.__ACCESSROW__ = control;
 
+const request = (path) => new Request(`https://docs.example.invalid${path}`);
+
 /* ========================================================================= */
-/* the module resolve hook for the two statically-importing handlers         */
+/* section 2 — the four paths #128 converted                                 */
 /* ========================================================================= */
 
-const stubRoot = mkdtempSync(join(tmpdir(), "access-row-"));
-
-function bindStaticModules() {
+/**
+ * Bind the two statically-importing handlers' collaborators to stubs.
+ *
+ * Each stub re-exports its real module wholesale with `export *` and then
+ * declares only the collaborators this file controls; an explicit local export
+ * shadows the same name arriving through the star. Naming the pass-through
+ * exports individually instead would make every stub a second copy of its
+ * module's import list, and each time a handler grew a dependency the stub
+ * would fail to resolve rather than exercise the handler — which is how this
+ * runner broke when P4-J (#120) landed.
+ */
+function bindStaticModules(stubRoot) {
+  mkdirSync(stubRoot, { recursive: true });
   const stub = (name, source) => {
     const file = join(stubRoot, name);
     writeFileSync(file, source, "utf8");
     return pathToFileURL(file).href;
   };
 
-  /* Each stub re-exports its real module wholesale with `export *` and then
-     declares only the collaborators this file controls; an explicit local
-     export shadows the same name arriving through the star. Naming the
-     pass-through exports individually instead would make every stub a second
-     copy of its module's import list, and each time a handler grew a
-     dependency the stub would fail to resolve rather than exercise the
-     handler — which is how this runner broke when P4-J (#120) landed. */
   const stubs = new Map([
     ["../lib/identity.mjs", stub("identity.mjs", `
       export * from ${JSON.stringify(real("netlify/lib/identity.mjs"))};
@@ -138,11 +478,17 @@ function bindStaticModules() {
         throw new StoreError("unavailable", 503, "Access store unavailable");
       }
     `)],
+    ["../lib/realtime.mjs", stub("realtime.mjs", `
+      export function mintToken(session, docId) {
+        return globalThis.__ACCESSROW__.mintToken(session, docId);
+      }
+    `)],
   ]);
 
   const bound = new Set([
     real("netlify/functions/access.mjs"),
     real("netlify/functions/session.mjs"),
+    real("netlify/functions/realtime-token.mjs"),
   ]);
 
   registerHooks({
@@ -155,80 +501,10 @@ function bindStaticModules() {
   });
 }
 
-/* ========================================================================= */
-/* the matrix                                                                */
-/* ========================================================================= */
-
-/**
- * Mutations of a complete owner row. Each one is a shape the shared validator
- * must reject; each is also a shape that, if wrongly accepted, carries enough
- * privilege to reach the work behind the check, so the assertion below can
- * tell acceptance from rejection.
- */
-function brokenRows(complete) {
-  return [
-    ["a missing key", (() => { const copy = { ...complete }; delete copy.canShare; return copy; })()],
-    ["an extra key", { ...complete, canPublish: true }],
-    ["an unknown role", { ...complete, role: "admin" }],
-    ["a non-boolean shared", { ...complete, shared: "yes" }],
-    ["a non-boolean capability", { ...complete, canComment: "yes" }],
-    ["an invalid threadControl", { ...complete, threadControl: "some" }],
-    ["capabilities that disagree with the role", { ...complete, canComment: false }],
-    ["an array", Object.freeze([])],
-    ["null", null],
-    ["a non-ordinary prototype", Object.assign(Object.create({ ping: 1 }), complete)],
-    ["an accessor-backed capability", Object.defineProperties({ ...complete }, {
-      canComment: { get: () => true, enumerable: true, configurable: true },
-    })],
-    ["a non-enumerable capability", Object.defineProperty({ ...complete }, "canComment", {
-      value: true, enumerable: false, writable: true, configurable: true,
-    })],
-    ["a symbol-keyed extra", Object.assign({ ...complete }, { [Symbol("canPublish")]: true })],
-    /* The key-order requirement `pending.mjs` had grown and the other copies
-       had not. A resolved row is always `role`, `shared`, then the frozen
-       matrix spread in order, so any other order was assembled elsewhere. */
-    ["keys out of matrix order", (() => {
-      const { role, shared, ...rest } = complete;
-      return { shared, role, ...rest };
-    })()],
-  ];
-}
-
-/** Capability tables no row can be validated against. */
-function unusableTables(canonical) {
-  return [
-    ["a table that throws", () => { throw new Error("no row"); }],
-    ["a table answering null", () => null],
-    ["a table answering a callable", () => () => true],
-    ["a table answering a short row", (role) => {
-      const row = { ...canonical(role) };
-      delete row.canShare;
-      return row;
-    }],
-    ["a table answering an extra key", (role) => ({ ...canonical(role), canPublish: true })],
-    ["a table answering out of order", (role) => {
-      const { canRead, ...rest } = canonical(role);
-      return { ...rest, canRead };
-    }],
-    ["a table answering an accessor", (role) => Object.defineProperty(
-      { ...canonical(role) }, "canRead", { get: () => true, enumerable: true, configurable: true },
-    )],
-  ];
-}
-
-/* ========================================================================= */
-/* per-handler drivers                                                       */
-/* ========================================================================= */
-
-const request = (path) => new Request(`https://docs.example.invalid${path}`);
-
-async function main() {
-  bindStaticModules();
-
-  const accessLib = await import(real("netlify/lib/access.mjs"));
+async function convertedPathsMatrix(accessLib) {
+  const before = failures;
   const { capabilitiesFor } = accessLib;
-  const complete = Object.freeze({ role: "owner", shared: false, ...capabilitiesFor("owner") });
-  const rowFor = (role) => ({ role, shared: false, ...capabilitiesFor(role) });
+  const rowFor = (role) => row(capabilitiesFor, role);
 
   const sessionHandler = (await import(real("netlify/functions/session.mjs"))).default;
   const accessHandler = (await import(real("netlify/functions/access.mjs"))).default;
@@ -291,7 +567,7 @@ async function main() {
       async run(access, table = capabilitiesFor) {
         let storeCalls = 0;
         const handler = createPendingHandler({
-          identify: () => ({ ...USER }),
+          identify: () => ({ ...SESSION }),
           resolveRole: async () => access,
           capabilitiesFor: table,
           assertIdentitySub: accessLib.assertIdentitySub,
@@ -324,7 +600,7 @@ async function main() {
         let storeCalls = 0;
         const handler = createEventsHandler({
           requireOriginFn: () => {},
-          identifyFn: () => ({ ...USER }),
+          identifyFn: () => ({ ...SESSION }),
           resolveRoleFn: async () => access,
           storeFn: () => { storeCalls += 1; throw new storeLib.StoreError("unavailable", 503, "x"); },
         });
@@ -350,7 +626,7 @@ async function main() {
   /* ---- every path rejects every broken row, without doing any work ------ */
 
   for (const path of paths) {
-    for (const [label, access] of brokenRows(complete)) {
+    for (const [label, access] of brokenRows(capabilitiesFor)) {
       const { status, storeCalls } = await path.run(access);
       eq(status, path.reject, `${path.name}: ${label} is ${path.reject}`);
       eq(storeCalls, 0, `${path.name}: ${label} performs no store work`);
@@ -377,56 +653,243 @@ async function main() {
     }
   }
 
-  if (failures === 0) {
-    process.stdout.write("PASS  access-row matrix across the four converted paths\n");
-  }
-
-  /* ---- the call-graph acceptance, asserted rather than grepped by name -- */
-
-  /* The acceptance property, asserted on the call graph rather than grepped by
-     name. #125's acceptance check was `grep "function validateAccess"`, which
-     `events.mjs` escaped simply by calling its copy `assertResolvedAccess`;
-     `gate.ts` escapes it too, as `validResolvedAccess`. Naming is not the
-     invariant. The invariant is that a module which resolves a role reaches
-     the shared validator, and the exceptions are named here so that adding a
-     new one fails rather than passing silently. */
-  const { readFileSync, readdirSync } = await import("node:fs");
-  const sourceDirs = ["netlify/functions", "netlify/edge-functions"];
-  const unshared = sourceDirs.flatMap((dir) => readdirSync(join(ROOT, dir))
-    .filter((name) => /\.(mjs|ts)$/.test(name))
-    .filter((name) => {
-      const source = readFileSync(join(ROOT, dir, name), "utf8");
-      return source.includes("resolveRole") && !source.includes("validateAccessRow");
-    })
-    .map((name) => `${dir}/${name}`))
-    .sort();
-
-  /* Two known exceptions, both out of scope for #128 and both filed:
-     - `realtime-token.mjs` never validated the row against the matrix at all.
-       It checks only `canRead`, so a row claiming `role: "none", canRead: true`
-       mints a token. That is a missing check, not a copy to fold in, and
-       closing it changes the authentication path's error surface.
-     - `gate.ts` is the Deno edge gate. Its `validResolvedAccess()` is a real
-       hand copy and it already imports from `../lib/access.mjs`, but it runs
-       on a different runtime with no test harness of its own, and its copy
-       requires writable-and-configurable descriptors that the shared validator
-       does not. Folding it in is a behaviour change on the request path that
-       fronts every document, and belongs in its own ticket. */
-  eq(unshared.join(", "), "netlify/edge-functions/gate.ts, netlify/functions/realtime-token.mjs",
-    "exactly the known role-resolving modules that bypass the shared validator");
-
-  if (failures === 0) {
-    process.stdout.write("PASS  every role-resolving module reaches the shared validator\n");
-  }
-
-  return failures === 0 ? 0 : 1;
+  section(before, "access-row matrix across the four converted paths");
 }
+
+/* ========================================================================= */
+/* section 3 — netlify/functions/realtime-token.mjs                          */
+/* ========================================================================= */
+
+async function realtimeTokenMatrix(accessLib) {
+  const before = failures;
+  process.env.ABLY_API_KEY = "invented-ably-key";
+
+  const handler = (await import(real("netlify/functions/realtime-token.mjs"))).default;
+
+  const run = async (overrides) => {
+    control.storeCalls = 0;
+    control.minted = 0;
+    Object.assign(control, {
+      identify: () => ({ ...SESSION }),
+      resolveRole: () => row(accessLib.capabilitiesFor, "editor"),
+      capabilitiesFor: (role) => accessLib.capabilitiesFor(role),
+      mintToken: () => {
+        control.minted += 1;
+        return { ...TOKEN };
+      },
+      ...overrides,
+    });
+    return handler(request(`/api/realtime-token?doc=${DOC_ID}`));
+  };
+
+  for (const [label, access] of brokenRows(accessLib.capabilitiesFor)) {
+    const response = await run({ resolveRole: () => access });
+    eq(response.status, 500, `realtime-token refuses ${label} with 500`);
+    eq(control.minted, 0, `realtime-token mints nothing for ${label}`);
+  }
+
+  // A proxied row is refused before the validator sees it: a trapped row can
+  // answer one way while it is checked and another when the capability is read.
+  {
+    const target = row(accessLib.capabilitiesFor, "editor");
+    const response = await run({ resolveRole: () => new Proxy(target, {}) });
+    eq(response.status, 500, "realtime-token refuses a proxied row with 500");
+    eq(control.minted, 0, "realtime-token mints nothing for a proxied row");
+  }
+
+  // An unusable capability table is invalid state, never an implicit denial.
+  for (const [label, table] of unusableTables(accessLib.capabilitiesFor)) {
+    const response = await run({ capabilitiesFor: table });
+    eq(response.status, 500, `realtime-token refuses ${label} with 500`);
+    eq(control.minted, 0, `realtime-token mints nothing for ${label}`);
+  }
+
+  // A well-formed row is still answered exactly as before.
+  {
+    const response = await run({ resolveRole: () => row(accessLib.capabilitiesFor, "none") });
+    eq(response.status, 403, "realtime-token denies a well-formed unreadable row");
+    eq(control.minted, 0, "a denied realtime request mints nothing");
+  }
+  for (const role of ["owner", "editor", "commenter", "viewer"]) {
+    const response = await run({ resolveRole: () => row(accessLib.capabilitiesFor, role, true) });
+    eq(response.status, 200, `realtime-token allows a well-formed ${role} row`);
+    deepEq(await response.json(), TOKEN, `a ${role} request returns the minted token`);
+    eq(control.minted, 1, `a ${role} request mints exactly one token`);
+  }
+  {
+    const response = await run({ mintToken: () => null });
+    eq(response.status, 204, "an absent realtime provider is still 204");
+  }
+
+  section(before, "realtime-token.mjs validates the resolved row");
+}
+
+/* ========================================================================= */
+/* section 4 — netlify/edge-functions/gate.ts                                */
+/* ========================================================================= */
+
+const META_LINE = `<meta name="doc-id" content="${DOC_ID}">\n`;
+const PAGE = `${META_LINE}<p>An invented document body.</p>\n`;
+
+/**
+ * The edge gate is TypeScript that runs on Deno and has no test harness of its
+ * own. Transpiling it with the repository's pinned TypeScript and loading it
+ * on Node is the closest executable proof available here: the transpile is
+ * type-erasure only, so the control flow under test is the shipped control
+ * flow. The stubs are written as siblings under the temporary root so the
+ * module's own relative specifiers resolve without a loader hook.
+ */
+function transpileGate(ts, gateRoot) {
+  mkdirSync(join(gateRoot, "edge-functions"), { recursive: true });
+  mkdirSync(join(gateRoot, "lib"), { recursive: true });
+
+  writeFileSync(
+    join(gateRoot, "lib/identity.mjs"),
+    `export function identify(req) { return globalThis.__ACCESSROW__.identify(req); }\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(gateRoot, "lib/access.mjs"),
+    `import { validateAccessRow } from ${JSON.stringify(real("netlify/lib/access.mjs"))};\n` +
+      `export { validateAccessRow };\n` +
+      `export function capabilitiesFor(role) { return globalThis.__ACCESSROW__.capabilitiesFor(role); }\n` +
+      `export function resolveRole(docId, user, options) {\n` +
+      `  return globalThis.__ACCESSROW__.resolveRole(docId, user, options);\n` +
+      `}\n`,
+    "utf8",
+  );
+
+  const source = readFileSync(join(ROOT, "netlify/edge-functions/gate.ts"), "utf8");
+  const emitted = ts.transpileModule(source, {
+    fileName: "gate.ts",
+    reportDiagnostics: true,
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      isolatedModules: true,
+    },
+  });
+  const errors = (emitted.diagnostics ?? []).filter(
+    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  ok(errors.length === 0, `gate.ts failed to transpile: ${errors.map((d) => d.messageText).join("; ")}`);
+
+  const file = join(gateRoot, "edge-functions/gate.mjs");
+  writeFileSync(file, emitted.outputText, "utf8");
+  return pathToFileURL(file).href;
+}
+
+async function gateMatrix(ts, gateRoot, accessLib) {
+  const before = failures;
+  const gate = (await import(transpileGate(ts, gateRoot))).default;
+
+  const gateRequest = () => new Request("https://docs.example.invalid/doc/", { method: "GET" });
+  const downstream = () =>
+    new Response(PAGE, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  const context = () => ({ next: async () => downstream() });
+
+  const run = async (overrides) => {
+    Object.assign(control, {
+      identify: () => ({ ...SESSION }),
+      capabilitiesFor: (role) => accessLib.capabilitiesFor(role),
+      resolveRole: () => row(accessLib.capabilitiesFor, "editor"),
+      ...overrides,
+    });
+    return gate(gateRequest(), context());
+  };
+
+  for (const [label, access] of brokenRows(accessLib.capabilitiesFor)) {
+    const response = await run({ resolveRole: () => access });
+    eq(response.status, 500, `the edge gate refuses ${label} with 500`);
+    eq(
+      await response.text(),
+      "Document access could not be verified.",
+      `the edge gate reports ${label} as unverified`,
+    );
+  }
+
+  /* Not asserted here: a proxied row. `realtime-token.mjs` refuses one through
+     `isProxy()` from `node:util/types`, but `gate.ts` has no equivalent — Deno
+     exposes no such predicate — so a `new Proxy(validRow, {})` is served. The
+     shared validator cannot close this on its own, and the asymmetry is filed
+     as #157 rather than pinned here, because asserting the current 200 would
+     enshrine it. */
+
+  for (const [label, table] of unusableTables(accessLib.capabilitiesFor)) {
+    const response = await run({ capabilitiesFor: table });
+    eq(response.status, 500, `the edge gate refuses ${label} with 500`);
+  }
+
+  {
+    const response = await run({ resolveRole: () => row(accessLib.capabilitiesFor, "none") });
+    eq(response.status, 403, "the edge gate denies a well-formed unreadable row");
+    eq(
+      await response.text(),
+      "You do not have access to this document.",
+      "a denied document says so in plain text",
+    );
+  }
+  for (const role of ["owner", "editor", "commenter", "viewer"]) {
+    const response = await run({ resolveRole: () => row(accessLib.capabilitiesFor, role, true) });
+    eq(response.status, 200, `the edge gate serves a well-formed ${role} row`);
+    eq(await response.text(), PAGE, `a ${role} request replays the whole document`);
+  }
+
+  // A deliberate relaxation, recorded because it is a behaviour change and not
+  // a refactor: `validResolvedAccess()` required every own property to be
+  // writable *and* configurable, so a frozen row was a 500. The shared
+  // validator requires an enumerable data property and nothing more, which is
+  // what every other write path has always accepted.
+  {
+    const frozen = Object.freeze(row(accessLib.capabilitiesFor, "editor", true));
+    const response = await run({ resolveRole: () => frozen });
+    eq(response.status, 200, "the edge gate accepts a frozen well-formed row");
+  }
+
+  section(before, "gate.ts validates the resolved row through the shared validator");
+}
+
+/* ========================================================================= */
+/* entry point                                                               */
+/* ========================================================================= */
+
+async function main() {
+  const ts = await loadTypeScript();
+  await staticInventory(ts);
+
+  const roots = [];
+  installSignalCleanup(roots);
+  const temporaryRoot = guardedTempRoot("access-row-");
+  roots.push(temporaryRoot);
+  try {
+    /* The stub tree must exist before any handler is imported: the resolve
+       hook is consulted at import time, not at call time. */
+    bindStaticModules(join(temporaryRoot, "stubs"));
+    const accessLib = await import(real("netlify/lib/access.mjs"));
+
+    await convertedPathsMatrix(accessLib);
+    await realtimeTokenMatrix(accessLib);
+    await gateMatrix(ts, join(temporaryRoot, "gate"), accessLib);
+  } finally {
+    removeTempRoots(roots);
+  }
+
+  if (failures === 0) {
+    process.stdout.write(`PASS  access-row: ${checks} checks\n`);
+    return 0;
+  }
+  process.stderr.write(`FAIL  access-row: ${failures} of ${checks} checks failed\n`);
+  return 1;
+}
+
+const deadline = setTimeout(() => {
+  bail("the runner exceeded its 120s deadline");
+}, 120_000);
+deadline.unref();
 
 try {
   process.exitCode = await main();
 } catch (error) {
   process.stderr.write(`FAIL  access-row runner: ${error.stack}\n`);
   process.exitCode = 1;
-} finally {
-  rmSync(stubRoot, { recursive: true, force: true });
 }

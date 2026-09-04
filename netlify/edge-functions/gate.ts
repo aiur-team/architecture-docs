@@ -1,5 +1,9 @@
 import { identify } from "../lib/identity.mjs";
-import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
+import {
+  capabilitiesFor,
+  resolveRole,
+  validateAccessRow,
+} from "../lib/access.mjs";
 
 type GateContext = {
   next(request?: Request): Promise<Response>;
@@ -15,17 +19,6 @@ const UNVERIFIED = "Document access could not be verified.";
 const DENIED = "You do not have access to this document.";
 
 const IDENTITY_KEYS = ["sub", "email", "name", "isOrg"];
-const CAPABILITY_KEYS = [
-  "canRead",
-  "canComment",
-  "threadControl",
-  "canSuggest",
-  "canEdit",
-  "canAccept",
-  "canShare",
-  "canSeeMembers",
-];
-const RESULT_KEYS = ["role", "shared", ...CAPABILITY_KEYS];
 const CONTENT_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
 const CONTENT_TYPE_QUOTED = '"(?:[\\t !#-\\[\\]-~]|\\\\[\\t !-~])*"';
 const CONTENT_TYPE_PARAMETER = `;[\\t ]*${CONTENT_TYPE_TOKEN}[\\t ]*=[\\t ]*(?:${CONTENT_TYPE_TOKEN}|${CONTENT_TYPE_QUOTED})[\\t ]*`;
@@ -92,25 +85,6 @@ function validIdentity(
 
 function validContentType(value: string | null): boolean {
   return value !== null && HTML_CONTENT_TYPE.test(value);
-}
-
-function validResolvedAccess(value: unknown): null | Record<string, unknown> {
-  const result = exactMutableRecord(value, RESULT_KEYS);
-  if (
-    result === null ||
-    typeof result.role !== "string" ||
-    typeof result.shared !== "boolean"
-  )
-    return null;
-
-  try {
-    const expected = capabilitiesFor(result.role);
-    if (CAPABILITY_KEYS.some((key) => result[key] !== expected[key]))
-      return null;
-  } catch {
-    return null;
-  }
-  return result;
 }
 
 function isUnavailableError(value: unknown): boolean {
@@ -397,11 +371,19 @@ export default async function gate(
       );
     }
 
-    const access = validResolvedAccess(resolved);
-    if (access === null) {
+    // The eighth hand copy of the access-row check used to live here under a
+    // third name, `validResolvedAccess()` (#135). It is the shared
+    // `validateAccessRow()` now (#132): one definition, so a weakening lands
+    // in one file rather than in whichever copy no gate exercises. The edge
+    // path gains the checks the copy lacked -- the role must be a known role,
+    // `threadControl` one of the three controls, every capability a boolean --
+    // and loses the copy's demand that each own property be writable and
+    // configurable, which the shared validator does not make.
+    if (!validateAccessRow(resolved, capabilitiesFor)) {
       await cancelAndRelease(reader);
       return plainResponse(500, UNVERIFIED);
     }
+    const access = resolved as Record<string, unknown>;
     if (access.canRead !== true) {
       await cancelAndRelease(reader);
       return plainResponse(403, DENIED);

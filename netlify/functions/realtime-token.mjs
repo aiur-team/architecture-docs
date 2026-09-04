@@ -1,6 +1,6 @@
 import { isProxy } from "node:util/types";
 import { identify } from "../lib/identity.mjs";
-import { resolveRole } from "../lib/access.mjs";
+import { capabilitiesFor, resolveRole, validateAccessRow } from "../lib/access.mjs";
 import { mintToken } from "../lib/realtime.mjs";
 
 const DOC_ID_RE = /^[0-9a-f]{6}$/;
@@ -36,25 +36,6 @@ function isUnavailableStoreError(thrown) {
     );
   } catch {
     return false;
-  }
-}
-
-function accessDecision(value) {
-  if (value === null || typeof value !== "object" || isProxy(value)) return null;
-  try {
-    if (Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
-      return null;
-    }
-    const keys = Reflect.ownKeys(value);
-    for (const key of keys) {
-      if (typeof key !== "string") return null;
-      if (!ordinaryDataDescriptor(Object.getOwnPropertyDescriptor(value, key))) return null;
-    }
-    const canRead = Object.getOwnPropertyDescriptor(value, "canRead");
-    if (!ordinaryDataDescriptor(canRead) || typeof canRead.value !== "boolean") return null;
-    return canRead.value;
-  } catch {
-    return null;
   }
 }
 
@@ -114,9 +95,18 @@ export default async function handler(req) {
   } catch (error) {
     return empty(isUnavailableStoreError(error) ? 503 : 500);
   }
-  const canRead = accessDecision(access);
-  if (canRead === null) return empty(500);
-  if (canRead === false) return empty(403);
+  // The role is only half the answer. Until #135 this path read `canRead` off
+  // whatever `resolveRole()` returned and never checked the row against the
+  // capability matrix, so a row claiming `role: "none", canRead: true` minted a
+  // token. `validateAccessRow()` is the one definition of a well-formed row
+  // (#132); a proxy is refused before it reaches the validator, because a
+  // trapped row can answer one way while being checked and another way when
+  // the capability is finally read.
+  if (access === null || typeof access !== "object" || isProxy(access)) {
+    return empty(500);
+  }
+  if (!validateAccessRow(access, capabilitiesFor)) return empty(500);
+  if (access.canRead !== true) return empty(403);
 
   let token;
   try {

@@ -152,6 +152,13 @@ jobs:
           # validator had no test of any kind before #128. This runner drives
           # the capability matrix through each of them, so neutering the shared
           # validator -- or any one of the four call sites -- fails here.
+          #
+          # The gate on the shared access-row validator: the exact set of
+          # role-resolving modules that keep a private copy, plus the runtime
+          # matrix for the two surfaces #135 folded onto validateAccessRow().
+          # It is the only thing that runs netlify/edge-functions/gate.ts at
+          # all -- the edge function is TypeScript for Deno, so the runner
+          # transpiles it with the TypeScript the typecheck step installed.
           node scripts/test-access-row.mjs
           node --experimental-vm-modules scripts/test-p4-k.mjs contract
           node scripts/test-p4-k-browser.mjs
