@@ -194,23 +194,23 @@ function brokenRows(complete) {
 }
 
 /** Capability tables no row can be validated against. */
-function unusableTables(real) {
+function unusableTables(canonical) {
   return [
     ["a table that throws", () => { throw new Error("no row"); }],
     ["a table answering null", () => null],
     ["a table answering a callable", () => () => true],
     ["a table answering a short row", (role) => {
-      const row = { ...real(role) };
+      const row = { ...canonical(role) };
       delete row.canShare;
       return row;
     }],
-    ["a table answering an extra key", (role) => ({ ...real(role), canPublish: true })],
+    ["a table answering an extra key", (role) => ({ ...canonical(role), canPublish: true })],
     ["a table answering out of order", (role) => {
-      const { canRead, ...rest } = real(role);
+      const { canRead, ...rest } = canonical(role);
       return { ...rest, canRead };
     }],
     ["a table answering an accessor", (role) => Object.defineProperty(
-      { ...real(role) }, "canRead", { get: () => true, enumerable: true, configurable: true },
+      { ...canonical(role) }, "canRead", { get: () => true, enumerable: true, configurable: true },
     )],
   ];
 }
