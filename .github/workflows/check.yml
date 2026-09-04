@@ -27,6 +27,12 @@ jobs:
       - name: root lockfile is in sync
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # notify() runs after the authoritative write, so a body it rejects that
+      # the store accepted is a 500 for a comment that already landed. The two
+      # grammars are only kept in step by being asserted against each other.
+      - name: notify() accepts what the store accepts
+        run: node netlify/lib/notify.test.mjs
+
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
