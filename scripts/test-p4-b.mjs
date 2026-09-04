@@ -28,7 +28,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { mkdirSync, mkdtempSync, chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1312,6 +1312,7 @@ class El {
   constructor(document, tagName) {
     this.ownerDocument = document;
     this.tagName = tagName.toUpperCase();
+    this.localName = tagName.toLowerCase();
     this.attributes = new Map();
     this.children = [];
     this.parentNode = null;
@@ -1345,6 +1346,10 @@ class El {
 
   set textContent(value) {
     this.html = escapeText(String(value));
+  }
+
+  get isConnected() {
+    return this.ownerDocument.order.includes(this);
   }
 
   get contentEditable() {
@@ -1526,9 +1531,16 @@ function evaluateClient(options = {}) {
       "content-type",
       answer.contentType === undefined ? "application/json; charset=utf-8" : answer.contentType,
     ]]);
+    const bytes = new TextEncoder().encode(JSON.stringify(answer.body));
+    let sent = false;
     return {
       status: answer.status,
       headers: { get: (name) => headers.get(name.toLowerCase()) ?? null },
+      body: { getReader: () => ({
+        read: async () => sent ? { done: true } : (sent = true, { done: false, value: bytes }),
+        cancel: async () => {},
+        releaseLock: () => {},
+      }) },
       json: async () => {
         if (answer.malformed === true) throw new SyntaxError("bad json");
         return answer.body;
@@ -1555,6 +1567,11 @@ function evaluateClient(options = {}) {
       }
     },
     Range: class Range {},
+    TextEncoder,
+    TextDecoder,
+    Uint8Array,
+    ArrayBuffer,
+    crypto: webcrypto,
     URL,
     Object,
     Array,
@@ -1580,16 +1597,16 @@ function evaluateClient(options = {}) {
 }
 
 const SESSION_EDITOR = Object.freeze({
-  doc: DOC_ID,
   sub: SUB,
   email: EMAIL,
   name: NAME,
-  roles: ["member"],
+  roles: Object.freeze(["member"]),
+  canComment: true,
+  canEdit: true,
+  doc: DOC_ID,
   role: "editor",
   shared: false,
-  canComment: true,
   canSuggest: true,
-  canEdit: true,
   canAccept: false,
   canShare: false,
   canSeeMembers: true,
@@ -1846,9 +1863,14 @@ async function clientMatrix() {
     return { harness, block, controls, button: buttonOf(controls), status: statusOf(controls) };
   }
 
+  async function activate(button) {
+    button.dispatchEvent(makeEvent("click"));
+    for (let turn = 0; turn < 4; turn += 1) await settle();
+  }
+
   {
     const { block, button } = await editable();
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     eq(block.textContent, TEXT, "activating reveals the data-md plaintext");
     eq(block.getAttribute("contenteditable"), "plaintext-only", "the native probe is used");
     ok(block.classList.contains("doc-edit-editing"), "the block is marked editing");
@@ -1858,7 +1880,7 @@ async function clientMatrix() {
     await reveal(harness, SESSION_EDITOR);
     const block = harness.blocks.get(AID);
     const controls = controlsFor(harness, AID);
-    buttonOf(controls).dispatchEvent(makeEvent("click"));
+    await activate(buttonOf(controls));
     eq(block.getAttribute("contenteditable"), "true", "the fallback sets plain contenteditable");
     const paste = makeEvent("paste", {
       clipboardData: { getData: (type) => (type === "text/plain" ? " pasted" : "<b>no</b>") },
@@ -1870,7 +1892,7 @@ async function clientMatrix() {
   }
   {
     const { block, button, status } = await editable();
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = "changed";
     block.dispatchEvent(makeEvent("keydown", { key: "Escape" }));
     eq(block.innerHTML, INNER, "Escape restores the prior HTML");
@@ -1885,14 +1907,14 @@ async function clientMatrix() {
     await reveal(harness, SESSION_EDITOR);
     const block = harness.blocks.get(AID);
     const controls = controlsFor(harness, AID);
-    buttonOf(controls).dispatchEvent(makeEvent("click"));
+    await activate(buttonOf(controls));
     eq(block.textContent, "plain built text", "a block without data-md edits its text content");
     block.dispatchEvent(makeEvent("keydown", { key: "Escape" }));
     eq(block.hasAttribute("data-md"), false, "Escape restores the absence of data-md");
   }
   {
     const { block, button } = await editable();
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.dispatchEvent(makeEvent("blur"));
     eq(block.innerHTML, INNER, "an unchanged blur restores without a request");
   }
@@ -1905,6 +1927,7 @@ async function clientMatrix() {
           status: 200,
           body: {
             receipt: {
+              aid: JSON.parse(init.body).aid,
               text: JSON.parse(init.body).text,
               by: { sub: SUB, name: NAME, email: EMAIL },
               at: NOW_ISO,
@@ -1917,14 +1940,19 @@ async function clientMatrix() {
       return okOverlay();
     };
     const { harness, block, button, status } = await editable({ responder });
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = NEXT_TEXT;
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     for (let turn = 0; turn < 12; turn += 1) await settle();
     eq(posts, 1, "Ctrl+Enter saves exactly once");
     const request = harness.requests[harness.requests.length - 1];
     eq(request.init.method, "POST", "the save is a POST");
-    eq(JSON.parse(request.init.body), { docId: DOC_ID, aid: AID, text: NEXT_TEXT },
+    eq(JSON.parse(request.init.body), {
+      docId: DOC_ID,
+      aid: AID,
+      text: NEXT_TEXT,
+      baseHash: createHash("sha256").update(INNER, "utf8").digest("hex"),
+    },
       "the save body is exact");
     eq(request.init.credentials, "same-origin", "the save is same-origin");
     eq(request.init.redirect, "error", "the save refuses redirects");
@@ -1941,7 +1969,7 @@ async function clientMatrix() {
       ? { status: 409, body: { error: { code: "conflict", message: "x" }, current: "**other** text" } }
       : okOverlay());
     const { block, button, status, controls } = await editable({ responder });
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = NEXT_TEXT;
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", metaKey: true }));
     for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -1956,7 +1984,7 @@ async function clientMatrix() {
       ? { status: 409, body: { error: { code: "conflict", message: "x" }, current: null } }
       : okOverlay());
     const { block, button, status } = await editable({ responder });
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = NEXT_TEXT;
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -1972,7 +2000,7 @@ async function clientMatrix() {
       }
       : okOverlay());
     const { block, button } = await editable({ responder });
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = NEXT_TEXT;
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -1985,6 +2013,7 @@ async function clientMatrix() {
       status: 200,
       body: {
         receipt: {
+          aid: AID,
           text: "something else",
           by: { sub: SUB, name: NAME, email: EMAIL },
           at: NOW_ISO,
@@ -1997,7 +2026,7 @@ async function clientMatrix() {
   ]) {
     const responder = (url, init) => (init.method === "POST" ? answer : okOverlay());
     const { block, button, status, controls } = await editable({ responder });
-    button.dispatchEvent(makeEvent("click"));
+    await activate(button);
     block.textContent = NEXT_TEXT;
     block.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -2021,6 +2050,7 @@ async function clientMatrix() {
         status: 200,
         body: {
           receipt: {
+            aid: JSON.parse(init.body).aid,
             text: JSON.parse(init.body).text,
             by: { sub: SUB, name: NAME, email: EMAIL },
             at: NOW_ISO,
@@ -2042,8 +2072,8 @@ async function clientMatrix() {
     const second = harness.blocks.get(OTHER_AID);
     // Both blocks enter editing before either saves, so the guard under test
     // is the in-flight save and not the activation check.
-    buttonOf(controlsFor(harness, AID)).dispatchEvent(makeEvent("click"));
-    buttonOf(controlsFor(harness, OTHER_AID)).dispatchEvent(makeEvent("click"));
+    await activate(buttonOf(controlsFor(harness, AID)));
+    await activate(buttonOf(controlsFor(harness, OTHER_AID)));
     first.textContent = NEXT_TEXT;
     first.dispatchEvent(makeEvent("keydown", { key: "Enter", ctrlKey: true }));
     await settle();
@@ -2072,6 +2102,7 @@ async function clientMatrix() {
         status: 200,
         body: {
           receipt: {
+            aid: JSON.parse(init.body).aid,
             text: JSON.parse(init.body).text,
             by: { sub: SUB, name: NAME, email: EMAIL },
             at: NOW_ISO,
@@ -2083,7 +2114,7 @@ async function clientMatrix() {
       : okOverlay());
     for (const [label, text] of [["an empty", ""], ["a 4000-unit", "x".repeat(4000)]]) {
       const { block, button } = await editable({ responder });
-      button.dispatchEvent(makeEvent("click"));
+      await activate(button);
       block.textContent = text;
       block.dispatchEvent(makeEvent("blur"));
       for (let turn = 0; turn < 12; turn += 1) await settle();
@@ -2104,7 +2135,8 @@ async function clientMatrix() {
       .map((rule) => rule.trim())
       .filter((rule) => rule !== "");
     for (const selector of selectors) {
-      ok(selector.includes(".doc-edit-"), `the stylesheet owns only edit selectors: ${selector}`);
+      ok(selector.includes(".doc-edit-") || selector.includes(".doc-suggest-") ||
+        selector.includes("[data-suggest]"), `the stylesheet stays inside edit/suggestion selectors: ${selector}`);
     }
     ok(css.includes("@media print"), "print is handled");
     ok(css.includes("prefers-reduced-motion"), "reduced motion is handled");

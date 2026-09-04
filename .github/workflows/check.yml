@@ -144,6 +144,7 @@ jobs:
           fi
           node scripts/test-p4-m.mjs
           node scripts/test-p4-n.mjs
+          node scripts/test-p4-p.mjs
           node scripts/test-p4-o.mjs
           node scripts/test-p4-q.mjs
           node scripts/test-p4-t.mjs
