@@ -1,0 +1,217 @@
+/* ============================================================
+   presence.css — the masthead reader strip and the reader-location rail.
+
+   Scoped entirely to the IDs and classes presence.js creates: it never
+   hides or restyles document prose, and the rail consumes no layout space
+   and intercepts no input. Every token carries a literal fallback, because
+   this stylesheet is also loaded on its own by the rendered gate.
+
+   Theme follows P1-B's three states exactly: bare is light, an explicit
+   data-theme wins over the OS in both directions, and no colour is declared
+   only inside a media or [data-theme] block.
+   ============================================================ */
+
+.doc-presence {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-presence-faces {
+  display: inline-flex;
+  align-items: center;
+}
+
+.doc-presence-faces[hidden] {
+  display: none !important;
+}
+
+.doc-presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Adjacent masthead faces overlap; the first one must not pull left. */
+.doc-presence-avatar + .doc-presence-avatar {
+  margin-inline-start: -6px;
+}
+
+.doc-presence-more {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 6px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--ink-3, #7A8492);
+  user-select: none;
+}
+
+.doc-presence-toggle {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong, #CBD2DA);
+  border-radius: 6px;
+  background: var(--surface, #FFFFFF);
+  color: var(--ink-2, #49525F);
+  font-family: var(--sans, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.doc-presence-toggle:focus-visible {
+  outline: 2px solid var(--accent, #FF0420);
+  outline-offset: 2px;
+}
+
+/* ---- The reader-location rail -------------------------------------------
+   Absolute at inset zero over the document, pointer-transparent throughout,
+   and lighter than the comment controls it sits beside. */
+
+#doc-presence-rail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.doc-presence-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 1px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.doc-presence-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.doc-presence-initial + .doc-presence-initial {
+  margin-inline-start: -4px;
+}
+
+.doc-presence-marker-more {
+  color: var(--ink-3, #7A8492);
+  background: var(--surface-2, #EEF1F4);
+}
+
+/* ---- The eight fixed colour pairs ---------------------------------------
+   Light is the un-stamped default. The OS preference applies only when no
+   explicit light choice was made, and the two explicit states come last so
+   the toggle wins in both directions. */
+
+.doc-presence-colour-0 { color: #1e3a8a; background-color: #dbeafe; }
+.doc-presence-colour-1 { color: #14532d; background-color: #dcfce7; }
+.doc-presence-colour-2 { color: #78350f; background-color: #fef3c7; }
+.doc-presence-colour-3 { color: #701a75; background-color: #fae8ff; }
+.doc-presence-colour-4 { color: #7f1d1d; background-color: #fee2e2; }
+.doc-presence-colour-5 { color: #164e63; background-color: #cffafe; }
+.doc-presence-colour-6 { color: #4c1d95; background-color: #ede9fe; }
+.doc-presence-colour-7 { color: #1e293b; background-color: #e2e8f0; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .doc-presence-colour-0 { color: #dbeafe; background-color: #1e3a8a; }
+  :root:not([data-theme="light"]) .doc-presence-colour-1 { color: #dcfce7; background-color: #14532d; }
+  :root:not([data-theme="light"]) .doc-presence-colour-2 { color: #fef3c7; background-color: #78350f; }
+  :root:not([data-theme="light"]) .doc-presence-colour-3 { color: #fae8ff; background-color: #701a75; }
+  :root:not([data-theme="light"]) .doc-presence-colour-4 { color: #fee2e2; background-color: #7f1d1d; }
+  :root:not([data-theme="light"]) .doc-presence-colour-5 { color: #cffafe; background-color: #164e63; }
+  :root:not([data-theme="light"]) .doc-presence-colour-6 { color: #ede9fe; background-color: #4c1d95; }
+  :root:not([data-theme="light"]) .doc-presence-colour-7 { color: #e2e8f0; background-color: #1e293b; }
+}
+
+:root[data-theme="dark"] .doc-presence-colour-0 { color: #dbeafe; background-color: #1e3a8a; }
+:root[data-theme="dark"] .doc-presence-colour-1 { color: #dcfce7; background-color: #14532d; }
+:root[data-theme="dark"] .doc-presence-colour-2 { color: #fef3c7; background-color: #78350f; }
+:root[data-theme="dark"] .doc-presence-colour-3 { color: #fae8ff; background-color: #701a75; }
+:root[data-theme="dark"] .doc-presence-colour-4 { color: #fee2e2; background-color: #7f1d1d; }
+:root[data-theme="dark"] .doc-presence-colour-5 { color: #cffafe; background-color: #164e63; }
+:root[data-theme="dark"] .doc-presence-colour-6 { color: #ede9fe; background-color: #4c1d95; }
+:root[data-theme="dark"] .doc-presence-colour-7 { color: #e2e8f0; background-color: #1e293b; }
+
+:root[data-theme="light"] .doc-presence-colour-0 { color: #1e3a8a; background-color: #dbeafe; }
+:root[data-theme="light"] .doc-presence-colour-1 { color: #14532d; background-color: #dcfce7; }
+:root[data-theme="light"] .doc-presence-colour-2 { color: #78350f; background-color: #fef3c7; }
+:root[data-theme="light"] .doc-presence-colour-3 { color: #701a75; background-color: #fae8ff; }
+:root[data-theme="light"] .doc-presence-colour-4 { color: #7f1d1d; background-color: #fee2e2; }
+:root[data-theme="light"] .doc-presence-colour-5 { color: #164e63; background-color: #cffafe; }
+:root[data-theme="light"] .doc-presence-colour-6 { color: #4c1d95; background-color: #ede9fe; }
+:root[data-theme="light"] .doc-presence-colour-7 { color: #1e293b; background-color: #e2e8f0; }
+
+/* ---- Responsive, forced colours, motion, print -------------------------- */
+
+/* Narrow viewports drop only the rail. The strip and the privacy toggle stay
+   available and wrap with .head-top. */
+@media (max-width: 720px) {
+  #doc-presence-rail {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .doc-presence-avatar,
+  .doc-presence-initial,
+  .doc-presence-marker,
+  .doc-presence-toggle {
+    border: 1px solid CanvasText;
+  }
+
+  .doc-presence-marker {
+    opacity: 1;
+  }
+
+  .doc-presence-toggle:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-presence,
+  .doc-presence *,
+  #doc-presence-rail,
+  #doc-presence-rail * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media print {
+  .doc-presence,
+  #doc-presence-rail {
+    display: none !important;
+  }
+}
