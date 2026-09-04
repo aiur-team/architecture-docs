@@ -91,7 +91,15 @@ test("missing and malformed organisation domains fail closed", async (t) => {
 });
 
 test("suffix near-misses do not classify as organisation mailboxes", async () => {
-  for (const email of ["member@notexample.com", "member@sub.example.com"]) {
+  // A domain merely CONTAINING the configured one must not match. The last two
+  // are registrable by an attacker, so an `includes`-style check would hand them
+  // organisation membership; only exact-suffix matching rejects them.
+  for (const email of [
+    "member@notexample.com",
+    "member@sub.example.com",
+    "member@example.com.evil.com",
+    "member@example.como",
+  ]) {
     const loaded = await loadIdentity({ domain: "@example.com", email });
     assert.equal((await loaded.identity.identify(new Request("https://docs.invalid"))).isOrg, false);
   }
