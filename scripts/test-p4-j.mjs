@@ -5,7 +5,8 @@
  *   node scripts/test-p4-j.mjs contract
  *   node scripts/test-p4-j.mjs hosted
  *
- * The entry point is its own supervisor. Parent mode validates `P4J_BASE`,
+ * The entry point is its own supervisor. Parent mode validates `P4J_BASE` when
+ * one is supplied -- CI supplies none, see `verifyBase()` --
  * generates an unguessable in-memory nonce, and spawns this same file with
  * `--worker` in its own detached process group under a real 120-second
  * deadline. On any timeout or failure it signals that group, escalates to
@@ -73,9 +74,29 @@ function git(args) {
  * The reviewed base must be one lowercase commit ID that already carries this
  * canonical ticket and every predecessor, still owns P3-H's `access.mjs`, and
  * does not yet carry this runner.
+ *
+ * That base is necessarily a commit on this ticket's own branch: `main` never
+ * carries `docs/tickets/P4-J.md` without also carrying this runner, and the
+ * branch is squash-merged, so no commit satisfying the conditions survives on
+ * `main` at all. Requiring it unconditionally would therefore make this runner
+ * die on every push build the moment it is wired into CI (#116) -- a runner
+ * nothing can execute, which is the exact failure that gate exists to stop.
+ *
+ * So the gate is kept, and is opt-in: supply `P4J_BASE` and every condition
+ * below is enforced as specified; omit it and the run is against the working
+ * tree, announced on stderr by the parent so the omission is visible in the log
+ * rather than inferred. `hosted` mode still requires it -- see `HOSTED_ENV`.
  */
-function verifyBase() {
+function verifyBase({ announce = false } = {}) {
   const base = process.env.P4J_BASE;
+  if (base === undefined || base === "") {
+    if (announce) {
+      process.stderr.write(
+        "NOTE  P4J_BASE unset: the reviewed-base gate is skipped and the working tree is under test\n",
+      );
+    }
+    return "";
+  }
   if (typeof base !== "string" || !BASE_PATTERN.test(base)) {
     die("export P4J_BASE as the reviewed 40-character lowercase commit ID");
   }
@@ -121,7 +142,7 @@ function requireHostedEnv() {
 }
 
 async function parent(mode) {
-  verifyBase();
+  verifyBase({ announce: true });
   if (mode === "hosted") {
     requireHostedEnv();
   }

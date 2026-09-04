@@ -88,8 +88,15 @@ jobs:
           # excuses that one failure, dated, out loud, and only while the
           # unguarded measurement is still in the source. Remove the wrapper
           # with #124. Every other runner is invoked directly.
+          #
+          # test-p4-j.mjs names the mode it runs: `contract` is the hermetic
+          # one, and `hosted` needs operator credentials no build has. Its
+          # reviewed-base gate is deliberately not driven from here -- the only
+          # commits that satisfy it live on the ticket branch and do not survive
+          # the squash merge, so a `P4J_BASE` set here would fail on `main`.
           node scripts/allow-known-runner-failure.mjs scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
+          node scripts/test-p4-j.mjs contract
           node scripts/test-p4-m.mjs
 
       - name: edge gate config is fail-closed
