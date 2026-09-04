@@ -36,6 +36,9 @@ jobs:
       - name: typecheck
         run: npm --prefix templates/docbuild ci --no-audit --no-fund && npm --prefix templates/docbuild run check
 
+      - name: Check inline converter parity
+        run: node scripts/check-inline-md.mjs
+
       # The unit tests were written before anything ran them, and a test that
       # never executes cannot hold a regression out. Every file is named
       # explicitly rather than globbed: `node --test` treats an unmatched

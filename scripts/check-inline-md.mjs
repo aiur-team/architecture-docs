@@ -1,0 +1,744 @@
+#!/usr/bin/env node
+/**
+ * Prove that the browser copy of the three-mark inline converter is
+ * byte-for-byte behaviorally identical to the canonical builder converter for
+ * every committed conformance row.
+ *
+ * P2-D owns `templates/docbuild/src/inline_md.ts` and the 12-row fixture.
+ * P4-B carries the same algorithm into `templates/base/edit.js` as the same
+ * private top-level declarations P2-D uses, so the dependency-free page can
+ * render and edit pending text. Two copies of one algorithm drift silently;
+ * this check turns that drift into a deterministic CI failure.
+ *
+ * Deliberately absent: a normaliser twin. P1-D publishes one compiled `norm()`
+ * that both the builder and `window.doc.anchor.norm` execute, so there is no
+ * second implementation to compare and no `scripts/check-normalise.mjs`.
+ *
+ * The check adds no dependency. It parses the browser module with the
+ * repository's already-pinned TypeScript compiler, evaluates only the exact
+ * source bytes of those declarations inside a fresh `node:vm` context with
+ * code generation disabled, and never executes the rest of `edit.js`.
+ *
+ * Output contract: exactly one success line on stdout and exit 0, or exactly
+ * one `FAIL inline converter parity:` line on stderr and exit 1 (exit 2 for an
+ * invalid command line). A failure line never carries source text, fixture
+ * values, a stack, or an absolute path — the fixture row number and direction
+ * are the whole public vocabulary.
+ */
+
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import vm from "node:vm";
+
+/** The repository root, derived from this file's own location. */
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+const CANONICAL_FIXTURE = join(ROOT, "templates", "fixtures", "inline.json");
+const DEFAULT_CLIENT = join(ROOT, "templates", "base", "edit.js");
+const BUILDER_MODULE = join(ROOT, "templates", "docbuild", "dist", "inline_md.js");
+const TYPESCRIPT_HOST = join(ROOT, "templates", "docbuild", "package.json");
+
+/** The exact P2-D row count. A fixture of any other length is drift. */
+const EXPECTED_ROWS = 12;
+
+/** The exact own keys of a fixture row, in order. */
+const ROW_KEYS = ["md", "html"];
+
+/**
+ * The private top-level declarations P4-B must keep in `edit.js`, in reporting
+ * and evaluation order. They are a test seam inside one browser module, not a
+ * new global or public API.
+ *
+ * `form` is the exact shape each binding must take, because the canonical P2-D
+ * module the browser copy must stay byte-compatible with declares its shared
+ * `replaceLiteral` helper as a `const` arrow and the other four as plain
+ * function declarations. Accepting only the exact canonical form keeps the
+ * extraction as narrow as the four-declaration original: any other shape of
+ * these names is not a converter, it is a rebinding.
+ */
+const CONVERTERS = [
+  { name: "replaceLiteral", form: "const" },
+  { name: "untag", form: "function" },
+  { name: "wrap", form: "function" },
+  { name: "toMd", form: "function" },
+  { name: "toHtml", form: "function" },
+];
+
+/** Just the declaration names, for the rebinding and free-reference gates. */
+const CONVERTER_NAMES = CONVERTERS.map((entry) => entry.name);
+
+/**
+ * The only free identifiers a converter declaration may reference besides the
+ * other four: ECMAScript primitives. Every host surface — DOM, storage,
+ * network, locale, timers, Node — is absent, and so are `eval` and `Function`.
+ */
+const ALLOWED_GLOBALS = new Set([
+  "String",
+  "Number",
+  "Boolean",
+  "Object",
+  "Array",
+  "Math",
+  "JSON",
+  "RegExp",
+  "Symbol",
+  "BigInt",
+  "undefined",
+  "NaN",
+  "Infinity",
+]);
+
+/**
+ * Member names that reach past string arithmetic: locale-sensitive operations
+ * (which make output depend on the runtime's locale) and the prototype
+ * plumbing a sandbox escape would climb.
+ */
+const FORBIDDEN_MEMBERS = new Set([
+  "localeCompare",
+  "toLocaleString",
+  "toLocaleLowerCase",
+  "toLocaleUpperCase",
+  "constructor",
+  "prototype",
+  "__proto__",
+]);
+
+/** A checked failure carrying the exact public reason line. */
+class ParityError extends Error {}
+
+/** Fail the check with one public reason. */
+function fail(reason) {
+  throw new ParityError(reason);
+}
+
+// ---------------------------------------------------------------------------
+// Command line
+// ---------------------------------------------------------------------------
+
+/**
+ * The argument grammar is closed: either no arguments, or `--fixture` and
+ * `--client` exactly once each with a usable path. Anything else exits 2
+ * before a single byte of fixture or source is read.
+ */
+function parseArguments(argv) {
+  if (argv.length === 0) {
+    return { fixture: CANONICAL_FIXTURE, client: DEFAULT_CLIENT };
+  }
+  if (argv.length !== 4) return null;
+
+  const selected = { fixture: null, client: null };
+  for (let index = 0; index < argv.length; index += 2) {
+    const option = argv[index];
+    if (option !== "--fixture" && option !== "--client") return null;
+    const key = option.slice(2);
+    if (selected[key] !== null) return null;
+    const value = resolveArgumentPath(argv[index + 1]);
+    if (value === null) return null;
+    selected[key] = value;
+  }
+  if (selected.fixture === null || selected.client === null) return null;
+  return selected;
+}
+
+/**
+ * Accept an absolute path, or a repository-root-relative path that stays
+ * inside the repository. A relative path is resolved against ROOT, never
+ * against `process.cwd()`, so the check reads the same files from any cwd.
+ */
+function resolveArgumentPath(value) {
+  if (typeof value !== "string" || value === "" || value.includes("\0")) return null;
+  if (isAbsolute(value)) return value;
+  const segments = value.split(/[/\\]/);
+  if (segments.some((segment) => segment === "..")) return null;
+  const resolved = resolve(ROOT, value);
+  if (resolved !== ROOT && !resolved.startsWith(ROOT + sep)) return null;
+  return resolved;
+}
+
+// ---------------------------------------------------------------------------
+// Fixture
+// ---------------------------------------------------------------------------
+
+/** Read and shape-check one fixture file. `label` names it in failures. */
+function loadFixture(path, label) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    fail(`${label} is unreadable`);
+  }
+
+  let rows;
+  try {
+    rows = JSON.parse(text);
+  } catch {
+    fail(`${label} is not valid JSON`);
+  }
+
+  if (!Array.isArray(rows)) fail(`${label} is not a JSON array`);
+  if (rows.length !== EXPECTED_ROWS) {
+    fail(`${label} has ${rows.length} rows, expected ${EXPECTED_ROWS}`);
+  }
+
+  const seen = new Map();
+  rows.forEach((row, index) => {
+    const number = index + 1;
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      fail(`${label} row ${number} is not an object`);
+    }
+    const keys = Object.keys(row);
+    if (keys.length !== ROW_KEYS.length || keys.some((key, at) => key !== ROW_KEYS[at])) {
+      fail(`${label} row ${number} does not have exactly the md and html keys`);
+    }
+    for (const key of ROW_KEYS) {
+      if (typeof row[key] !== "string") fail(`${label} row ${number} ${key} is not a string`);
+    }
+    const identity = JSON.stringify([row.md, row.html]);
+    const earlier = seen.get(identity);
+    if (earlier !== undefined) fail(`${label} row ${number} duplicates row ${earlier}`);
+    seen.set(identity, number);
+  });
+
+  return rows;
+}
+
+/**
+ * Compare the selected fixture to the committed canonical one field by field.
+ * Running this before either converter is what makes a missing, added,
+ * reordered, duplicated, or altered row fail even when the altered pair happens
+ * to round-trip through both copies.
+ */
+function requireCanonicalRows(selected, canonical) {
+  for (let index = 0; index < canonical.length; index += 1) {
+    for (const key of ROW_KEYS) {
+      if (selected[index][key] !== canonical[index][key]) {
+        fail(`row ${index + 1} ${key} mismatch`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Browser converter extraction
+// ---------------------------------------------------------------------------
+
+/** Load the TypeScript compiler the repository already pins for the builder. */
+function loadTypeScript() {
+  try {
+    return createRequire(pathToFileURL(TYPESCRIPT_HOST))("typescript");
+  } catch {
+    return fail("the pinned TypeScript compiler is unavailable");
+  }
+}
+
+/**
+ * Parse the browser module and return the exact source bytes of the converter
+ * declarations. The rest of the file is never evaluated, and a form too dynamic
+ * to extract safely fails closed rather than being reached by importing the
+ * whole module.
+ */
+function extractConverterSources(ts, path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    fail("client source is unreadable");
+  }
+
+  const source = ts.createSourceFile(
+    "client.js",
+    text,
+    ts.ScriptTarget.ES2022,
+    /* setParentNodes */ true,
+    ts.ScriptKind.JS,
+  );
+
+  const diagnostics = source.parseDiagnostics;
+  if (!Array.isArray(diagnostics)) fail("client source diagnostics are unavailable");
+  if (diagnostics.length > 0) fail("client source does not parse");
+
+  const found = new Map();
+  // Every binding below is one the module is allowed to introduce for a
+  // converter name; `requireNoConverterWrites` treats every other one as a
+  // rebinding, so this set is exactly the exemption list it needs.
+  const accepted = new Set();
+
+  const record = (name, entry) => {
+    if (found.has(name)) fail(`duplicate ${name} declaration`);
+    found.set(name, entry);
+  };
+
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
+      const name = statement.name.text;
+      if (!CONVERTER_NAMES.includes(name)) continue;
+      record(name, { statement, declaration: statement, fn: statement, form: "function" });
+      continue;
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    const list = statement.declarationList;
+    for (const declaration of list.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue;
+      const name = declaration.name.text;
+      if (!CONVERTER_NAMES.includes(name)) continue;
+      // Anything but a lone `const <name> = (...) => ...` is left unrecorded on
+      // purpose, so it surfaces as the rebinding it is rather than as a
+      // converter this checker would then extract and trust.
+      if (
+        (list.flags & ts.NodeFlags.Const) === 0 ||
+        list.declarations.length !== 1 ||
+        declaration.initializer === undefined ||
+        !ts.isArrowFunction(declaration.initializer)
+      ) {
+        continue;
+      }
+      record(name, { statement, declaration, fn: declaration.initializer, form: "const" });
+      accepted.add(declaration);
+    }
+  }
+
+  for (const entry of CONVERTERS) {
+    const declared = found.get(entry.name);
+    if (declared === undefined || declared.form !== entry.form) {
+      fail(`missing ${entry.name} declaration`);
+    }
+  }
+
+  // Extracting the declaration is only proof of what the browser runs while
+  // the declaration is still what the name resolves to. `edit.js` is one
+  // module, so a single later `toHtml = ...` silently swaps the function the
+  // page calls while leaving this checker looking at the original bytes.
+  requireNoConverterWrites(ts, source, accepted);
+
+  const sources = [];
+  for (const entry of CONVERTERS) {
+    const { statement, declaration, fn } = found.get(entry.name);
+    const isAsync = (fn.modifiers ?? []).some(
+      (modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword,
+    );
+    if (isAsync || fn.asteriskToken !== undefined) {
+      fail(`${entry.name} declaration is async or a generator`);
+    }
+    if (fn.body === undefined) fail(`${entry.name} declaration has no body`);
+    requireClosedDeclaration(ts, declaration, entry.name);
+    // The whole statement, so the `const` form arrives as a binding rather than
+    // as a bare arrow expression.
+    sources.push(text.slice(statement.getStart(source), statement.getEnd()));
+  }
+  return sources;
+}
+
+/** True for every node that opens a new variable scope for parameters and vars. */
+function isFunctionLike(ts, node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  );
+}
+
+/**
+ * Names bound directly in one scope, deliberately not descending into nested
+ * functions: a `toHtml` declared inside some other function shadows the module
+ * one only within that function, and crediting it any wider would hide a real
+ * rebinding.
+ */
+function scopeBindings(ts, scope) {
+  const names = new Set();
+
+  const addName = (name) => {
+    if (name === undefined) return;
+    if (ts.isIdentifier(name)) {
+      names.add(name.text);
+      return;
+    }
+    if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (ts.isBindingElement(element)) addName(element.name);
+      }
+    }
+  };
+
+  if (isFunctionLike(ts, scope)) {
+    for (const parameter of scope.parameters) addName(parameter.name);
+  }
+
+  const visit = (node) => {
+    if (isFunctionLike(ts, node)) {
+      // The name of a nested function declaration binds out here; its insides
+      // belong to its own scope.
+      if (ts.isFunctionDeclaration(node) && node.name !== undefined) names.add(node.name.text);
+      return;
+    }
+    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) addName(node.name);
+    if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.name !== undefined) {
+      names.add(node.name.text);
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
+      addName(node.variableDeclaration.name);
+    }
+    if (ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportSpecifier(node)) {
+      addName(node.name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(scope, visit);
+
+  return names;
+}
+
+/**
+ * Reject any write to one of the converter names anywhere in the browser
+ * module, unless the enclosing scope declares its own binding of that name.
+ *
+ * Without this the check is bypassable by one line. `function toHtml(...) {}`
+ * followed later by `toHtml = function (t) { return evil(t); }` parses clean,
+ * extracts the honest declaration, passes every fixture row, and ships a page
+ * whose editor runs the replacement. That is precisely the drift this gate
+ * exists to make impossible, so a rebinding fails closed.
+ */
+function requireNoConverterWrites(ts, source, accepted) {
+  const isAssignment = (kind) =>
+    kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+
+  /** Report an assignment target, walking destructuring patterns. */
+  const reportTarget = (node, shadowed) => {
+    if (node === undefined) return;
+    if (ts.isIdentifier(node)) {
+      if (CONVERTER_NAMES.includes(node.text) && !shadowed.has(node.text)) {
+        fail(`${node.text} declaration is rebound`);
+      }
+      return;
+    }
+    if (ts.isParenthesizedExpression(node)) {
+      reportTarget(node.expression, shadowed);
+      return;
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) reportTarget(element, shadowed);
+      return;
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isPropertyAssignment(property)) reportTarget(property.initializer, shadowed);
+        else if (ts.isShorthandPropertyAssignment(property)) {
+          reportTarget(property.name, shadowed);
+          reportTarget(property.objectAssignmentInitializer, shadowed);
+        } else if (ts.isSpreadAssignment(property)) reportTarget(property.expression, shadowed);
+      }
+      return;
+    }
+    if (ts.isSpreadElement(node)) {
+      reportTarget(node.expression, shadowed);
+      return;
+    }
+    // `[a = 1] = xs`: the default is a value, the left half is the target.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      reportTarget(node.left, shadowed);
+    }
+  };
+
+  const visit = (node, shadowed) => {
+    let scope = shadowed;
+    if (isFunctionLike(ts, node)) {
+      scope = new Set(shadowed);
+      for (const name of scopeBindings(ts, node)) scope.add(name);
+    }
+
+    if (ts.isBinaryExpression(node) && isAssignment(node.operatorToken.kind)) {
+      reportTarget(node.left, scope);
+    }
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      reportTarget(node.operand, scope);
+    }
+    if (ts.isDeleteExpression(node)) reportTarget(node.expression, scope);
+
+    ts.forEachChild(node, (child) => visit(child, scope));
+  };
+
+  // At module scope the converter names are the declarations themselves, so
+  // nothing shadows them there.
+  ts.forEachChild(source, (child) => visit(child, new Set()));
+
+  /**
+   * A second module-scope binding is the same swap without an assignment
+   * expression: `var toHtml = evil` after the declaration is a legal
+   * redeclaration that simply overwrites it.
+   */
+  const visitBinding = (node) => {
+    // A nested function's parameters and locals are shadows, not rebindings.
+    if (isFunctionLike(ts, node)) return;
+
+    const flag = (name) => {
+      if (name === undefined) return;
+      if (ts.isIdentifier(name)) {
+        if (CONVERTER_NAMES.includes(name.text)) fail(`${name.text} declaration is rebound`);
+        return;
+      }
+      if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const element of name.elements) {
+          if (ts.isBindingElement(element)) flag(element.name);
+        }
+      }
+    };
+
+    // The one accepted `const` converter binding is the declaration itself.
+    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) {
+      if (!accepted.has(node)) flag(node.name);
+    }
+    if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.name !== undefined) {
+      flag(node.name);
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) {
+      flag(node.variableDeclaration.name);
+    }
+    if (ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportSpecifier(node)) {
+      flag(node.name);
+    }
+    ts.forEachChild(node, visitBinding);
+  };
+  ts.forEachChild(source, visitBinding);
+}
+
+/**
+ * Require that a declaration is closed over nothing but the other converter
+ * declarations and ECMAScript primitives, and that it uses no escape hatch.
+ *
+ * Bound names are over-collected on purpose: a local that shadows a global name
+ * can only reach the local, so treating every declared name in the function as
+ * bound can admit a harmless shadow but never hides a real free reference.
+ */
+function requireClosedDeclaration(ts, declaration, name) {
+  const bound = new Set([name]);
+  const references = [];
+
+  const collectBindings = (node) => {
+    if (node === undefined) return;
+    if (ts.isIdentifier(node)) {
+      bound.add(node.text);
+      return;
+    }
+    if (ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+      for (const element of node.elements) {
+        if (ts.isBindingElement(element)) collectBindings(element.name);
+      }
+    }
+  };
+
+  const visit = (node) => {
+    switch (node.kind) {
+      case ts.SyntaxKind.ImportDeclaration:
+      case ts.SyntaxKind.ImportEqualsDeclaration:
+      case ts.SyntaxKind.ExportDeclaration:
+      case ts.SyntaxKind.ExportAssignment:
+      case ts.SyntaxKind.MetaProperty:
+      case ts.SyntaxKind.ThisKeyword:
+      case ts.SyntaxKind.SuperKeyword:
+      case ts.SyntaxKind.WithStatement:
+      case ts.SyntaxKind.DebuggerStatement:
+      case ts.SyntaxKind.AwaitExpression:
+      case ts.SyntaxKind.YieldExpression:
+        fail(`${name} declaration uses forbidden syntax`);
+        break;
+      default:
+        break;
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      fail(`${name} declaration uses forbidden syntax`);
+    }
+
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_MEMBERS.has(node.name.text)) {
+      fail(`${name} declaration uses a forbidden member`);
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      FORBIDDEN_MEMBERS.has(node.argumentExpression.text)
+    ) {
+      fail(`${name} declaration uses a forbidden member`);
+    }
+
+    if (ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node)) {
+      collectBindings(node.name);
+    }
+    if (
+      (ts.isFunctionDeclaration(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node)) &&
+      node !== declaration
+    ) {
+      collectBindings(node.name);
+    }
+
+    if (ts.isIdentifier(node) && isReference(ts, node)) references.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+
+  visit(declaration);
+
+  for (const reference of references) {
+    if (bound.has(reference)) continue;
+    if (CONVERTER_NAMES.includes(reference)) continue;
+    if (ALLOWED_GLOBALS.has(reference)) continue;
+    fail(`${name} declaration references a forbidden identifier`);
+  }
+}
+
+/**
+ * True when an identifier names a value being read, rather than a property
+ * key, a label, or the name half of a declaration.
+ */
+function isReference(ts, node) {
+  const parent = node.parent;
+  if (parent === undefined) return true;
+  switch (parent.kind) {
+    case ts.SyntaxKind.PropertyAccessExpression:
+    case ts.SyntaxKind.QualifiedName:
+    case ts.SyntaxKind.PropertyAssignment:
+    case ts.SyntaxKind.MethodDeclaration:
+    case ts.SyntaxKind.PropertyDeclaration:
+    case ts.SyntaxKind.GetAccessor:
+    case ts.SyntaxKind.SetAccessor:
+    case ts.SyntaxKind.LabeledStatement:
+    case ts.SyntaxKind.BreakStatement:
+    case ts.SyntaxKind.ContinueStatement:
+    case ts.SyntaxKind.Parameter:
+    case ts.SyntaxKind.VariableDeclaration:
+    case ts.SyntaxKind.FunctionDeclaration:
+    case ts.SyntaxKind.FunctionExpression:
+    case ts.SyntaxKind.ClassDeclaration:
+    case ts.SyntaxKind.ClassExpression:
+    case ts.SyntaxKind.BindingElement:
+      // A shorthand `{ value }` is the one property position that also reads a
+      // binding; every other name half above declares or labels rather than
+      // reads.
+      return parent.kind === ts.SyntaxKind.BindingElement
+        ? node !== parent.name && node !== parent.propertyName
+        : node !== parent.name;
+    case ts.SyntaxKind.ShorthandPropertyAssignment:
+      return true;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Evaluate the exact declaration slices — and nothing else from the browser
+ * module — in a fresh context with code generation disabled.
+ */
+function instantiateClient(sources) {
+  const context = vm.createContext(Object.create(null), {
+    codeGeneration: { strings: false, wasm: false },
+  });
+  try {
+    vm.runInContext(sources.join("\n"), context, {
+      filename: "client-converter.js",
+      timeout: 10_000,
+    });
+  } catch {
+    fail("client converter evaluation failed");
+  }
+  const client = { toMd: context.toMd, toHtml: context.toHtml };
+  for (const direction of ["toMd", "toHtml"]) {
+    if (typeof client[direction] !== "function") fail(`client ${direction} is not callable`);
+  }
+  return client;
+}
+
+// ---------------------------------------------------------------------------
+// Parity
+// ---------------------------------------------------------------------------
+
+/** Run one conversion, turning a throw into a public row-scoped failure. */
+function convert(fn, input, reason) {
+  try {
+    return fn(input);
+  } catch {
+    return fail(reason);
+  }
+}
+
+async function main(argv) {
+  const paths = parseArguments(argv);
+  if (paths === null) {
+    process.stderr.write("FAIL inline converter parity: invalid arguments\n");
+    return 2;
+  }
+
+  try {
+    // The committed canonical fixture is the reference for everything else, so
+    // it is loaded and shape-checked first even when another file is selected.
+    const canonical = loadFixture(CANONICAL_FIXTURE, "canonical fixture");
+    const rows =
+      paths.fixture === CANONICAL_FIXTURE ? canonical : loadFixture(paths.fixture, "fixture");
+    requireCanonicalRows(rows, canonical);
+
+    let builder;
+    try {
+      builder = await import(pathToFileURL(BUILDER_MODULE).href);
+    } catch {
+      fail("the compiled builder converter is unavailable");
+    }
+    if (typeof builder.toMd !== "function" || typeof builder.toHtml !== "function") {
+      fail("the compiled builder converter is incomplete");
+    }
+
+    // The canonical rows must describe the builder before they can judge the
+    // browser copy.
+    rows.forEach((row, index) => {
+      const number = index + 1;
+      if (convert(builder.toHtml, row.md, `row ${number} builder threw`) !== row.html) {
+        fail(`row ${number} builder toHtml mismatch`);
+      }
+      if (convert(builder.toMd, row.html, `row ${number} builder threw`) !== row.md) {
+        fail(`row ${number} builder toMd mismatch`);
+      }
+    });
+
+    const ts = loadTypeScript();
+    const client = instantiateClient(extractConverterSources(ts, paths.client));
+
+    rows.forEach((row, index) => {
+      const number = index + 1;
+      const threw = `row ${number} client threw`;
+      const clientHtml = convert(client.toHtml, row.md, threw);
+      const clientMd = convert(client.toMd, row.html, threw);
+
+      if (clientHtml !== row.html) fail(`row ${number} client toHtml mismatch`);
+      if (clientMd !== row.md) fail(`row ${number} client toMd mismatch`);
+      // The two direct copy-to-copy comparisons are implied by the fixture
+      // equalities above once the builder has been checked against the same
+      // rows. They stay because the contract names all six, and because a
+      // builder that answered differently on a second call would only be
+      // visible here.
+      if (clientHtml !== builder.toHtml(row.md)) fail(`row ${number} toHtml drift`);
+      if (clientMd !== builder.toMd(row.html)) fail(`row ${number} toMd drift`);
+      if (convert(client.toMd, clientHtml, threw) !== row.md) {
+        fail(`row ${number} md round trip mismatch`);
+      }
+      if (convert(client.toHtml, clientMd, threw) !== row.html) {
+        fail(`row ${number} html round trip mismatch`);
+      }
+    });
+
+    process.stdout.write(`PASS inline converter parity: ${rows.length} rows\n`);
+    return 0;
+  } catch (error) {
+    const reason = error instanceof ParityError ? error.message : "unexpected checker failure";
+    process.stderr.write(`FAIL inline converter parity: ${reason}\n`);
+    return 1;
+  }
+}
+
+process.exitCode = await main(process.argv.slice(2));
