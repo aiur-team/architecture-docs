@@ -115,6 +115,7 @@ jobs:
           node scripts/allow-known-runner-failure.mjs scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-m.mjs
+          node scripts/test-p4-q.mjs
 
       - name: edge gate config is fail-closed
         run: |
