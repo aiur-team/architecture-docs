@@ -899,16 +899,134 @@ nav.jump a.history-changed::after {
   unicode-bidi: isolate;
 }
 
+/* P4-L — owner write controls.  Every rule stays inside P3-I's `.share-*`
+   scope, inherits the panel's own colours, and distinguishes disabled, busy
+   and confirmation states by more than colour alone. */
+.share-default-form,
+.share-invite,
+.share-row-controls,
+.share-transfer-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .4rem;
+  margin-top: .5rem;
+  color: inherit;
+}
+
+.share-default-form,
+.share-invite {
+  margin-top: .75rem;
+}
+
+.share-invite {
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border, #e2e6eb);
+}
+
+.share-op-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 8rem;
+  min-width: 0;
+  gap: .2rem;
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.share-op {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 1.9rem;
+  padding: .3rem .45rem;
+  color: var(--ink-2, #49525f);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #cbd2da);
+  border-radius: .4rem;
+  font: 500 .78rem/1.2 var(--sans, system-ui, sans-serif);
+}
+
+button.share-op {
+  flex: none;
+  background: var(--surface-2, #eef1f4);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.share-op:hover:enabled {
+  color: var(--accent, #c0122a);
+  border-color: var(--accent, #c0122a);
+}
+
+.share-op:focus-visible {
+  outline: 2px solid var(--accent, #c0122a);
+  outline-offset: 2px;
+}
+
+/* Disabled is announced by opacity, a dashed border and the not-allowed
+   cursor together, so a forced or monochrome palette still reads it. */
+.share-op:disabled {
+  opacity: .55;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.share-pop[aria-busy="true"] .share-list li,
+.share-pop[aria-busy="true"] .share-default-form,
+.share-pop[aria-busy="true"] .share-invite {
+  opacity: .8;
+}
+
+.share-transfer-confirm {
+  flex-direction: column;
+  align-items: stretch;
+  padding: .5rem;
+  border: 2px dashed var(--border-strong, #cbd2da);
+  border-radius: .5rem;
+}
+
+.share-transfer-confirm p {
+  margin: 0 0 .4rem;
+  font-size: .78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.share-transfer-confirm button.share-op {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 24rem) {
+  .share-op-label {
+    flex-basis: 100%;
+  }
+
+  .share-row-controls button.share-op,
+  .share-invite button.share-op,
+  .share-default-form button.share-op {
+    flex: 1 1 100%;
+  }
+}
+
 @media (forced-colors: active) {
   .share-btn,
   .share-pop,
-  .share-close {
+  .share-close,
+  .share-op,
+  .share-transfer-confirm {
     border: 1px solid CanvasText;
   }
 
   .share-btn:focus-visible,
-  .share-close:focus-visible {
+  .share-close:focus-visible,
+  .share-op:focus-visible {
     outline: 2px solid Highlight;
+  }
+
+  .share-op:disabled {
+    border-style: dashed;
+    opacity: 1;
+    color: GrayText;
   }
 }
 
@@ -921,7 +1039,8 @@ nav.jump a.history-changed::after {
 
 @media (prefers-reduced-motion: reduce) {
   .share-pop,
-  .share-pop * {
+  .share-pop *,
+  .share-op {
     animation: none !important;
     scroll-behavior: auto !important;
     transition: none !important;
@@ -7000,11 +7119,14 @@ function mountSharePanel(event) {
   let docId = session.doc;
   let sessionRole = session.role;
   let mayShare = session.canShare;
+  let maySeeMembers = session.canSeeMembers;
+  let isShared = session.shared;
   let panel = null;
   let heading = null;
   let closeButton = null;
   let status = null;
   let defaultPolicy = null;
+  let memberSection = null;
   let memberList = null;
   let invitationSection = null;
   let invitationList = null;
@@ -7013,6 +7135,24 @@ function mountSharePanel(event) {
   let generation = 0;
   let positionFrame = 0;
   let removed = false;
+
+  /* P4-L write state. Owner authority lives only in these closure fields: it
+     is never read back from the DOM, an attribute, or the cached session
+     event once a transfer or a write-time 403 has put it in doubt. */
+  let defaultForm = null;
+  let defaultSelect = null;
+  let defaultSave = null;
+  let inviteForm = null;
+  let inviteEmail = null;
+  let inviteRole = null;
+  let confirmation = null;
+  let lastOrgDefault = null;
+  let mutationMessage = "";
+  let busy = false;
+  let authorityUnknown = false;
+  let authorityAtRisk = false;
+  let pendingHeadingFocus = false;
+  let latched = null;
 
   const button = document.createElement("button");
   button.id = "doc-share-button";
@@ -7064,7 +7204,7 @@ function mountSharePanel(event) {
     status.setAttribute("aria-live", "polite");
     defaultPolicy = fixedElement("p", "share-default", null);
 
-    const memberSection = fixedElement("section", "share-members", null);
+    memberSection = fixedElement("section", "share-members", null);
     memberSection.setAttribute("aria-labelledby", "doc-share-members-title");
     const memberTitle = fixedElement("h3", "", "People with access");
     memberTitle.id = "doc-share-members-title";
@@ -7101,10 +7241,12 @@ function mountSharePanel(event) {
     invoker = button;
     panel.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    mutationMessage = "";
     status.textContent = "Loading access…";
     if (!positionPanel()) return;
     heading.focus();
-    refreshRoster();
+    if (authorityUnknown) reconcileThenRefresh();
+    else refreshRoster();
   }
 
   function closePanel() {
@@ -7112,6 +7254,19 @@ function mountSharePanel(event) {
     panel.hidden = true;
     button.setAttribute("aria-expanded", "false");
     generation += 1;
+    busy = false;
+    pendingHeadingFocus = false;
+    mutationMessage = "";
+    latched = null;
+    panel.removeAttribute("aria-busy");
+    clearConfirmation(false);
+    if (inviteEmail !== null) inviteEmail.value = "";
+    /* Closing during a transfer or a session reconciliation leaves ownership
+       genuinely unknown; the next open must ask the server, not the cache. */
+    if (authorityAtRisk) {
+      authorityAtRisk = false;
+      demoteAuthority();
+    }
     if (controller !== null) {
       const closingController = controller;
       controller = null;
@@ -7257,10 +7412,28 @@ function mountSharePanel(event) {
       if (!isCurrent(requestGeneration)) return;
       renderRoster(roster);
     } catch (error) {
-      if (isCurrent(requestGeneration)) status.textContent = "Access list could not be refreshed.";
+      if (isCurrent(requestGeneration)) {
+        /* A read failure outranks and replaces any retained mutation result. */
+        mutationMessage = "";
+        status.textContent = "Access list could not be refreshed.";
+      }
     } finally {
       clearTimeout(deadline);
       if (generation === requestGeneration && controller === requestController) controller = null;
+      settleReadUi(requestGeneration);
+    }
+  }
+
+  /* The write controls are re-enabled only once the refresh that follows a
+     mutation has settled, so a second write can never race the read that owns
+     the authoritative state. */
+  function settleReadUi(requestGeneration) {
+    if (removed || panel === null || panel.hidden || generation !== requestGeneration) return;
+    panel.removeAttribute("aria-busy");
+    restoreControlsAfterWrite();
+    if (pendingHeadingFocus) {
+      pendingHeadingFocus = false;
+      heading.focus();
     }
   }
 
@@ -7343,12 +7516,15 @@ function mountSharePanel(event) {
   }
 
   function renderRoster(roster) {
-    const memberRows = roster.members.map((member) => {
+    clearConfirmation(false);
+    const owner = ownerEligible();
+    const memberRows = roster.members.map((member, index) => {
       const row = document.createElement("li");
       const fields = member.name === ""
         ? [member.email, roleLabel(member.role)]
         : [member.name, member.email, roleLabel(member.role)];
       appendIsolatedFields(row, fields);
+      if (owner && index !== 0) row.appendChild(memberControls(member, row));
       return row;
     });
     const invitationRows = roster.invitations.map((invitation) => {
@@ -7359,14 +7535,15 @@ function mountSharePanel(event) {
       date.setAttribute("datetime", invitation.expiresAt);
       date.appendChild(document.createTextNode(invitation.expiresAt.slice(0, 10)));
       row.appendChild(date);
+      if (owner) row.appendChild(invitationControls(invitation));
       return row;
     });
-    const defaultLabels = { commenter: "Commenter", viewer: "Viewer", none: "No access" };
     memberList.replaceChildren(...memberRows);
     invitationList.replaceChildren(...invitationRows);
-    defaultPolicy.textContent = `Organization default: ${defaultLabels[roster.orgDefault]}`;
+    renderOwnerForms(roster.orgDefault, owner);
     invitationSection.hidden = invitationRows.length === 0;
-    status.textContent = "";
+    status.textContent = mutationMessage;
+    latched = null;
     handlePositionChange();
   }
 
@@ -7388,6 +7565,19 @@ function mountSharePanel(event) {
     if (memberList !== null) memberList.replaceChildren();
     if (invitationList !== null) invitationList.replaceChildren();
     if (defaultPolicy !== null) defaultPolicy.textContent = "";
+    confirmation = null;
+    defaultForm = null;
+    defaultSelect = null;
+    defaultSave = null;
+    inviteForm = null;
+    inviteEmail = null;
+    inviteRole = null;
+    lastOrgDefault = null;
+    mutationMessage = "";
+    busy = false;
+    pendingHeadingFocus = false;
+    authorityAtRisk = false;
+    latched = null;
     button.remove();
     if (panel !== null) panel.remove();
     if (controller !== null) {
@@ -7398,8 +7588,521 @@ function mountSharePanel(event) {
     docId = "";
     sessionRole = "";
     mayShare = false;
+    maySeeMembers = false;
+    isShared = false;
     invoker = null;
   }
+
+  /* ------------------------------------------------------------------ *
+   * P4-L — owner-only controls and the single serialized write path.
+   * ------------------------------------------------------------------ */
+
+  /* Owner controls exist only while the latest validated session — the initial
+     event or a reconciliation — still says owner. `authorityUnknown` is the
+     one-way door a transfer or a write-time 403 opens: it can only be closed
+     by a fresh server session, never by the cached event. */
+  function ownerEligible() {
+    return !removed
+      && !authorityUnknown
+      && sessionRole === "owner"
+      && mayShare === true
+      && maySeeMembers === true
+      && isShared === true;
+  }
+
+  function demoteAuthority() {
+    sessionRole = "editor";
+    mayShare = false;
+    authorityUnknown = true;
+    clearConfirmation(false);
+    removeOwnerControls();
+  }
+
+  function opControl(element) {
+    element.classList.add("share-op");
+    return element;
+  }
+
+  function opButton(className, text) {
+    const control = fixedElement("button", className, text);
+    control.setAttribute("type", "button");
+    return opControl(control);
+  }
+
+  function roleSelect(className, roles, selected) {
+    const select = fixedElement("select", className, null);
+    for (const role of roles) {
+      const option = fixedElement("option", "", roleLabel(role));
+      option.value = role;
+      select.appendChild(option);
+    }
+    select.value = selected;
+    return opControl(select);
+  }
+
+  /* The accessible name is label text, so a server address never reaches an
+     attribute, an id, a selector or a live announcement. */
+  function labelled(text, control) {
+    const label = fixedElement("label", "share-op-label", text);
+    label.appendChild(control);
+    return label;
+  }
+
+  /* A write disables every owner control and remembers which ones were
+     already disabled — an unchanged select's Save button, or the row behind an
+     open confirmation — so a failed refresh restores the panel it interrupted
+     rather than enabling a button the roster never justified. */
+  function disableControlsForWrite() {
+    if (panel === null) return;
+    latched = new Set();
+    for (const node of panel.querySelectorAll(".share-op")) {
+      if (node.disabled) latched.add(node);
+      node.disabled = true;
+    }
+  }
+
+  function restoreControlsAfterWrite() {
+    if (panel === null || latched === null) return;
+    const held = latched;
+    latched = null;
+    for (const node of panel.querySelectorAll(".share-op")) node.disabled = held.has(node);
+    if (confirmation !== null && confirmation.controls !== null) {
+      for (const node of confirmation.controls.querySelectorAll(".share-op")) node.disabled = true;
+    }
+  }
+
+  function removeOwnerControls() {
+    clearConfirmation(false);
+    if (inviteForm !== null) {
+      inviteForm.remove();
+      inviteForm = null;
+      inviteEmail = null;
+      inviteRole = null;
+    }
+    if (defaultForm !== null) {
+      defaultForm.remove();
+      defaultForm = null;
+      defaultSelect = null;
+      defaultSave = null;
+    }
+    if (panel !== null) {
+      for (const group of panel.querySelectorAll(".share-row-controls")) group.remove();
+    }
+    if (defaultPolicy !== null && lastOrgDefault !== null) {
+      defaultPolicy.hidden = false;
+      defaultPolicy.textContent = `Organization default: ${DEFAULT_LABELS[lastOrgDefault]}`;
+    }
+  }
+
+  function renderOwnerForms(orgDefault, owner) {
+    lastOrgDefault = orgDefault;
+    if (defaultForm !== null) {
+      defaultForm.remove();
+      defaultForm = null;
+      defaultSelect = null;
+      defaultSave = null;
+    }
+    if (inviteForm !== null) {
+      inviteForm.remove();
+      inviteForm = null;
+      inviteEmail = null;
+      inviteRole = null;
+    }
+    if (!owner) {
+      defaultPolicy.hidden = false;
+      defaultPolicy.textContent = `Organization default: ${DEFAULT_LABELS[orgDefault]}`;
+      return;
+    }
+    defaultPolicy.hidden = true;
+    defaultPolicy.textContent = "";
+    defaultForm = createDefaultForm(orgDefault);
+    inviteForm = createInviteForm();
+    panel.insertBefore(defaultForm, memberSection);
+    panel.insertBefore(inviteForm, memberSection);
+  }
+
+  function createDefaultForm(orgDefault) {
+    const form = fixedElement("div", "share-default-form", null);
+    defaultSelect = roleSelect("share-default-control", ["commenter", "viewer", "none"], orgDefault);
+    defaultSave = opButton("share-default-save", "Save default");
+    defaultSave.disabled = true;
+    defaultSelect.addEventListener("change", () => {
+      defaultSave.disabled = defaultSelect.value === orgDefault;
+    });
+    defaultSave.addEventListener("click", () => {
+      if (defaultSelect.value === orgDefault) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, orgDefault: defaultSelect.value }, false, noop);
+    });
+    form.append(labelled("Organization default", defaultSelect), defaultSave);
+    return form;
+  }
+
+  function createInviteForm() {
+    const form = fixedElement("form", "share-invite", null);
+    form.setAttribute("novalidate", "");
+    inviteEmail = opControl(fixedElement("input", "share-invite-email", null));
+    inviteEmail.setAttribute("type", "email");
+    inviteEmail.setAttribute("autocomplete", "off");
+    inviteEmail.setAttribute("maxlength", "254");
+    inviteRole = roleSelect("share-invite-role", ["commenter", "viewer", "editor"], "commenter");
+    const submit = opControl(fixedElement("button", "share-invite-submit", "Invite"));
+    submit.setAttribute("type", "submit");
+    form.append(labelled("Email", inviteEmail), labelled("Role", inviteRole), submit);
+    form.addEventListener("submit", handleInvite);
+    return form;
+  }
+
+  function handleInvite(event) {
+    event.preventDefault();
+    if (!ownerEligible() || inviteEmail === null) return;
+    if (busy || controller !== null) return;
+    const email = inviteEmail.value.trim().toLowerCase();
+    if (!validInviteEmail(email)) {
+      mutationMessage = "Enter a valid email address.";
+      status.textContent = mutationMessage;
+      return;
+    }
+    const role = inviteRole.value;
+    sendMutation("POST", ACCESS_PATH, { doc: docId, email, role }, false, () => {
+      if (inviteEmail !== null) inviteEmail.value = "";
+    });
+  }
+
+  /* The canonical P2-G grammar: 3–254 bytes, ASCII, one interior `@`. Accepted
+     input is ASCII, so the `maxlength` character cap and the byte ceiling are
+     the same number. */
+  function validInviteEmail(value) {
+    return typeof value === "string" && value.length >= 3 && validEmail(value);
+  }
+
+  function memberControls(member, row) {
+    const target = { sub: member.sub, role: member.role, email: member.email };
+    const group = fixedElement("div", "share-row-controls", null);
+    const select = roleSelect("share-role", ["editor", "commenter", "viewer"], target.role);
+    const save = opButton("share-save-role", "Save role");
+    save.disabled = true;
+    select.addEventListener("change", () => {
+      save.disabled = select.value === target.role;
+    });
+    save.addEventListener("click", () => {
+      if (select.value === target.role) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, sub: target.sub, role: select.value }, false, noop);
+    });
+    const revoke = opButton("share-revoke", "Revoke access");
+    revoke.addEventListener("click", () => {
+      sendMutation("DELETE", ACCESS_PATH, { doc: docId, sub: target.sub }, false, noop);
+    });
+    const transfer = opButton("share-transfer", "Transfer ownership");
+    transfer.addEventListener("click", () => openConfirmation(row, group, transfer, target.sub));
+    group.append(labelled(`Role for ${target.email}`, select), save, revoke, transfer);
+    return group;
+  }
+
+  function invitationControls(invitation) {
+    const target = { email: invitation.email, role: invitation.role };
+    const group = fixedElement("div", "share-row-controls", null);
+    const select = roleSelect("share-role", ["editor", "commenter", "viewer"], target.role);
+    const save = opButton("share-save-role", "Save role");
+    save.disabled = true;
+    select.addEventListener("change", () => {
+      save.disabled = select.value === target.role;
+    });
+    save.addEventListener("click", () => {
+      if (select.value === target.role) return;
+      sendMutation("PATCH", ACCESS_PATH, { doc: docId, email: target.email, role: select.value }, false, noop);
+    });
+    const cancel = opButton("share-cancel-invitation", "Cancel invitation");
+    cancel.addEventListener("click", () => {
+      sendMutation("DELETE", ACCESS_PATH, { doc: docId, email: target.email }, false, noop);
+    });
+    /* P4-J's recovery-only reissue branch: the identical invite body, which
+       changes no access record or expiry and appends no event. */
+    const resend = opButton("share-resend", "Resend setup link");
+    resend.addEventListener("click", () => {
+      sendMutation("POST", ACCESS_PATH, { doc: docId, email: target.email, role: target.role }, false, noop);
+    });
+    group.append(labelled(`Role for ${target.email}`, select), save, cancel, resend);
+    return group;
+  }
+
+  function openConfirmation(row, controls, initiator, sub) {
+    if (!ownerEligible() || busy) return;
+    clearConfirmation(true);
+    const group = fixedElement("div", "share-transfer-confirm", null);
+    group.appendChild(fixedElement("p", "", TRANSFER_WARNING));
+    const confirm = opButton("share-transfer-yes", "Transfer");
+    const cancel = opButton("share-transfer-no", "Cancel");
+    confirm.addEventListener("click", () => {
+      sendMutation("POST", TRANSFER_PATH, { doc: docId, sub }, true, noop);
+    });
+    cancel.addEventListener("click", () => clearConfirmation(true));
+    group.append(confirm, cancel);
+    /* The row's own disabled state is remembered, not assumed: cancelling
+       must not enable a Save button an unchanged select never justified. */
+    const held = new Set();
+    for (const node of controls.querySelectorAll(".share-op")) {
+      if (node.disabled) held.add(node);
+      node.disabled = true;
+    }
+    confirmation = { group, initiator, controls, held };
+    row.appendChild(group);
+    confirm.focus();
+  }
+
+  function clearConfirmation(restoreFocus) {
+    if (confirmation === null) return;
+    const open = confirmation;
+    confirmation = null;
+    open.group.remove();
+    if (open.controls !== null && !busy && open.controls.isConnected) {
+      for (const node of open.controls.querySelectorAll(".share-op")) node.disabled = open.held.has(node);
+    }
+    if (restoreFocus && open.initiator !== null && open.initiator.isConnected) open.initiator.focus();
+  }
+
+  function noop() {}
+
+  /* One state machine serves every control. There is at most one in-flight
+     request across mutation, session and roster work, no queue, no retry, and
+     no response body is ever read from a mutation: the following GET owns
+     every visible authoritative value. */
+  async function sendMutation(method, path, body, isTransfer, onAccepted) {
+    if (removed || busy || controller !== null) return;
+    if (panel === null || panel.hidden || !ownerEligible()) return;
+    let endpoint;
+    try {
+      endpoint = new URL(path, location.origin);
+    } catch (error) {
+      return;
+    }
+    if (endpoint.origin !== location.origin) return;
+
+    const requestGeneration = generation;
+    const requestController = new AbortController();
+    busy = true;
+    if (isTransfer) authorityAtRisk = true;
+    controller = requestController;
+    panel.setAttribute("aria-busy", "true");
+    disableControlsForWrite();
+    status.textContent = "Updating access…";
+    const deadline = setTimeout(() => requestController.abort(), 15_000);
+    let outcome = null;
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body),
+        signal: requestController.signal,
+      });
+      if (!isCurrent(requestGeneration)) return;
+      const code = response.status;
+      if (response.redirected === true) outcome = "ambiguous";
+      else if (code === 401) outcome = "unauthorized";
+      else if (code === 403) outcome = "forbidden";
+      else if (code === 204) outcome = "ok";
+      else if (code === 400 || code === 404 || code === 413 || code === 415 || code === 429
+        || (code === 409 && !isTransfer)) outcome = "rejected";
+      else outcome = "ambiguous";
+    } catch (error) {
+      if (isCurrent(requestGeneration)) outcome = "ambiguous";
+    } finally {
+      clearTimeout(deadline);
+      busy = false;
+      if (controller === requestController) controller = null;
+    }
+    if (outcome === null || !isCurrent(requestGeneration)) return;
+
+    if (outcome === "unauthorized") {
+      removeFeature();
+      return;
+    }
+    if (outcome === "ok") {
+      clearConfirmation(false);
+      onAccepted();
+      mutationMessage = "Access updated.";
+    } else if (outcome === "forbidden") {
+      mutationMessage = "Your access changed.";
+    } else if (outcome === "rejected") {
+      mutationMessage = "Access change was not accepted.";
+    } else {
+      mutationMessage = "Access change could not be completed.";
+    }
+    status.textContent = mutationMessage;
+    pendingHeadingFocus = true;
+
+    /* A completed transfer, an ambiguous transfer, and any write-time 403 all
+       mean the cached owner authority may be a lie. Give it up before the read
+       and let the server say what this session is now. */
+    const reconcile = outcome === "forbidden"
+      || (isTransfer && (outcome === "ok" || outcome === "ambiguous"));
+    if (!reconcile) {
+      if (isTransfer) authorityAtRisk = false;
+      refreshRoster();
+      return;
+    }
+    demoteAuthority();
+    authorityAtRisk = true;
+    if (!await refreshSession(requestGeneration)) return;
+    refreshRoster();
+  }
+
+  async function reconcileThenRefresh() {
+    const requestGeneration = generation;
+    if (!await refreshSession(requestGeneration)) return;
+    refreshRoster();
+  }
+
+  /* P2-C's exact session transport, repeated once. This is P4-L's deliberate
+     successor exception to the single startup probe: it dispatches no event,
+     touches no `data-session`, and amends no other module. */
+  async function refreshSession(requestGeneration) {
+    if (!isCurrent(requestGeneration) || controller !== null) return false;
+    const endpoint = new URL("/api/session", location.href);
+    endpoint.searchParams.set("doc", docId);
+    const requestController = new AbortController();
+    controller = requestController;
+    const timer = setTimeout(() => requestController.abort(), 2_000);
+    let refreshed = null;
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        mode: "same-origin",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "application/json" },
+        signal: requestController.signal,
+      });
+      if (response.status === 200) {
+        const header = response.headers.get("content-type");
+        if (header !== null && isJsonContentType(header)) {
+          const parsed = await response.json();
+          refreshed = validFinalSession(parsed);
+          if (refreshed !== null) deepFreeze(refreshed);
+        }
+      }
+    } catch (error) {
+      refreshed = null;
+    } finally {
+      clearTimeout(timer);
+      if (controller === requestController) controller = null;
+    }
+    if (removed) return false;
+    if (!isCurrent(requestGeneration)) {
+      /* A close during reconciliation leaves authority unknown on purpose. */
+      return false;
+    }
+    if (refreshed === null) {
+      removeFeature();
+      return false;
+    }
+    sessionRole = refreshed.role;
+    mayShare = refreshed.canShare;
+    maySeeMembers = refreshed.canSeeMembers;
+    isShared = refreshed.shared;
+    authorityUnknown = false;
+    authorityAtRisk = false;
+    if (!ownerEligible()) removeOwnerControls();
+    return true;
+  }
+
+  /* The complete thirteen-field P3-H final session, plus the only two
+     internally consistent shapes that may keep a Share surface open. */
+  function validFinalSession(body) {
+    if (!isRecord(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
+    for (const field of FINAL_SESSION_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(body, field)) return null;
+    }
+    if (typeof body.sub !== "string" || typeof body.email !== "string"
+      || typeof body.name !== "string") return null;
+    if (!Array.isArray(body.roles) || body.roles.length !== 1) return null;
+    if (body.roles[0] !== "member" && body.roles[0] !== "guest") return null;
+    if (typeof body.canComment !== "boolean" || typeof body.canEdit !== "boolean") return null;
+    if (body.doc !== docId) return null;
+    if (!SESSION_ROLES.includes(body.role)) return null;
+    if (typeof body.shared !== "boolean" || typeof body.canSuggest !== "boolean"
+      || typeof body.canAccept !== "boolean" || typeof body.canShare !== "boolean"
+      || typeof body.canSeeMembers !== "boolean") return null;
+    if (body.shared !== true || body.canSeeMembers !== true) return null;
+    const consistent = (body.role === "owner" && body.canShare === true)
+      || (body.role === "editor" && body.canShare === false);
+    return consistent ? body : null;
+  }
+
+  function deepFreeze(root) {
+    const stack = [root];
+    const ordered = [];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      ordered.push(current);
+      for (const field of Object.keys(current)) {
+        const child = current[field];
+        if (child !== null && typeof child === "object") stack.push(child);
+      }
+    }
+    for (let index = ordered.length - 1; index >= 0; index -= 1) Object.freeze(ordered[index]);
+    return root;
+  }
+
+  /* P2-C's single accepted content-type grammar. */
+  function isJsonContentType(value) {
+    if (typeof value !== "string") return false;
+    const length = value.length;
+    let at = 0;
+    const ows = () => {
+      while (at < length) {
+        const code = value.charCodeAt(at);
+        if (code === 32 || code === 9) at += 1;
+        else return;
+      }
+    };
+    const lower = (code) => (code >= 65 && code <= 90 ? code + 32 : code);
+    const word = (expected) => {
+      if (at + expected.length > length) return false;
+      for (let index = 0; index < expected.length; index += 1) {
+        if (lower(value.charCodeAt(at)) !== expected.charCodeAt(index)) return false;
+        at += 1;
+      }
+      return true;
+    };
+    ows();
+    if (!word("application")) return false;
+    if (at >= length || value.charCodeAt(at) !== 47) return false;
+    at += 1;
+    if (!word("json")) return false;
+    ows();
+    if (at === length) return true;
+    if (value.charCodeAt(at) !== 59) return false;
+    at += 1;
+    ows();
+    if (!word("charset")) return false;
+    if (at >= length || value.charCodeAt(at) !== 61) return false;
+    at += 1;
+    if (at < length && value.charCodeAt(at) === 34) {
+      at += 1;
+      if (!word("utf-8")) return false;
+      if (at >= length || value.charCodeAt(at) !== 34) return false;
+      at += 1;
+    } else if (!word("utf-8")) {
+      return false;
+    }
+    ows();
+    return at === length;
+  }
+
+  const ACCESS_PATH = "/api/access";
+  const TRANSFER_PATH = "/api/access/transfer";
+  const TRANSFER_WARNING = "Transfer ownership to this person? You will become an editor."
+    + " If setup stops during transfer, the new owner may need to invite you again.";
+  const DEFAULT_LABELS = { commenter: "Commenter", viewer: "Viewer", none: "No access" };
+  const FINAL_SESSION_FIELDS = [
+    "sub", "email", "name", "roles", "canComment", "canEdit",
+    "doc", "role", "shared", "canSuggest", "canAccept", "canShare", "canSeeMembers",
+  ];
+  const SESSION_ROLES = ["owner", "editor", "commenter", "viewer", "none"];
 }
 
 </script>
