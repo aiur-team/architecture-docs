@@ -45,7 +45,12 @@ drift from the CSS.
 templates/check-dist        # rebuild every document; fail if committed dist/ changed
 scripts/scrub-check.sh      # fail if private context reached this repository
 npm --prefix templates/docbuild run check   # typecheck
+node scripts/test-p4-a.mjs  # the comment write path, in a real browser
 ```
+
+`test-p4-a.mjs` is slower than the rest: it installs a pinned Playwright and Chromium into a temporary
+root of its own on every run, and removes it afterwards. It drives `templates/base/comments.js` through
+a real engine because the write path is defined in terms of Selection, Range and focus.
 
 `check-dist` is the acceptance test that let the builder be rewritten twice — Python, then Rust, then
 TypeScript — without altering a single byte of any document's output.

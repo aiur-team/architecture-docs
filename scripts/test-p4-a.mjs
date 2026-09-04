@@ -550,34 +550,94 @@ async function selectAndSettle(page, a, b) {
 const SELECTION_SETTLE_MS = 400;
 
 /* The transient tooltip host is the one element this module positions itself,
-   so `position: fixed` on a direct child of the body identifies it. */
-async function waitForTooltip(page) {
+   so `position: fixed` on a direct child of the body identifies it.  The
+   description is spelled out once and quoted in every failure, because a
+   selector that resolves to nothing is the failure these helpers exist to
+   report by name. */
+const TOOLTIP_HOST = "a direct child of <body> carrying style.position === 'fixed'";
+
+/* The host is not stable the moment it first appears.  `selectionchange` is
+   dispatched from a queued task, so it can land *after* the `mouseup` that
+   already showed the tooltip; the client's own handler then removes the host
+   and schedules a 250 ms trailing rebuild.  Any wait that is followed by a
+   separate measuring round trip can therefore observe the first, doomed host
+   and measure the gap after it.  Locally the queued task always won the race
+   and the gap never opened; in GitHub Actions it did, and the measurement read
+   `undefined.getBoundingClientRect()` (#124).  Every helper below either waits
+   past that rebuild or waits and acts inside one page function. */
+
+/* The page's own account of itself, for a failure that has to explain why no
+   tooltip was there rather than throw a TypeError from inside the browser.
+   `hostRect` separates "never appeared" from "appeared but never laid out". */
+const tooltipState = (page) => page.evaluate(() => {
+  const hosts = [...document.body.children].filter((node) => node.style && node.style.position === "fixed");
+  const host = hosts[hosts.length - 1];
+  const rect = host === undefined ? null : host.getBoundingClientRect();
+  return {
+    fixedChildren: hosts.length,
+    hostRect: rect === null ? null : { w: rect.width, h: rect.height, x: rect.left, y: rect.top },
+    hostButton: host === undefined ? null : host.querySelector("button") !== null,
+    panel: document.getElementById("doc-comments-panel") !== null,
+    panelHidden: (document.getElementById("doc-comments-panel") || {}).hidden === true,
+    draftOpen: document.querySelector(".doc-comments-draft") !== null,
+    selection: document.getSelection().toString(),
+    status: (document.getElementById("doc-comments-status") || {}).textContent || null,
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+  };
+});
+
+/* A page that has gone away cannot describe itself, and that must not become
+   the error the caller sees instead of the one it was already reporting. */
+const describe = (page) => tooltipState(page).then(JSON.stringify, (error) => `unavailable: ${String(error).split("\n")[0]}`);
+
+const firstLine = (error) => String(error && error.message ? error.message : error).split("\n")[0];
+
+/* Poll until a host exists *and* has been laid out, then hand back everything
+   a caller could want to assert, measured in the same turn that found it. */
+async function tooltipGeometry(page, label, { timeout = 5000 } = {}) {
+  let handle;
   try {
-    await page.waitForFunction(
-      () => [...document.body.children].some((node) => node.style && node.style.position === "fixed"),
-      null,
-      { timeout: 5000 },
-    );
+    handle = await page.waitForFunction(() => {
+      const hosts = [...document.body.children].filter((node) => node.style && node.style.position === "fixed");
+      const host = hosts[hosts.length - 1];
+      if (host === undefined) return null;
+      const rect = host.getBoundingClientRect();
+      /* A host that is present but not yet measurable is not a result; the
+         poll simply has not finished waiting for layout. */
+      if (rect.width === 0 || rect.height === 0) return null;
+      return {
+        text: host.textContent,
+        left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+        width: rect.width, height: rect.height,
+        inner: { w: window.innerWidth, h: window.innerHeight },
+      };
+    }, null, { timeout });
   } catch (error) {
-    const state = await page.evaluate(() => ({
-      panel: document.getElementById("doc-comments-panel") !== null,
-      draftOpen: document.querySelector(".doc-comments-draft") !== null,
-      selection: document.getSelection().toString(),
-      status: (document.getElementById("doc-comments-status") || {}).textContent || null,
-    }));
-    throw new Error(`no tooltip appeared: ${JSON.stringify(state)}`);
+    throw new Error(`${label}: no measurable tooltip host (${TOOLTIP_HOST}) within ${timeout} ms [${firstLine(error)}]: ${await describe(page)}`);
+  }
+  return handle.jsonValue();
+}
+
+/* Finding the button and pressing it are one page function on purpose: a
+   rebuilt host between the two would leave the click on a detached node. */
+async function clickTooltipButton(page, label, { timeout = 5000 } = {}) {
+  try {
+    await page.waitForFunction(() => {
+      const hosts = [...document.body.children].filter((node) => node.style && node.style.position === "fixed");
+      const host = hosts[hosts.length - 1];
+      const button = host === undefined ? null : host.querySelector("button");
+      if (button === null) return false;
+      button.click();
+      return true;
+    }, null, { timeout });
+  } catch (error) {
+    throw new Error(`${label}: no tooltip button to press (${TOOLTIP_HOST} > button) within ${timeout} ms [${firstLine(error)}]: ${await describe(page)}`);
   }
 }
 
-async function openTooltipDraft(page) {
-  await waitForTooltip(page);
-  await page.waitForFunction(() => {
-    const host = [...document.body.children].filter((node) => node.style && node.style.position === "fixed").pop();
-    const button = host === undefined ? null : host.querySelector("button");
-    if (button === null) return false;
-    button.click();
-    return true;
-  }, null, { timeout: 5000 });
+async function openTooltipDraft(page, label = "tooltip draft") {
+  await tooltipGeometry(page, label);
+  await clickTooltipButton(page, label);
   await page.waitForSelector("#doc-comments-draft-body");
 }
 
@@ -1430,6 +1490,12 @@ function inventedApi(state) {
   };
 }
 
+/* Every context in this matrix pins its own viewport.  Playwright's default is
+   already fixed, but the clamping assertions below compare against these
+   numbers, and a context that inherited them silently would make the next
+   headless-vs-headed difference look like a client bug. */
+const VIEWPORT = { viewport: { width: 1280, height: 900 } };
+
 async function browserMatrix() {
   const chromium = await loadChromium();
   const browser = await chromium.launch();
@@ -1453,28 +1519,31 @@ async function browserMatrix() {
   try {
     /* -- a real pointer drag across nested inline markup -------------- */
     {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const context = await browser.newContext(VIEWPORT);
       const { page, errors } = await open(context);
-      const box = await page.locator('p[data-aid="a44f0e1b7"] strong').boundingBox();
+      const target = page.locator('p[data-aid="a44f0e1b7"] strong');
+      /* Measure the drag target only once it is actually laid out, so a
+         missing or zero-sized element reports the selector rather than
+         reading `x` off `null`. */
+      await target.waitFor({ state: "visible", timeout: 5000 });
+      const box = await target.boundingBox();
+      assert.ok(box !== null && box.width > 0 && box.height > 0,
+        `pointer drag: p[data-aid="a44f0e1b7"] strong has no layout box to drag across: ${JSON.stringify(box)}`);
       await page.mouse.move(box.x + 2, box.y + box.height / 2);
       await page.mouse.down();
       await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 12 });
       await page.mouse.up();
-      await page.waitForFunction(() => [...document.body.children].some((n) => n.style && n.style.position === "fixed"));
+      /* The drag's last `selectionchange` may still be queued behind the
+         `mouseup`; wait past the rebuild it triggers before measuring. */
+      await page.waitForTimeout(SELECTION_SETTLE_MS);
 
-      const tooltip = await page.evaluate(() => {
-        const host = [...document.body.children].filter((n) => n.style && n.style.position === "fixed").pop();
-        const rect = host.getBoundingClientRect();
-        return { text: host.textContent, left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-      });
+      const tooltip = await tooltipGeometry(page, "pointer drag");
       assert.equal(tooltip.text, "Comment");
-      assert.ok(tooltip.left >= 0 && tooltip.top >= 0 && tooltip.right <= 1280 && tooltip.bottom <= 900, "the tooltip is clamped into the viewport");
+      assert.ok(tooltip.left >= 0 && tooltip.top >= 0 && tooltip.right <= VIEWPORT.viewport.width && tooltip.bottom <= VIEWPORT.viewport.height,
+        `the tooltip is clamped into the viewport: ${JSON.stringify(tooltip)}`);
 
       const before = await page.evaluate(() => document.querySelector("main").innerHTML);
-      await page.evaluate(() => {
-        const host = [...document.body.children].filter((n) => n.style && n.style.position === "fixed").pop();
-        host.querySelector("button").click();
-      });
+      await clickTooltipButton(page, "pointer drag");
       await page.waitForSelector("#doc-comments-draft-body");
       await page.fill("#doc-comments-draft-body", "A real comment typed into a real browser.");
       await page.click(".doc-comments-draft button[type=submit]");
@@ -1497,7 +1566,7 @@ async function browserMatrix() {
 
     /* -- keyboard only: tab to the panel, reply, resolve -------------- */
     {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const context = await browser.newContext(VIEWPORT);
       const { page, errors } = await open(context);
       await page.focus("#doc-comments-toggle");
       await page.keyboard.press("Enter");
@@ -1544,23 +1613,21 @@ async function browserMatrix() {
     /* -- narrow, zoomed, dark and forced-colors all stay usable ------- */
     for (const [name, contextOptions, prepare] of [
       ["narrow", { viewport: { width: 380, height: 720 } }, null],
-      ["200% zoom", { viewport: { width: 1280, height: 900 } }, (page) => page.evaluate(() => { document.documentElement.style.zoom = "200%"; })],
-      ["dark", { viewport: { width: 1280, height: 900 }, colorScheme: "dark" }, null],
-      ["forced colors", { viewport: { width: 1280, height: 900 }, forcedColors: "active" }, null],
+      ["200% zoom", VIEWPORT, (page) => page.evaluate(() => { document.documentElement.style.zoom = "200%"; })],
+      ["dark", { ...VIEWPORT, colorScheme: "dark" }, null],
+      ["forced colors", { ...VIEWPORT, forcedColors: "active" }, null],
     ]) {
       const context = await browser.newContext(contextOptions);
       const { page, errors } = await open(context);
       if (prepare !== null) await prepare(page);
       await page.click("#doc-comments-toggle");
       await page.waitForSelector("#doc-comments-panel:not([hidden])");
-      await page.evaluate(() => window.__t.select({ sel: 'p[data-aid="a31b7c9d2"]', at: 4 }, { sel: 'p[data-aid="a31b7c9d2"]', at: 13 }));
-      await page.evaluate(() => window.__t.mouseup());
-      await page.waitForFunction(() => [...document.body.children].some((n) => n.style && n.style.position === "fixed"));
-      const geometry = await page.evaluate(() => {
-        const host = [...document.body.children].filter((n) => n.style && n.style.position === "fixed").pop();
-        const rect = host.getBoundingClientRect();
-        return { width: rect.width, height: rect.height, left: rect.left, top: rect.top, inner: { w: window.innerWidth, h: window.innerHeight } };
-      });
+      /* `selectAndSettle` waits out the trailing selection timer, so the host
+         measured below is the rebuilt one and not the doomed first host. */
+      await selectAndSettle(page, { sel: 'p[data-aid="a31b7c9d2"]', at: 4 }, { sel: 'p[data-aid="a31b7c9d2"]', at: 13 });
+      const geometry = await tooltipGeometry(page, name);
+      /* `tooltipGeometry` will not return an unlaid-out host, so this holds by
+         construction; it stays as the statement of what the row is about. */
       assert.ok(geometry.width > 0 && geometry.height > 0, `${name}: the tooltip is rendered`);
       assert.ok(geometry.left >= 0 && geometry.top >= 0, `${name}: the tooltip is on screen`);
       assert.ok(geometry.left <= geometry.inner.w && geometry.top <= geometry.inner.h, `${name}: the tooltip is inside the viewport`);
@@ -1573,7 +1640,7 @@ async function browserMatrix() {
       const root = process.env.P4A_ROOT;
       const file = join(root, "p4a-file-mode.html");
       writeFileSync(file, state.body, { mode: 0o600 });
-      const context = await browser.newContext();
+      const context = await browser.newContext(VIEWPORT);
       const page = await context.newPage();
       const seen = [];
       page.on("request", (request) => seen.push(request.url()));

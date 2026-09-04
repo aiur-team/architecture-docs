@@ -54,6 +54,16 @@ jobs:
             templates/docbuild/dist/anchors.test.js
           node --test scripts/connect.test.mjs
 
+      # The P4-A write path's only automated guard. It is a standalone
+      # supervisor rather than a `node --test` file, so it is invoked directly,
+      # and it installs a pinned Playwright and Chromium into a temporary root
+      # of its own — the price of the write path having a gate at all. #107 /
+      # PR #116 wires this and its P4-B sibling up as part of a wider CI audit;
+      # this step exists so the browser-matrix fix in #124 is actually proved
+      # in Actions rather than only on a developer machine.
+      - name: P4-A write path
+        run: node scripts/test-p4-a.mjs
+
       - name: edge gate config is fail-closed
         run: |
           node --input-type=module <<'NODE'
