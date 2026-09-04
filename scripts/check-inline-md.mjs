@@ -5,10 +5,10 @@
  * every committed conformance row.
  *
  * P2-D owns `templates/docbuild/src/inline_md.ts` and the 12-row fixture.
- * P4-B carries the same algorithm into `templates/base/edit.js` as four private
- * top-level declarations so the dependency-free page can render and edit
- * pending text. Two copies of one algorithm drift silently; this check turns
- * that drift into a deterministic CI failure.
+ * P4-B carries the same algorithm into `templates/base/edit.js` as the same
+ * private top-level declarations P2-D uses, so the dependency-free page can
+ * render and edit pending text. Two copies of one algorithm drift silently;
+ * this check turns that drift into a deterministic CI failure.
  *
  * Deliberately absent: a normaliser twin. P1-D publishes one compiled `norm()`
  * that both the builder and `window.doc.anchor.norm` execute, so there is no
@@ -16,7 +16,7 @@
  *
  * The check adds no dependency. It parses the browser module with the
  * repository's already-pinned TypeScript compiler, evaluates only the exact
- * source bytes of the four declarations inside a fresh `node:vm` context with
+ * source bytes of those declarations inside a fresh `node:vm` context with
  * code generation disabled, and never executes the rest of `edit.js`.
  *
  * Output contract: exactly one success line on stdout and exit 0, or exactly
@@ -47,15 +47,31 @@ const EXPECTED_ROWS = 12;
 const ROW_KEYS = ["md", "html"];
 
 /**
- * The four private top-level declarations P4-B must keep in `edit.js`, in
- * reporting order. They are a test seam inside one browser module, not a new
- * global or public API.
+ * The private top-level declarations P4-B must keep in `edit.js`, in reporting
+ * and evaluation order. They are a test seam inside one browser module, not a
+ * new global or public API.
+ *
+ * `form` is the exact shape each binding must take, because the canonical P2-D
+ * module the browser copy must stay byte-compatible with declares its shared
+ * `replaceLiteral` helper as a `const` arrow and the other four as plain
+ * function declarations. Accepting only the exact canonical form keeps the
+ * extraction as narrow as the four-declaration original: any other shape of
+ * these names is not a converter, it is a rebinding.
  */
-const CONVERTERS = ["untag", "wrap", "toMd", "toHtml"];
+const CONVERTERS = [
+  { name: "replaceLiteral", form: "const" },
+  { name: "untag", form: "function" },
+  { name: "wrap", form: "function" },
+  { name: "toMd", form: "function" },
+  { name: "toHtml", form: "function" },
+];
+
+/** Just the declaration names, for the rebinding and free-reference gates. */
+const CONVERTER_NAMES = CONVERTERS.map((entry) => entry.name);
 
 /**
  * The only free identifiers a converter declaration may reference besides the
- * other three: ECMAScript primitives. Every host surface — DOM, storage,
+ * other four: ECMAScript primitives. Every host surface — DOM, storage,
  * network, locale, timers, Node — is absent, and so are `eval` and `Function`.
  */
 const ALLOWED_GLOBALS = new Set([
@@ -218,10 +234,10 @@ function loadTypeScript() {
 }
 
 /**
- * Parse the browser module and return the exact source bytes of the four
- * converter declarations. The rest of the file is never evaluated, and a form
- * too dynamic to extract safely fails closed rather than being reached by
- * importing the whole module.
+ * Parse the browser module and return the exact source bytes of the converter
+ * declarations. The rest of the file is never evaluated, and a form too dynamic
+ * to extract safely fails closed rather than being reached by importing the
+ * whole module.
  */
 function extractConverterSources(ts, path) {
   let text;
@@ -244,36 +260,72 @@ function extractConverterSources(ts, path) {
   if (diagnostics.length > 0) fail("client source does not parse");
 
   const found = new Map();
-  for (const statement of source.statements) {
-    if (!ts.isFunctionDeclaration(statement) || statement.name === undefined) continue;
-    const name = statement.name.text;
-    if (!CONVERTERS.includes(name)) continue;
+  // Every binding below is one the module is allowed to introduce for a
+  // converter name; `requireNoConverterWrites` treats every other one as a
+  // rebinding, so this set is exactly the exemption list it needs.
+  const accepted = new Set();
+
+  const record = (name, entry) => {
     if (found.has(name)) fail(`duplicate ${name} declaration`);
-    found.set(name, statement);
+    found.set(name, entry);
+  };
+
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
+      const name = statement.name.text;
+      if (!CONVERTER_NAMES.includes(name)) continue;
+      record(name, { statement, declaration: statement, fn: statement, form: "function" });
+      continue;
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    const list = statement.declarationList;
+    for (const declaration of list.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue;
+      const name = declaration.name.text;
+      if (!CONVERTER_NAMES.includes(name)) continue;
+      // Anything but a lone `const <name> = (...) => ...` is left unrecorded on
+      // purpose, so it surfaces as the rebinding it is rather than as a
+      // converter this checker would then extract and trust.
+      if (
+        (list.flags & ts.NodeFlags.Const) === 0 ||
+        list.declarations.length !== 1 ||
+        declaration.initializer === undefined ||
+        !ts.isArrowFunction(declaration.initializer)
+      ) {
+        continue;
+      }
+      record(name, { statement, declaration, fn: declaration.initializer, form: "const" });
+      accepted.add(declaration);
+    }
   }
 
-  for (const name of CONVERTERS) {
-    if (!found.has(name)) fail(`missing ${name} declaration`);
+  for (const entry of CONVERTERS) {
+    const declared = found.get(entry.name);
+    if (declared === undefined || declared.form !== entry.form) {
+      fail(`missing ${entry.name} declaration`);
+    }
   }
 
   // Extracting the declaration is only proof of what the browser runs while
   // the declaration is still what the name resolves to. `edit.js` is one
   // module, so a single later `toHtml = ...` silently swaps the function the
   // page calls while leaving this checker looking at the original bytes.
-  requireNoConverterWrites(ts, source);
+  requireNoConverterWrites(ts, source, accepted);
 
   const sources = [];
-  for (const name of CONVERTERS) {
-    const declaration = found.get(name);
-    const isAsync = (declaration.modifiers ?? []).some(
+  for (const entry of CONVERTERS) {
+    const { statement, declaration, fn } = found.get(entry.name);
+    const isAsync = (fn.modifiers ?? []).some(
       (modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword,
     );
-    if (isAsync || declaration.asteriskToken !== undefined) {
-      fail(`${name} declaration is async or a generator`);
+    if (isAsync || fn.asteriskToken !== undefined) {
+      fail(`${entry.name} declaration is async or a generator`);
     }
-    if (declaration.body === undefined) fail(`${name} declaration has no body`);
-    requireClosedDeclaration(ts, declaration, name);
-    sources.push(text.slice(declaration.getStart(source), declaration.getEnd()));
+    if (fn.body === undefined) fail(`${entry.name} declaration has no body`);
+    requireClosedDeclaration(ts, declaration, entry.name);
+    // The whole statement, so the `const` form arrives as a binding rather than
+    // as a bare arrow expression.
+    sources.push(text.slice(statement.getStart(source), statement.getEnd()));
   }
   return sources;
 }
@@ -342,7 +394,7 @@ function scopeBindings(ts, scope) {
 }
 
 /**
- * Reject any write to one of the four converter names anywhere in the browser
+ * Reject any write to one of the converter names anywhere in the browser
  * module, unless the enclosing scope declares its own binding of that name.
  *
  * Without this the check is bypassable by one line. `function toHtml(...) {}`
@@ -351,7 +403,7 @@ function scopeBindings(ts, scope) {
  * whose editor runs the replacement. That is precisely the drift this gate
  * exists to make impossible, so a rebinding fails closed.
  */
-function requireNoConverterWrites(ts, source) {
+function requireNoConverterWrites(ts, source, accepted) {
   const isAssignment = (kind) =>
     kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 
@@ -359,7 +411,7 @@ function requireNoConverterWrites(ts, source) {
   const reportTarget = (node, shadowed) => {
     if (node === undefined) return;
     if (ts.isIdentifier(node)) {
-      if (CONVERTERS.includes(node.text) && !shadowed.has(node.text)) {
+      if (CONVERTER_NAMES.includes(node.text) && !shadowed.has(node.text)) {
         fail(`${node.text} declaration is rebound`);
       }
       return;
@@ -414,8 +466,8 @@ function requireNoConverterWrites(ts, source) {
     ts.forEachChild(node, (child) => visit(child, scope));
   };
 
-  // At module scope the four names are the declarations themselves, so nothing
-  // shadows them there.
+  // At module scope the converter names are the declarations themselves, so
+  // nothing shadows them there.
   ts.forEachChild(source, (child) => visit(child, new Set()));
 
   /**
@@ -430,7 +482,7 @@ function requireNoConverterWrites(ts, source) {
     const flag = (name) => {
       if (name === undefined) return;
       if (ts.isIdentifier(name)) {
-        if (CONVERTERS.includes(name.text)) fail(`${name.text} declaration is rebound`);
+        if (CONVERTER_NAMES.includes(name.text)) fail(`${name.text} declaration is rebound`);
         return;
       }
       if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
@@ -440,7 +492,10 @@ function requireNoConverterWrites(ts, source) {
       }
     };
 
-    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) flag(node.name);
+    // The one accepted `const` converter binding is the declaration itself.
+    if (ts.isVariableDeclaration(node) || ts.isBindingElement(node)) {
+      if (!accepted.has(node)) flag(node.name);
+    }
     if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.name !== undefined) {
       flag(node.name);
     }
@@ -456,8 +511,8 @@ function requireNoConverterWrites(ts, source) {
 }
 
 /**
- * Require that a declaration is closed over nothing but the other three
- * converters and ECMAScript primitives, and that it uses no escape hatch.
+ * Require that a declaration is closed over nothing but the other converter
+ * declarations and ECMAScript primitives, and that it uses no escape hatch.
  *
  * Bound names are over-collected on purpose: a local that shadows a global name
  * can only reach the local, so treating every declared name in the function as
@@ -534,7 +589,7 @@ function requireClosedDeclaration(ts, declaration, name) {
 
   for (const reference of references) {
     if (bound.has(reference)) continue;
-    if (CONVERTERS.includes(reference)) continue;
+    if (CONVERTER_NAMES.includes(reference)) continue;
     if (ALLOWED_GLOBALS.has(reference)) continue;
     fail(`${name} declaration references a forbidden identifier`);
   }
@@ -579,8 +634,8 @@ function isReference(ts, node) {
 }
 
 /**
- * Evaluate the four exact declaration slices — and nothing else from the
- * browser module — in a fresh context with code generation disabled.
+ * Evaluate the exact declaration slices — and nothing else from the browser
+ * module — in a fresh context with code generation disabled.
  */
 function instantiateClient(sources) {
   const context = vm.createContext(Object.create(null), {
