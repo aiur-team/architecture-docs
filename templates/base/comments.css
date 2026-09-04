@@ -18,6 +18,13 @@
 .doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
 .doc-comment-marker[hidden]{display:none}
 .doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+/* P4-Q: the rail carries two kinds.  A suggestion marker keeps the comment
+   marker's box, border weight and accessible name and differs only in colour,
+   so forced colours and print see one shape and one label either way. */
+.doc-rail-suggestion{border-color:var(--info,#2A5DB0);background:var(--info-soft,#E7EEFA);color:var(--info,#2A5DB0)}
+@media (prefers-color-scheme:dark){
+  .doc-rail-suggestion{border-color:var(--info,#7FA8F0);background:var(--info-soft,#1A2333);color:var(--info,#7FA8F0)}
+}
 
 /* ---- non-mutating fallback when custom highlights are unavailable ---- */
 .doc-comment-block{border-inline-start:3px solid var(--warn,#A85B00);background-color:var(--warn-soft,#FBF0DF);padding-inline-start:8px}
@@ -51,6 +58,12 @@
 .doc-comments-author{font-weight:600;color:var(--doc-comments-ink)}
 .doc-comments-edited{font-style:italic}
 .doc-comments-empty{color:var(--doc-comments-ink-2)}
+/* P4-Q: the one section a second client may render into.  It inherits the
+   panel's width, wrapping and overflow rules; everything inside it is styled
+   by whoever registered the renderer. */
+.doc-panel-extension{display:block;margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}
+.doc-panel-extension:empty{display:none}
+.doc-panel-extension-empty{margin:14px 0 0;color:var(--doc-comments-ink-2)}
 
 /* ---- keyboard focus ---- */
 #doc-comments-toggle:focus-visible,#doc-comments-panel :focus-visible,.doc-comment-marker:focus-visible{outline:2px solid var(--doc-comments-accent,var(--accent,#C0122A));outline-offset:2px}
@@ -63,10 +76,12 @@
 
 /* ---- motion, forced colours, print ---- */
 @media (prefers-reduced-motion:reduce){
-  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card{animation-duration:0s;transition-duration:0s}
+  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card,.doc-panel-extension{animation-duration:0s;transition-duration:0s}
 }
 @media (forced-colors:active){
   #doc-comments-panel{border:1px solid CanvasText}
+  .doc-comment-marker{border:1px solid CanvasText;background:Canvas;color:CanvasText}
+  .doc-comment-marker-active{border:2px solid Highlight}
   .doc-comment-block{border-inline-start:3px solid CanvasText}
   .doc-comment-block-active{outline:2px solid Highlight}
 }
