@@ -950,17 +950,31 @@ try {
     return child;
   };
 
-  mkdirSync(join(inputRoot, "existing-promotion-output"));
+  const existingPromotionOutput = join(inputRoot, "existing-promotion-output");
+  mkdirSync(existingPromotionOutput);
+  const existingPromotionOutputStat = lstatSync(existingPromotionOutput);
+  let existingOutputClockCalls = 0;
+  let existingOutputProviderCalls = 0;
   await assert.rejects(createPromotionRunner({
     workingDirectory: inputRoot,
     repositoryRoot,
     env: { PATH: process.env.PATH },
-    nowFn() { assert.fail("existing output sampled time"); },
-    spawnFn() { assert.fail("existing output reached provider"); },
+    nowFn() { existingOutputClockCalls += 1; throw new Error("existing output sampled time"); },
+    spawnFn() { existingOutputProviderCalls += 1; throw new Error("existing output reached provider"); },
   })(parsePromoteArgs([
     "--file", "page-promote.html", "--manifest", "edit-no-history.json",
     "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "existing-promotion-output",
   ])), (error) => error.tag === "promotion");
+  assert.equal(existingOutputClockCalls, 0);
+  assert.equal(existingOutputProviderCalls, 0);
+  assert.deepEqual(readdirSync(existingPromotionOutput), []);
+  const existingPromotionOutputAfter = lstatSync(existingPromotionOutput);
+  assert.deepEqual(
+    { dev: existingPromotionOutputAfter.dev, ino: existingPromotionOutputAfter.ino },
+    { dev: existingPromotionOutputStat.dev, ino: existingPromotionOutputStat.ino },
+    "pre-existing output remains untouched",
+  );
+  rmSync(existingPromotionOutput, { recursive: true });
 
   await assert.rejects(createPromotionRunner({
     workingDirectory: inputRoot,
@@ -1082,6 +1096,25 @@ try {
     assert.equal(existsSync(join(inputRoot, `partial-${index}`)), false);
   }
   assert.equal(partialSpawns, 0, "partial history topologies stop before provider work");
+
+  let ambiguousHistoryProviderCalls = 0;
+  await assert.rejects(createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    nowFn: () => Date.parse("2026-09-04T14:00:00.000Z"),
+    spawnFn() {
+      ambiguousHistoryProviderCalls += 1;
+      throw new Error("ambiguous history reached provider");
+    },
+  })(parsePromoteArgs([
+    "--file", "page-promote-history.html",
+    "--manifest", "edit-promote-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", "ambiguous-history",
+  ])), (error) => error.tag === "promotion");
+  assert.equal(ambiguousHistoryProviderCalls, 0, "missing history sidecar fails before provider work");
+  assert.equal(existsSync(join(inputRoot, "ambiguous-history")), false);
   promotionRemoteManifest = noHistoryManifest;
 
   const malformedSecondTimes = [Date.parse("2026-09-04T14:00:00.000Z"), Number.NaN];
@@ -1145,6 +1178,16 @@ try {
     new Map([[aid, { ...directReceipt, baseHash: "0".repeat(64) }]]),
     "no-current",
   );
+  await rejectPromotion(
+    { blobs: [validInventoryRow], directories: [] },
+    new Map([[aid, {
+      ...directReceipt,
+      via: "suggestion",
+      sugId: "malformed",
+      acceptedBy: { sub: "deployer-1", name: "Site Deployer", email: "deployer@example.com" },
+      acceptedAt: "2026-09-04T13:01:00.000Z",
+    }]]),
+  );
 
   writeFileSync(join(inputRoot, "page-promote-thirteen.html"), thirteen.html);
   writeFileSync(join(inputRoot, "edit-promote-thirteen.json"), `${JSON.stringify(thirteen.manifest, null, 2)}\n`);
@@ -1194,6 +1237,26 @@ try {
   };
 
   const sourceLockPath = join(inputRoot, "edit-no-history.json.promote.lock");
+
+  const lateOutputCollision = join(inputRoot, "late-output-collision");
+  let lateOutputIdentity;
+  await atomicFailure("late-output-collision", {
+    createPromotionFn(input, options) {
+      mkdirSync(lateOutputCollision);
+      const stat = lstatSync(lateOutputCollision);
+      lateOutputIdentity = { dev: stat.dev, ino: stat.ino };
+      return createPromotion(input, options);
+    },
+  });
+  const lateOutputAfter = lstatSync(lateOutputCollision);
+  assert.deepEqual(
+    { dev: lateOutputAfter.dev, ino: lateOutputAfter.ino },
+    lateOutputIdentity,
+    "output appearing during promotion remains untouched",
+  );
+  assert.deepEqual(readdirSync(lateOutputCollision), []);
+  rmSync(lateOutputCollision, { recursive: true });
+
   writeFileSync(sourceLockPath, "existing source lock\n", { mode: 0o600 });
   await atomicFailure("history-lock-output", {}, "history-lock", { sourceLockRemains: true });
   assert.equal(readFileSync(sourceLockPath, "utf8"), "existing source lock\n");
