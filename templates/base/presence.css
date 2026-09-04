@@ -11,8 +11,13 @@
    only inside a media or [data-theme] block.
    ============================================================ */
 
+/* No auto start-margin here. `.head-top` is a flex row whose `.status-chip`
+   already carries `margin-left:auto`, and a second auto margin in the same
+   line splits the free space between the two instead of pushing everything
+   right: the chip visibly jumps ~300px left the moment presence mounts. The
+   chip's margin already right-aligns the whole trailing cluster, so the strip
+   still lands immediately before the theme control. */
 .doc-presence {
-  margin-inline-start: auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;

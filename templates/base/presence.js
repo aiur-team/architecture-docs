@@ -571,11 +571,17 @@
   }
 
   // Expiry needs a clock that only moves forward. A backwards or non-finite
-  // sample deletes nothing and is not remembered, so the next usable sample
-  // resumes normal expiry.
+  // sample deletes nothing, and the next usable sample resumes normal expiry.
+  // A backwards reading still re-baselines: an NTP correction moves the clock
+  // back for good, and holding the pre-correction peak as a floor would
+  // suspend every future expiry until wall-clock time caught back up.
   function clockSample() {
     const now = stamp();
-    if (now === null || now < lastClock) return null;
+    if (now === null) return null;
+    if (now < lastClock) {
+      lastClock = now;
+      return null;
+    }
     lastClock = now;
     return now;
   }
@@ -854,7 +860,12 @@
     }
     railEl.replaceChildren(...nodes);
 
+    // Measure every marker first, then write every position, the way the
+    // comment rail's own placement pass does. Interleaving an `offsetWidth`
+    // read with the previous marker's style write forces one synchronous
+    // reflow per marker.
     const scrollWidth = document.documentElement.scrollWidth;
+    const placements = [];
     let previousTop = null;
     for (const candidate of candidates) {
       let top = candidate.rect.top - railRect.top;
@@ -863,10 +874,15 @@
 
       const desired = candidate.rect.right - railRect.left + MARKER_OFFSET_PX;
       const ceiling = scrollWidth - candidate.node.offsetWidth - RAIL_EDGE_PX;
-      const left = Math.max(RAIL_EDGE_PX, Math.min(desired, ceiling));
-
-      candidate.node.style.top = `${top}px`;
-      candidate.node.style.left = `${left}px`;
+      placements.push({
+        node: candidate.node,
+        top,
+        left: Math.max(RAIL_EDGE_PX, Math.min(desired, ceiling)),
+      });
+    }
+    for (const placement of placements) {
+      placement.node.style.top = `${placement.top}px`;
+      placement.node.style.left = `${placement.left}px`;
     }
   }
 
@@ -973,6 +989,11 @@
         // Same: the page is going away or being persisted.
       }
     }
+    // Release the in-flight beat with every other handle. P3-F aborts its
+    // publish controllers on its own earlier pagehide, so nothing is still
+    // travelling; leaving the flag set would swallow the immediate beat a
+    // BFCache restore owes its peers until the abandoned call settled.
+    beatPending = false;
     suspended = true;
   }
 
