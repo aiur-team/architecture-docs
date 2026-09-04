@@ -1490,6 +1490,11 @@ window.doc.anchor = { BLOCK, norm, scanBlocks };
    owner already filled, the module installs nothing and the static document is
    unchanged.
 
+   P4-I adds one advisory layer on top: entering the direct editor announces a
+   frozen local `doc:edit-state` and publishes one `edit.claim` through P3-F,
+   and every way out of the editor publishes one matching `edit.release`. It is
+   a hint for peers, never a lock -- the block hash still decides.
+
    Amendment chain: P4-B (this initial overlay/direct-edit client) -> P4-I ->
    P4-P. The four converter declarations below are byte-compatible with P2-D's
    `inline_md` twin on purpose; P4-C extracts them and runs the parity gate. */
@@ -1839,6 +1844,96 @@ function installEdit() {
     return { applied, available: true };
   }
 
+  /* ------------------------------------------------------------ the soft lock */
+
+  /* P4-I's advisory editing claim. It is presentation state for peers and
+     nothing else: the server's block hash stays the only write authority, so
+     a lost, delayed, duplicated or reordered claim can never change what a
+     save is allowed to do. At most one local block is claimed at a time.
+
+     P1-B loads this module before realtime, so the transport surface cannot
+     be captured here. It is proved at publish time instead, by exactly the
+     shape P3-F promises: a frozen object whose only own property is a
+     non-writable, non-configurable, enumerable `publish` function. */
+
+  let claimedAid = null;
+
+  function ignore() {}
+
+  function realtimeSurface() {
+    try {
+      const surface = window.doc.realtime;
+      if (surface === null || typeof surface !== "object") return null;
+      if (!Object.isFrozen(surface)) return null;
+      if (Object.getOwnPropertySymbols(surface).length !== 0) return null;
+      const names = Object.getOwnPropertyNames(surface);
+      if (names.length !== 1 || names[0] !== "publish") return null;
+      const descriptor = Object.getOwnPropertyDescriptor(surface, "publish");
+      if (descriptor === undefined || !hasOwn(descriptor, "value")) return null;
+      if (typeof descriptor.value !== "function") return null;
+      if (descriptor.enumerable !== true) return null;
+      if (descriptor.writable !== false || descriptor.configurable !== false) return null;
+      return surface;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /* Exactly one attempt, never awaited and never retried. An absent surface,
+     a synchronous throw, a rejection and a resolved false are the same
+     non-event: the editor keeps working, it is simply undecorated for peers.
+     Nothing here creates a timer, and no save ever waits on it. */
+  function publishClaim(event) {
+    const surface = realtimeSurface();
+    if (surface === null) return;
+    try {
+      Promise.resolve(surface.publish(event)).then(ignore, ignore);
+    } catch (error) {
+      // A transport failure is silence, not a broken editor.
+    }
+  }
+
+  /** The one local signal P3-G listens for. Freshly created and frozen each
+     time, so a listener can trust the shape without copying it. */
+  function announceEditState(aid) {
+    document.dispatchEvent(new CustomEvent("doc:edit-state", {
+      detail: Object.freeze({ aid }),
+    }));
+  }
+
+  function claimBlock(aid) {
+    // Moving straight from one editor to another releases the old block
+    // first, so peers never see this tab holding two claims at once.
+    if (claimedAid !== null) releaseBlock(null);
+    claimedAid = aid;
+    announceEditState(aid);
+    publishClaim({ t: "edit.claim", aid });
+  }
+
+  /* Idempotent. `expected` names the block that is finishing, or `null` to
+     release whatever is active, which is what the page-lifecycle path needs.
+     The aid is captured and cleared before either side effect, so an
+     overlapping finish — a blur that follows Escape, or a pagehide during a
+     save — publishes nothing a second time. A block whose claim has already
+     been taken over by another editor releases nothing. */
+  function releaseBlock(expected) {
+    if (claimedAid === null) return;
+    if (expected !== null && claimedAid !== expected) return;
+    const captured = claimedAid;
+    claimedAid = null;
+    announceEditState(null);
+    publishClaim({ t: "edit.release", aid: captured });
+  }
+
+  // Registered during module evaluation. P1-B loads edit before presence, so
+  // this runs ahead of P3-G's own `pagehide` listener and peers see the
+  // release before the bye. No `unload` or `beforeunload` listener is added.
+  try {
+    window.addEventListener("pagehide", () => releaseBlock(null));
+  } catch (error) {
+    // A host without the page lifecycle simply never fires it.
+  }
+
   /* -------------------------------------------------------------- the editor */
 
   let saving = false;
@@ -1901,6 +1996,9 @@ function installEdit() {
     };
 
     const stopEditing = () => {
+      // Before the save request, the restore, or the programmatic blur: peers
+      // learn this block is free ahead of any write or navigation work.
+      releaseBlock(aid);
       editing = false;
       element.removeAttribute("contenteditable");
       element.classList.remove(EDITING_CLASS);
@@ -2039,6 +2137,7 @@ function installEdit() {
       element.classList.add(EDITING_CLASS);
       controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
       editing = true;
+      claimBlock(aid);
       element.addEventListener("keydown", onKeyDown);
       element.addEventListener("paste", onPaste);
       element.addEventListener("blur", onBlur);
@@ -5502,6 +5601,12 @@ runHistory();
 // which is what keeps a realtime-disabled deployment visually dark without
 // asking P3-F for a state getter it deliberately does not expose.
 //
+// P4-I extends the same discipline to editing claims. A peer's `edit.claim`
+// hides that block's direct Edit button and shows one chip; it is a hint, not
+// a lock, and the server's block hash still decides every write. Claims live
+// only in memory, expire with the roster lease they ride behind, and never
+// extend one.
+//
 // The one persisted fact is a local privacy preference. Storage that is
 // corrupt or unavailable fails closed toward silence: a reader who cannot be
 // proven visible-by-default is treated as hidden and gets only a recovery
@@ -5514,6 +5619,7 @@ runHistory();
   const LEASE_MS = 50000;
   const SWEEP_MS = 5000;
   const MAX_READERS = 200;
+  const MAX_CLAIMS = 200;
   const STORAGE_KEY = "doc.presence.hidden.v1";
   const CLIENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
   const AID_RE = /^a[0-9a-f]{8}$/;
@@ -5539,7 +5645,9 @@ runHistory();
   const ROLE_VALUES = ["owner", "editor", "commenter", "viewer", "none"];
   const BEAT_KEYS = ["source", "t", "clientId", "label", "act", "aid"];
   const BYE_KEYS = ["source", "t", "clientId"];
+  const CLAIM_KEYS = ["source", "t", "clientId", "aid"];
   const OWN_BEAT_KEYS = ["label", "act", "aid"];
+  const EDIT_STATE_KEYS = ["aid"];
 
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -5611,6 +5719,7 @@ runHistory();
   let hiddenByChoice = false;
   let beatPending = false;
   let localLabel = "";
+  let localEditingAid = null;
 
   let beatTimer = 0;
   let sweepTimer = 0;
@@ -5631,6 +5740,12 @@ runHistory();
   // this module knows, and it authorizes nothing.
   const roster = new Map();
 
+  // clientId -> claimed aid, and the chips currently rendered for it. Both are
+  // advisory presentation: neither authorizes a write, renews a lease, reads a
+  // clock, or creates a timer.
+  const claims = new Map();
+  const chipsByAid = new Map();
+
   document.addEventListener("session", onSession);
   document.addEventListener("doc:event", onDocEvent);
 
@@ -5648,6 +5763,9 @@ runHistory();
     localLabel = admitted.label;
 
     document.addEventListener("visibilitychange", onVisibility);
+    // Only after a valid session: an unactivated module reports nothing about
+    // what this reader is doing.
+    document.addEventListener("doc:edit-state", onEditState);
     window.addEventListener("online", onOnline);
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
@@ -5810,12 +5928,49 @@ runHistory();
 
   // --- Publishing -----------------------------------------------------------
 
-  // The P4-I amendment seam. P3-G itself never publishes an aid or an editing
-  // activity; a later owner amends this one function once it has a proven
-  // editable focus, and every timer, privacy and validation rule here still
-  // applies to what it returns.
+  // The P4-I amendment seam, now filled. The local aid comes from edit.js's
+  // `doc:edit-state` signal, and every timer, privacy and validation rule here
+  // still applies to what this returns: a hidden reader publishes nothing, and
+  // an invalid aid drops the beat rather than broadcasting it.
   function currentBeat() {
-    return { label: localLabel, act: "reading", aid: null };
+    return {
+      label: localLabel,
+      act: localEditingAid === null ? "reading" : "editing",
+      aid: localEditingAid,
+    };
+  }
+
+  // edit.js already publishes the edge transition and the ordinary beat
+  // supplies renewal, so this listener never publishes. It accepts exactly the
+  // frozen one-key detail edit.js dispatches and rejects everything else by
+  // descriptor, without invoking a getter.
+  function onEditState(event) {
+    let detail;
+    try {
+      detail = event.detail;
+    } catch (ignored) {
+      return;
+    }
+
+    let aid;
+    try {
+      if (detail === null || typeof detail !== "object") return;
+      if (Object.getPrototypeOf(detail) !== Object.prototype) return;
+      if (!Object.isFrozen(detail)) return;
+      if (Object.getOwnPropertySymbols(detail).length !== 0) return;
+      if (!sameSequence(Object.getOwnPropertyNames(detail), EDIT_STATE_KEYS)) return;
+      if (!plainDataKey(detail, "aid")) return;
+      aid = detail.aid;
+      if (aid !== null && !(typeof aid === "string" && AID_RE.test(aid))) return;
+    } catch (ignored) {
+      return;
+    }
+
+    if (localEditingAid === aid) return;
+    localEditingAid = aid;
+    // A peer claim on the block this tab was editing has been held in memory
+    // rather than rendered; ending local editing is when it may appear.
+    renderClaims();
   }
 
   function sendBeat() {
@@ -5947,12 +6102,14 @@ runHistory();
     // An accepted client event proves transport even when it changes nothing.
     proveTransport();
     if (detail.t === "beat") applyBeat(detail);
-    else removeReader(detail.clientId);
+    else if (detail.t === "bye") removeReader(detail.clientId);
+    else if (detail.t === "edit.claim") applyClaim(detail);
+    else applyRelease(detail);
   }
 
-  // Only P3-F's two frozen flat client shapes. Server projections and
-  // claim/release events are ignored, and every rejection is descriptor-shaped
-  // so no getter runs.
+  // Only P3-F's frozen flat client shapes: `beat`, `bye`, and P4-I's
+  // `edit.claim` / `edit.release`. Server projections are ignored, and every
+  // rejection is descriptor-shaped so no getter runs.
   function readClientDetail(event) {
     let detail;
     try {
@@ -5970,7 +6127,8 @@ runHistory();
       const keys = Object.getOwnPropertyNames(detail);
       const isBeat = sameSequence(keys, BEAT_KEYS);
       const isBye = !isBeat && sameSequence(keys, BYE_KEYS);
-      if (!isBeat && !isBye) return null;
+      const isClaim = !isBeat && !isBye && sameSequence(keys, CLAIM_KEYS);
+      if (!isBeat && !isBye && !isClaim) return null;
 
       for (let index = 0; index < keys.length; index += 1) {
         if (!plainDataKey(detail, keys[index])) return null;
@@ -5983,6 +6141,14 @@ runHistory();
       if (isBye) {
         if (detail.t !== "bye") return null;
         return { t: "bye", clientId };
+      }
+
+      if (isClaim) {
+        const kind = detail.t;
+        if (kind !== "edit.claim" && kind !== "edit.release") return null;
+        const claimed = detail.aid;
+        if (typeof claimed !== "string" || !AID_RE.test(claimed)) return null;
+        return { t: kind, clientId, aid: claimed };
       }
 
       if (detail.t !== "beat") return null;
@@ -6031,8 +6197,32 @@ runHistory();
     repaint();
   }
 
+  // A beat that merely says `editing` never becomes a claim: only an explicit
+  // `edit.claim` hides a peer's control, so an old replayed beat cannot
+  // resurrect a lock that was already released.
+  function applyClaim(detail) {
+    const existing = claims.get(detail.clientId);
+    // The cap is unconditional and never evicts. A client that already holds a
+    // key may move it to another block even at the cap; a client without one
+    // is dropped there, whether or not the roster has seen it.
+    if (existing === undefined && claims.size >= MAX_CLAIMS) return;
+    if (existing === detail.aid) return;
+    claims.set(detail.clientId, detail.aid);
+    repaint();
+  }
+
+  // An out-of-order release names a block this client no longer holds, so it
+  // must not clear the newer claim that replaced it.
+  function applyRelease(detail) {
+    if (claims.get(detail.clientId) !== detail.aid) return;
+    claims.delete(detail.clientId);
+    repaint();
+  }
+
   function removeReader(clientId) {
-    if (!roster.delete(clientId)) return;
+    const hadRow = roster.delete(clientId);
+    const hadClaim = claims.delete(clientId);
+    if (!hadRow && !hadClaim) return;
     repaint();
   }
 
@@ -6044,6 +6234,7 @@ runHistory();
     for (const entry of roster) {
       if (now - entry[1].seen >= LEASE_MS) {
         roster.delete(entry[0]);
+        claims.delete(entry[0]);
         changed = true;
       }
     }
@@ -6202,6 +6393,7 @@ runHistory();
     } catch (ignored) {
       return;
     }
+    renderClaims();
     requestPlacement();
   }
 
@@ -6244,6 +6436,127 @@ runHistory();
   function firstPoint(word) {
     for (const point of word) return point;
     return "";
+  }
+
+  // --- Editing claims -------------------------------------------------------
+
+  // A claim renders only against a block P4-B actually made editable: one
+  // unique connected `[data-aid]` element, an open `details` ancestor if it has
+  // one, and an immediately following controls wrapper holding exactly one
+  // direct Edit button. Anything ambiguous renders nothing and hides nothing,
+  // because hiding the wrong control is worse than showing no chip.
+  function claimTarget(blocks, aid) {
+    try {
+      const block = blocks.get(aid);
+      if (block === undefined || block === null) return null;
+      if (block.isConnected !== true) return null;
+      const details = block.closest("details");
+      if (details !== null && details !== undefined && details.open === false) return null;
+      const controls = block.nextElementSibling;
+      if (controls === null || controls === undefined) return null;
+      if (controls.tagName !== "DIV") return null;
+      if (!controls.classList.contains("doc-edit-controls")) return null;
+      const buttons = controls.querySelectorAll("button.doc-edit-button");
+      if (buttons.length !== 1) return null;
+      return { controls, button: buttons[0] };
+    } catch (ignored) {
+      return null;
+    }
+  }
+
+  function claimText(rows) {
+    if (rows.length === 1) return `${rows[0].label} is editing`;
+    return `${rows.length} people are editing`;
+  }
+
+  function claimPhrases(rows) {
+    const phrases = [];
+    for (const row of rows) phrases.push(`${row.label}, editing`);
+    return phrases.join("; ");
+  }
+
+  // Recomputed whole at every material roster or claim repaint. A claim with
+  // no current roster row is retained in memory but contributes nothing here;
+  // the claimant's next valid beat is what makes it visible.
+  function renderClaims() {
+    let blocks;
+    const groups = new Map();
+    try {
+      blocks = blockIndex();
+      for (const row of sortedRoster()) {
+        const aid = claims.get(row.id);
+        if (aid === undefined) continue;
+        // The block this tab is editing keeps its own P4-B controls. Moving
+        // focus-owned DOM while someone is typing is worse than a late chip,
+        // and the claim stays in memory until local editing ends.
+        if (aid === localEditingAid) continue;
+        const rows = groups.get(aid);
+        if (rows === undefined) groups.set(aid, [row]);
+        else rows.push(row);
+      }
+    } catch (ignored) {
+      return;
+    }
+
+    for (const aid of [...chipsByAid.keys()]) {
+      if (!groups.has(aid)) dropChip(aid);
+    }
+    for (const entry of groups) showChip(entry[0], entry[1], claimTarget(blocks, entry[0]));
+  }
+
+  function dropChip(aid) {
+    const record = chipsByAid.get(aid);
+    if (record === undefined) return;
+    chipsByAid.delete(aid);
+    try {
+      record.chip.remove();
+      record.button.removeAttribute("hidden");
+    } catch (ignored) {
+      // The controls are already gone; nothing durable depended on them.
+    }
+  }
+
+  // One noninteractive chip immediately before the direct Edit button, and
+  // that button hidden while it stands. Labels enter only as text properties
+  // and a client ID never reaches the DOM.
+  function showChip(aid, rows, target) {
+    if (target === null) {
+      dropChip(aid);
+      return;
+    }
+    const existing = chipsByAid.get(aid);
+    // A rebuilt controls wrapper is a different target, so the old record is
+    // dropped rather than reused against DOM that no longer exists.
+    if (existing !== undefined
+      && (existing.button !== target.button || existing.chip.parentNode !== target.controls)) {
+      dropChip(aid);
+    }
+    try {
+      let record = chipsByAid.get(aid);
+      if (record === undefined) {
+        const chip = document.createElement("span");
+        chip.className = "pill warn doc-edit-claim";
+        chip.setAttribute("role", "status");
+        target.controls.insertBefore(chip, target.button);
+        record = { chip, button: target.button };
+        chipsByAid.set(aid, record);
+      }
+      record.chip.textContent = claimText(rows);
+      const phrases = claimPhrases(rows);
+      record.chip.title = phrases;
+      record.chip.setAttribute("aria-label", phrases);
+      record.button.setAttribute("hidden", "");
+    } catch (ignored) {
+      dropChip(aid);
+    }
+  }
+
+  // Every chip removed and every hidden control restored, with the claim map
+  // and this tab's own editing state.
+  function clearClaims() {
+    for (const aid of [...chipsByAid.keys()]) dropChip(aid);
+    claims.clear();
+    localEditingAid = null;
   }
 
   // --- Block markers --------------------------------------------------------
@@ -6464,6 +6777,7 @@ runHistory();
     stopSweep();
     cancelPlacement();
     roster.clear();
+    clearClaims();
     if (railEl !== null) {
       try {
         railEl.replaceChildren();
@@ -6524,6 +6838,8 @@ runHistory();
     stopSweep();
     cancelPlacement();
     roster.clear();
+    clearClaims();
+    document.removeEventListener("doc:edit-state", onEditState);
     try {
       if (railEl !== null) railEl.remove();
       if (container !== null) container.remove();

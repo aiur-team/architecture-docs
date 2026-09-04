@@ -14,6 +14,11 @@
    owner already filled, the module installs nothing and the static document is
    unchanged.
 
+   P4-I adds one advisory layer on top: entering the direct editor announces a
+   frozen local `doc:edit-state` and publishes one `edit.claim` through P3-F,
+   and every way out of the editor publishes one matching `edit.release`. It is
+   a hint for peers, never a lock -- the block hash still decides.
+
    Amendment chain: P4-B (this initial overlay/direct-edit client) -> P4-I ->
    P4-P. The four converter declarations below are byte-compatible with P2-D's
    `inline_md` twin on purpose; P4-C extracts them and runs the parity gate. */
@@ -363,6 +368,96 @@ function installEdit() {
     return { applied, available: true };
   }
 
+  /* ------------------------------------------------------------ the soft lock */
+
+  /* P4-I's advisory editing claim. It is presentation state for peers and
+     nothing else: the server's block hash stays the only write authority, so
+     a lost, delayed, duplicated or reordered claim can never change what a
+     save is allowed to do. At most one local block is claimed at a time.
+
+     P1-B loads this module before realtime, so the transport surface cannot
+     be captured here. It is proved at publish time instead, by exactly the
+     shape P3-F promises: a frozen object whose only own property is a
+     non-writable, non-configurable, enumerable `publish` function. */
+
+  let claimedAid = null;
+
+  function ignore() {}
+
+  function realtimeSurface() {
+    try {
+      const surface = window.doc.realtime;
+      if (surface === null || typeof surface !== "object") return null;
+      if (!Object.isFrozen(surface)) return null;
+      if (Object.getOwnPropertySymbols(surface).length !== 0) return null;
+      const names = Object.getOwnPropertyNames(surface);
+      if (names.length !== 1 || names[0] !== "publish") return null;
+      const descriptor = Object.getOwnPropertyDescriptor(surface, "publish");
+      if (descriptor === undefined || !hasOwn(descriptor, "value")) return null;
+      if (typeof descriptor.value !== "function") return null;
+      if (descriptor.enumerable !== true) return null;
+      if (descriptor.writable !== false || descriptor.configurable !== false) return null;
+      return surface;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /* Exactly one attempt, never awaited and never retried. An absent surface,
+     a synchronous throw, a rejection and a resolved false are the same
+     non-event: the editor keeps working, it is simply undecorated for peers.
+     Nothing here creates a timer, and no save ever waits on it. */
+  function publishClaim(event) {
+    const surface = realtimeSurface();
+    if (surface === null) return;
+    try {
+      Promise.resolve(surface.publish(event)).then(ignore, ignore);
+    } catch (error) {
+      // A transport failure is silence, not a broken editor.
+    }
+  }
+
+  /** The one local signal P3-G listens for. Freshly created and frozen each
+     time, so a listener can trust the shape without copying it. */
+  function announceEditState(aid) {
+    document.dispatchEvent(new CustomEvent("doc:edit-state", {
+      detail: Object.freeze({ aid }),
+    }));
+  }
+
+  function claimBlock(aid) {
+    // Moving straight from one editor to another releases the old block
+    // first, so peers never see this tab holding two claims at once.
+    if (claimedAid !== null) releaseBlock(null);
+    claimedAid = aid;
+    announceEditState(aid);
+    publishClaim({ t: "edit.claim", aid });
+  }
+
+  /* Idempotent. `expected` names the block that is finishing, or `null` to
+     release whatever is active, which is what the page-lifecycle path needs.
+     The aid is captured and cleared before either side effect, so an
+     overlapping finish — a blur that follows Escape, or a pagehide during a
+     save — publishes nothing a second time. A block whose claim has already
+     been taken over by another editor releases nothing. */
+  function releaseBlock(expected) {
+    if (claimedAid === null) return;
+    if (expected !== null && claimedAid !== expected) return;
+    const captured = claimedAid;
+    claimedAid = null;
+    announceEditState(null);
+    publishClaim({ t: "edit.release", aid: captured });
+  }
+
+  // Registered during module evaluation. P1-B loads edit before presence, so
+  // this runs ahead of P3-G's own `pagehide` listener and peers see the
+  // release before the bye. No `unload` or `beforeunload` listener is added.
+  try {
+    window.addEventListener("pagehide", () => releaseBlock(null));
+  } catch (error) {
+    // A host without the page lifecycle simply never fires it.
+  }
+
   /* -------------------------------------------------------------- the editor */
 
   let saving = false;
@@ -425,6 +520,9 @@ function installEdit() {
     };
 
     const stopEditing = () => {
+      // Before the save request, the restore, or the programmatic blur: peers
+      // learn this block is free ahead of any write or navigation work.
+      releaseBlock(aid);
       editing = false;
       element.removeAttribute("contenteditable");
       element.classList.remove(EDITING_CLASS);
@@ -563,6 +661,7 @@ function installEdit() {
       element.classList.add(EDITING_CLASS);
       controls.classList.remove("doc-edit-conflict", "doc-edit-failed");
       editing = true;
+      claimBlock(aid);
       element.addEventListener("keydown", onKeyDown);
       element.addEventListener("paste", onPaste);
       element.addEventListener("blur", onBlur);
