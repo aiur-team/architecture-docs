@@ -20,6 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { open as openAsync } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -412,10 +413,15 @@ async function runHosted(connectModule, {
 const connect = await import("./connect.mjs");
 const {
   assertModeManifest,
+  assertPromotionHistory,
   createConnectRunner,
+  createPromotion,
+  createPromotionRunner,
   inspectStandaloneHtml,
+  main,
   normalizeConnectOwner,
   parseConnectArgs,
+  parsePromoteArgs,
 } = connect;
 
 const hostedArguments = process.argv.slice(2);
@@ -434,11 +440,15 @@ if (hostedMode) {
 } else {
 assert.deepEqual(Object.keys(connect).sort(), [
   "assertModeManifest",
+  "assertPromotionHistory",
   "createConnectRunner",
+  "createPromotion",
+  "createPromotionRunner",
   "inspectStandaloneHtml",
   "main",
   "normalizeConnectOwner",
   "parseConnectArgs",
+  "parsePromoteArgs",
 ]);
 
 const hostedAbortController = new AbortController();
@@ -498,6 +508,29 @@ for (const argv of [
   assert.throws(() => parseConnectArgs(argv));
 }
 
+const originalStderrWrite = process.stderr.write;
+const originalExitCode = process.exitCode;
+let malformedMainStderr = "";
+try {
+  process.stderr.write = (chunk) => {
+    malformedMainStderr += String(chunk);
+    return true;
+  };
+  process.exitCode = undefined;
+  await main(null);
+  assert.equal(process.exitCode, 2);
+  assert.equal(malformedMainStderr, "connect: invalid arguments\n");
+  malformedMainStderr = "";
+  const throwingArguments = [];
+  Object.defineProperty(throwingArguments, "0", { get() { throw new Error("invented argument read failure"); } });
+  await main(throwingArguments);
+  assert.equal(process.exitCode, 2);
+  assert.equal(malformedMainStderr, "connect: invalid arguments\n");
+} finally {
+  process.stderr.write = originalStderrWrite;
+  process.exitCode = originalExitCode;
+}
+
 assert.equal(normalizeConnectOwner("\tOWNER+tag@Sub.Example.COM\r"), "owner+tag@sub.example.com");
 assert.equal(normalizeConnectOwner("a..b@example.com"), "a..b@example.com");
 for (const owner of ["a@localhost", "a/b@example.com", "a@-bad.example", "a@bad..example", "K@example.com", "a@example.com\u0085"]) {
@@ -545,6 +578,270 @@ const unicodeRawTextHtml = html.replace(
   "<script>const fake",
   "<script>const dotted = 'İ'; const fake",
 );
+
+assert.deepEqual(parsePromoteArgs(["--help"]), { help: true });
+assert.deepEqual(parsePromoteArgs([
+  "--output", "review",
+  "--site", "123e4567-e89b-12d3-a456-426614174000",
+  "--file", "page.html",
+  "--manifest", "edit.json",
+]), {
+  file: "page.html",
+  manifest: "edit.json",
+  history: null,
+  site: "123e4567-e89b-12d3-a456-426614174000",
+  output: "review",
+});
+assert.deepEqual(assertPromotionHistory(history, "sample"), history);
+assert.throws(() => assertPromotionHistory({ doc: "sample", head: "", versions: [] }, "sample"));
+assert.equal(typeof createPromotion, "function");
+assert.equal(typeof createPromotionRunner, "function");
+assert.equal(createPromotionRunner({ env: {} }).name, "run");
+for (const dependencies of [
+  null,
+  [],
+  Object.create(null),
+  { unknownFn() {} },
+  { openFn: undefined },
+  { openFn: null },
+  { processId: 0 },
+  { processId: 1.5 },
+  { workingDirectory: "." },
+  { repositoryRoot: "." },
+  { env: null },
+]) assert.throws(() => createPromotionRunner(dependencies), { name: "TypeError", message: "Invalid promotion dependencies" });
+const accessorDependencies = {};
+Object.defineProperty(accessorDependencies, "openFn", { enumerable: true, get() { return openAsync; } });
+assert.throws(() => createPromotionRunner(accessorDependencies), { name: "TypeError", message: "Invalid promotion dependencies" });
+assert.throws(() => createPromotionRunner({ [Symbol("dependency")]: () => {} }), { name: "TypeError", message: "Invalid promotion dependencies" });
+for (const argv of [
+  [],
+  ["--help", "extra"],
+  ["--file=x"],
+  ["--file", "page.html", "--manifest", "edit.json", "--site", "site"],
+  ["--file", "page.html", "--manifest", "edit.json", "--site", "site", "--output", "out", "--history", ""],
+  ["--file", "page.html", "--manifest", "edit.json", "--site", "site", "--output", "out", "--output", "again"],
+]) assert.throws(() => parsePromoteArgs(argv));
+
+const directReceipt = {
+  v: 1,
+  aid,
+  text: "Updated **world**",
+  by: { sub: "reader-1", name: "Sample Reader", email: "reader@example.com" },
+  at: "2026-09-04T12:00:00.000Z",
+  baseHash: noHistoryManifest.blocks[aid].hash,
+  pr: null,
+  via: "edit",
+};
+const promotionNoHistoryHtml = noHistoryHtml.replace(
+  `<p data-editable data-aid="${aid}">`,
+  `<p data-aid="${aid}" data-editable data-md="Hello *world*">`,
+);
+const originalNoHistoryManifest = JSON.stringify(noHistoryManifest);
+const firstPromotion = createPromotion({
+  html: promotionNoHistoryHtml,
+  manifest: noHistoryManifest,
+  history: null,
+  receipts: [directReceipt],
+}, { nowMs: Date.parse("2026-09-04T12:05:00.000Z") });
+const firstManifest = JSON.parse(firstPromotion.manifestBytes);
+const firstHistory = JSON.parse(firstPromotion.historyBytes);
+assert.equal(JSON.stringify(noHistoryManifest), originalNoHistoryManifest, "pure promotion preserves manifest input");
+assert.equal(promotionNoHistoryHtml.includes("Updated"), false, "pure promotion preserves HTML input");
+assert.equal(firstPromotion.promoted, 1);
+assert.match(firstManifest.commit, /^[0-9a-f]{7}$/);
+assert.equal(firstHistory.head, firstManifest.commit);
+assert.equal(firstHistory.versions[0].author, "Sample Reader");
+assert.equal(firstHistory.versions[0].changed[0].file, "example.html");
+assert.match(firstPromotion.html, /Updated <strong>world<\/strong>/);
+assert.match(firstPromotion.html, new RegExp(`id="doc-history" data-head="${firstManifest.commit}"`));
+assert.deepEqual(assertModeManifest(firstManifest, firstPromotion.html), { docId, manifest: firstManifest });
+assert.deepEqual(assertPromotionHistory(firstHistory, "sample"), firstHistory);
+
+const secondReceipt = {
+  ...directReceipt,
+  text: "Accepted *revision*",
+  by: { sub: "reader-2", name: "", email: "second@example.com" },
+  at: "2026-09-04T13:00:00.000Z",
+  baseHash: firstManifest.blocks[aid].hash,
+  via: "suggestion",
+  sugId: "s_review_12345678",
+  acceptedBy: { sub: "deployer-1", name: "Site Deployer", email: "deployer@example.com" },
+  acceptedAt: "2026-09-04T13:01:00.000Z",
+};
+const secondPromotion = createPromotion({
+  html: firstPromotion.html,
+  manifest: firstManifest,
+  history: firstHistory,
+  receipts: [secondReceipt],
+}, { nowMs: Date.parse("2026-09-04T13:05:00.000Z") });
+const secondHistory = JSON.parse(secondPromotion.historyBytes);
+assert.equal(secondHistory.versions.length, 2);
+assert.equal(secondHistory.versions[0].author, "second@example.com");
+assert.match(secondPromotion.html, /Accepted <em>revision<\/em>/);
+assert.throws(() => createPromotion({
+  html: promotionNoHistoryHtml,
+  manifest: noHistoryManifest,
+  history: null,
+  receipts: [{ ...directReceipt, baseHash: "0".repeat(64) }],
+}, { nowMs: Date.parse("2026-09-04T12:05:00.000Z") }));
+assert.throws(() => createPromotion({
+  html: promotionNoHistoryHtml,
+  manifest: noHistoryManifest,
+  history: null,
+  receipts: [{ ...directReceipt, text: "Hello *world*" }],
+}, { nowMs: Date.parse("2026-09-04T12:05:00.000Z") }), "a same-as-built overlay cannot claim stale-on-reconnect promotion");
+
+const inlineFixtures = JSON.parse(readFileSync(
+  fileURLToPath(new URL("../templates/fixtures/inline.json", import.meta.url)),
+  "utf8",
+));
+assert.equal(inlineFixtures.length, 12);
+const attributeEscape = (value) => value
+  .replaceAll("&", "&amp;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;");
+for (const [index, fixture] of inlineFixtures.entries()) {
+  const nextFixture = inlineFixtures[(index + 1) % inlineFixtures.length];
+  const fixtureAid = `a${(index + 1).toString(16).padStart(8, "0")}`;
+  const marked = ["code", "strong", "em"].some((tag) => fixture.html.includes(`<${tag}>`) && fixture.html.includes(`</${tag}>`));
+  const fixtureOpening = `<p data-aid="${fixtureAid}" data-editable${marked ? ` data-md="${attributeEscape(fixture.md)}"` : ""}>`;
+  const fixtureHtml = `<meta name="doc-id" content="${docId}">\n<!doctype html><html><body>${fixtureOpening}${fixture.html}</p></body></html>\n`;
+  const fixtureManifest = {
+    docId,
+    instance: "fixture",
+    commit: "",
+    blocks: {
+      [fixtureAid]: {
+        file: "sections/fixture.html",
+        section: "fixture",
+        tag: "p",
+        hash: createHash("sha256").update(fixture.html).digest("hex"),
+      },
+    },
+  };
+  const fixturePromotion = createPromotion({
+    html: fixtureHtml,
+    manifest: fixtureManifest,
+    history: null,
+    receipts: [{
+      ...directReceipt,
+      aid: fixtureAid,
+      text: nextFixture.md,
+      baseHash: fixtureManifest.blocks[fixtureAid].hash,
+    }],
+  }, { nowMs: Date.parse("2026-09-04T12:05:00.000Z") });
+  const nextMarked = ["code", "strong", "em"].some((tag) => nextFixture.html.includes(`<${tag}>`) && nextFixture.html.includes(`</${tag}>`));
+  const promotedOpening = `<p data-aid="${fixtureAid}" data-editable${nextMarked ? ` data-md="${attributeEscape(nextFixture.md)}"` : ""}>`;
+  assert.match(fixturePromotion.html, new RegExp(`${escapeRegExp(promotedOpening)}${escapeRegExp(nextFixture.html)}</p>`), `inline fixture ${index + 1}`);
+}
+
+const promotionSet = (count) => {
+  const blocks = {};
+  const receipts = [];
+  const body = [];
+  for (let index = 0; index < count; index += 1) {
+    const blockAid = `a${(index + 1).toString(16).padStart(8, "0")}`;
+    const oldText = `Old ${index + 1}`;
+    const fileNumber = String(count - index).padStart(2, "0");
+    blocks[blockAid] = {
+      file: `sections/${fileNumber}.html`,
+      section: `section-${fileNumber}`,
+      tag: "p",
+      hash: createHash("sha256").update(oldText).digest("hex"),
+    };
+    body.push(`<p data-aid="${blockAid}" data-editable>${oldText}</p>`);
+    receipts.push({
+      ...directReceipt,
+      aid: blockAid,
+      text: `New ${index + 1}`,
+      at: `2026-09-04T12:00:${String(index).padStart(2, "0")}.000Z`,
+      baseHash: blocks[blockAid].hash,
+    });
+  }
+  return {
+    html: `<meta name="doc-id" content="${docId}">\n<!doctype html><html><body>${body.join("")}</body></html>\n`,
+    manifest: { docId, instance: "many", commit: "", blocks },
+    receipts,
+  };
+};
+const twelve = promotionSet(12);
+const twelvePromotion = createPromotion({
+  html: twelve.html,
+  manifest: twelve.manifest,
+  history: null,
+  receipts: twelve.receipts,
+}, { nowMs: Date.parse("2026-09-04T14:00:00.000Z") });
+const twelveHistory = JSON.parse(twelvePromotion.historyBytes);
+assert.equal(twelveHistory.versions.length, 12);
+assert.deepEqual(
+  twelveHistory.versions.map((version) => version.changed[0].file),
+  Array.from({ length: 12 }, (_, index) => `${String(index + 1).padStart(2, "0")}.html`),
+  "new history rows use lexical file order",
+);
+const thirteen = promotionSet(13);
+assert.throws(() => createPromotion({
+  html: thirteen.html,
+  manifest: thirteen.manifest,
+  history: null,
+  receipts: thirteen.receipts,
+}, { nowMs: Date.parse("2026-09-04T14:00:00.000Z") }));
+
+const crPromotion = createPromotion({
+  html: promotionNoHistoryHtml,
+  manifest: noHistoryManifest,
+  history: null,
+  receipts: [{ ...directReceipt, text: "Line one\rLine two" }],
+}, { nowMs: Date.parse("2026-09-04T14:00:00.000Z") });
+const crChange = JSON.parse(crPromotion.historyBytes).versions[0].changed[0];
+assert.deepEqual({ patch: crChange.patch, clipped: crChange.clipped, add: crChange.add, del: crChange.del }, {
+  patch: "", clipped: true, add: 1, del: 1,
+});
+assert.ok(crPromotion.html.includes("Line one\rLine two"), "CR fallback preserves promoted text");
+
+const unicodePromotion = createPromotion({
+  html: promotionNoHistoryHtml,
+  manifest: noHistoryManifest,
+  history: null,
+  receipts: [{ ...directReceipt, text: "é".repeat(1000) }],
+}, { nowMs: Date.parse("2026-09-04T14:00:00.000Z") });
+const unicodeChange = JSON.parse(unicodePromotion.historyBytes).versions[0].changed[0];
+assert.equal(unicodeChange.clipped, true);
+assert.ok(Buffer.byteLength(unicodeChange.patch, "utf8") <= 1200);
+assert.doesNotMatch(unicodeChange.patch, /\uFFFD/);
+
+const retainedVersions = Array.from({ length: 12 }, (_, index) => ({
+  sha: `${(index + 1).toString(16).padStart(7, "0")}`,
+  date: `2026-09-${String(3 - Math.floor(index / 8)).padStart(2, "0")}T${String(23 - (index % 8)).padStart(2, "0")}:00:00.000Z`,
+  author: `Reader ${index + 1}`,
+  subject: `Existing ${index + 1}`,
+  url: "",
+  changed: [],
+}));
+const retainedHistory = { doc: "sample", head: retainedVersions[0].sha, versions: retainedVersions };
+const retainedScript = `<script type="application/json" id="doc-history" data-head="${retainedHistory.head}">${JSON.stringify(retainedHistory).replaceAll("</", "<\\/")}</script>`;
+const retainedHtml = promotionNoHistoryHtml.replace("</body>", `${retainedScript}</body>`);
+const retainedManifest = { ...noHistoryManifest, commit: retainedHistory.head };
+const retainedPromotion = createPromotion({
+  html: retainedHtml,
+  manifest: retainedManifest,
+  history: retainedHistory,
+  receipts: [directReceipt],
+}, { nowMs: Date.parse("2026-09-04T14:00:00.000Z") });
+const afterRetention = JSON.parse(retainedPromotion.historyBytes);
+assert.equal(afterRetention.versions.length, 12);
+assert.equal(afterRetention.versions.at(-1).sha, retainedVersions[10].sha, "retention evicts only the oldest row");
+
+const collidingHistory = { doc: "sample", head: firstHistory.head, versions: firstHistory.versions };
+const collidingScript = `<script type="application/json" id="doc-history" data-head="${collidingHistory.head}">${JSON.stringify(collidingHistory).replaceAll("</", "<\\/")}</script>`;
+const collidingHtml = promotionNoHistoryHtml.replace("</body>", `${collidingScript}</body>`);
+assert.throws(() => createPromotion({
+  html: collidingHtml,
+  manifest: { ...noHistoryManifest, commit: collidingHistory.head },
+  history: collidingHistory,
+  receipts: [directReceipt],
+}, { nowMs: Date.parse("2026-09-04T12:05:00.000Z") }), (error) => error.tag === "history-collision");
 
 assert.deepEqual(inspectStandaloneHtml(html), { docId });
 assert.deepEqual(assertModeManifest(manifest, html), { docId, manifest });
@@ -602,6 +899,463 @@ try {
   writeFileSync(join(inputRoot, "history.json"), `${JSON.stringify(history, null, 2)}\n`);
   writeFileSync(join(inputRoot, "page-no-history.html"), noHistoryHtml);
   writeFileSync(join(inputRoot, "edit-no-history.json"), `${JSON.stringify(noHistoryManifest, null, 2)}\n`);
+  writeFileSync(join(inputRoot, "page-promote.html"), promotionNoHistoryHtml);
+  const promotionHistoryHtml = promotionNoHistoryHtml.replace("</body>", `${embeddedHistoryScript}</body>`);
+  writeFileSync(join(inputRoot, "page-promote-history.html"), promotionHistoryHtml);
+  writeFileSync(join(inputRoot, "edit-promote-history.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const promotionCalls = [];
+  let promotionChildren = 0;
+  let promotionRemoteManifest = noHistoryManifest;
+  let promotionRemoteReceipts = new Map([[aid, directReceipt]]);
+  let promotionInventory = {
+    blobs: [{ etag: "fixture-etag", key: `edits/${docId}/${aid}.json` }],
+    directories: [],
+  };
+  const promotionSpawn = (executable, args, options) => {
+    assert.equal(executable, "netlify");
+    assert.equal(options.shell, false);
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(options.cwd, repositoryRoot);
+    assert.equal(options.env.NETLIFY_SITE_ID, "123e4567-e89b-12d3-a456-426614174000");
+    assert.equal(options.env.NETLIFY_AUTH_TOKEN, undefined);
+    promotionChildren += 1;
+    assert.equal(promotionChildren, 1, "promotion children are serialized");
+    promotionCalls.push([...args]);
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    process.nextTick(() => {
+      if (args[0] === "blobs:list") {
+        assert.deepEqual(args, ["blobs:list", "doc-state", "--prefix", `edits/${docId}/`, "--json"]);
+        child.stdout.write(JSON.stringify(promotionInventory));
+      } else if (args[0] === "blobs:get") {
+        const outputPath = args.at(-1);
+        if (args[2] === `mode/${docId}/manifest.json`) {
+          assert.deepEqual(args.slice(0, -1), ["blobs:get", "doc-state", `mode/${docId}/manifest.json`, "--output"]);
+          writeFileSync(outputPath, `${JSON.stringify(promotionRemoteManifest, null, 2)}\n`);
+        } else {
+          const receiptMatch = args[2].match(new RegExp(`^edits/${docId}/(a[0-9a-f]{8})\\.json$`));
+          assert.ok(receiptMatch);
+          assert.deepEqual(args.slice(0, -1), ["blobs:get", "doc-state", args[2], "--output"]);
+          writeFileSync(outputPath, JSON.stringify(promotionRemoteReceipts.get(receiptMatch[1])));
+        }
+      } else assert.fail(`unexpected promotion command ${args[0]}`);
+      child.stdout.end();
+      child.stderr.end();
+      promotionChildren -= 1;
+      child.emit("close", 0, null);
+    });
+    return child;
+  };
+
+  mkdirSync(join(inputRoot, "existing-promotion-output"));
+  await assert.rejects(createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    nowFn() { assert.fail("existing output sampled time"); },
+    spawnFn() { assert.fail("existing output reached provider"); },
+  })(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "existing-promotion-output",
+  ])), (error) => error.tag === "promotion");
+
+  await assert.rejects(createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    nowFn: () => Number.NaN,
+    spawnFn() { assert.fail("malformed first clock reached provider"); },
+  })(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "bad-first-clock",
+  ])), (error) => error.tag === "promotion");
+  assert.equal(existsSync(join(inputRoot, "bad-first-clock.publish.lock")), false);
+  assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), false);
+
+  const promotionTimes = [Date.parse("2026-09-04T12:02:00.000Z"), Date.parse("2026-09-04T12:05:00.000Z")];
+  const promotionLockWrites = [];
+  const promotionRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH, NETLIFY_AUTH_TOKEN: "must-not-cross" },
+    processId: 1234,
+    tmpdirFn: () => testRoot,
+    nowFn: () => promotionTimes.shift(),
+    spawnFn: promotionSpawn,
+    async openFn(path, flags, mode) {
+      const handle = await openAsync(path, flags, mode);
+      if (!path.endsWith(".promote.lock") && !path.endsWith(".publish.lock")) return handle;
+      return {
+        stat: handle.stat.bind(handle),
+        async writeFile(value) {
+          promotionLockWrites.push({ path, flags, mode, value: String(value) });
+          await handle.writeFile(value);
+        },
+        sync: handle.sync.bind(handle),
+        close: handle.close.bind(handle),
+      };
+    },
+  });
+  const promotionResult = await promotionRunner(parsePromoteArgs([
+    "--file", "page-promote.html",
+    "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", "promoted",
+  ]));
+  assert.deepEqual(promotionResult, {
+    output: join(inputRoot, "promoted"),
+    siteId: "123e4567-e89b-12d3-a456-426614174000",
+    promoted: 1,
+    stale: 0,
+  });
+  assert.deepEqual(promotionCalls.map((args) => args[0]), ["blobs:get", "blobs:list", "blobs:get"]);
+  assert.deepEqual(readdirSync(join(inputRoot, "promoted")), ["document.edit.json", "history.json", "index.html"]);
+  for (const name of ["document.edit.json", "history.json", "index.html"]) {
+    assert.equal(lstatSync(join(inputRoot, "promoted", name)).mode & 0o777, 0o600);
+  }
+  assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), false);
+  assert.equal(existsSync(join(inputRoot, "promoted.publish.lock")), false);
+  assert.equal(existsSync(join(inputRoot, "promoted.promote-staging")), false);
+  assert.deepEqual(promotionTimes, [], "promotion samples exactly two clocks");
+  const expectedLockLine = `${JSON.stringify({
+    v: 1,
+    pid: 1234,
+    startedAt: "2026-09-04T12:02:00.000Z",
+    output: join(inputRoot, "promoted"),
+  })}\n`;
+  assert.deepEqual(promotionLockWrites, [
+    { path: join(inputRoot, "edit-no-history.json.promote.lock"), flags: "wx", mode: 0o600, value: expectedLockLine },
+    { path: join(inputRoot, "promoted.publish.lock"), flags: "wx", mode: 0o600, value: expectedLockLine },
+  ], "history and output locks receive identical immutable bytes in order");
+
+  promotionRemoteManifest = manifest;
+  const historicalTimes = [Date.parse("2026-09-04T13:02:00.000Z"), Date.parse("2026-09-04T13:05:00.000Z")];
+  const historicalRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    processId: 1236,
+    tmpdirFn: () => testRoot,
+    nowFn: () => historicalTimes.shift(),
+    spawnFn: promotionSpawn,
+  });
+  const historicalResult = await historicalRunner(parsePromoteArgs([
+    "--file", "page-promote-history.html",
+    "--manifest", "edit-promote-history.json",
+    "--history", "history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", "promoted-history",
+  ]));
+  assert.equal(historicalResult.promoted, 1);
+  assert.equal(JSON.parse(readFileSync(join(inputRoot, "promoted-history", "history.json"), "utf8")).versions.length, 2);
+  assert.deepEqual(historicalTimes, []);
+
+  const partialTopology = [
+    ["page-promote.html", "edit-promote-history.json", null],
+    ["page-promote-history.html", "edit-no-history.json", null],
+    ["page-promote.html", "edit-no-history.json", "history.json"],
+    ["page-promote-history.html", "edit-promote-history.json", null],
+    ["page-promote.html", "edit-promote-history.json", "history.json"],
+    ["page-promote-history.html", "edit-no-history.json", "history.json"],
+  ];
+  let partialSpawns = 0;
+  for (const [index, [fileName, manifestName, historyName]] of partialTopology.entries()) {
+    const partialRunner = createPromotionRunner({
+      workingDirectory: inputRoot,
+      repositoryRoot,
+      env: { PATH: process.env.PATH },
+      tmpdirFn: () => testRoot,
+      nowFn() { assert.fail("partial history topology sampled time"); },
+      spawnFn() { partialSpawns += 1; throw new Error("partial history topology reached provider"); },
+    });
+    const tokens = [
+      "--file", fileName,
+      "--manifest", manifestName,
+      ...(historyName === null ? [] : ["--history", historyName]),
+      "--site", "123e4567-e89b-12d3-a456-426614174000",
+      "--output", `partial-${index}`,
+    ];
+    await assert.rejects(partialRunner(parsePromoteArgs(tokens)), (error) => error.tag === "promotion");
+    assert.equal(existsSync(join(inputRoot, `partial-${index}`)), false);
+  }
+  assert.equal(partialSpawns, 0, "partial history topologies stop before provider work");
+  promotionRemoteManifest = noHistoryManifest;
+
+  const malformedSecondTimes = [Date.parse("2026-09-04T14:00:00.000Z"), Number.NaN];
+  await assert.rejects(createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    tmpdirFn: () => testRoot,
+    nowFn: () => malformedSecondTimes.shift(),
+    spawnFn: promotionSpawn,
+  })(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "bad-second-clock",
+  ])), (error) => error.tag === "promotion");
+  assert.deepEqual(malformedSecondTimes, []);
+  assert.equal(existsSync(join(inputRoot, "bad-second-clock")), false);
+  assert.equal(existsSync(join(inputRoot, "bad-second-clock.publish.lock")), false);
+  assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), false);
+
+  let rejectedPromotionIndex = 0;
+  const rejectPromotion = async (inventory, receipts, expectedTag = "promotion") => {
+    promotionInventory = inventory;
+    promotionRemoteReceipts = receipts;
+    const outputName = `rejected-promotion-${rejectedPromotionIndex}`;
+    rejectedPromotionIndex += 1;
+    const times = [Date.parse("2026-09-04T15:00:00.000Z"), Date.parse("2026-09-04T15:01:00.000Z")];
+    const runner = createPromotionRunner({
+      workingDirectory: inputRoot,
+      repositoryRoot,
+      env: { PATH: process.env.PATH },
+      tmpdirFn: () => testRoot,
+      nowFn: () => times.shift(),
+      spawnFn: promotionSpawn,
+    });
+    await assert.rejects(runner(parsePromoteArgs([
+      "--file", "page-promote.html",
+      "--manifest", "edit-no-history.json",
+      "--site", "123e4567-e89b-12d3-a456-426614174000",
+      "--output", outputName,
+    ])), (error) => error.tag === expectedTag);
+    assert.equal(existsSync(join(inputRoot, outputName)), false);
+    assert.equal(existsSync(join(inputRoot, `${outputName}.publish.lock`)), false);
+    assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), false);
+  };
+  const validInventoryRow = { etag: "fixture-etag", key: `edits/${docId}/${aid}.json` };
+  for (const invalidInventory of [
+    [],
+    { blobs: [], directories: ["edits/"] },
+    { blobs: [{ ...validInventoryRow, etag: "" }], directories: [] },
+    { blobs: [{ ...validInventoryRow, etag: "x".repeat(513) }], directories: [] },
+    { blobs: [{ ...validInventoryRow, key: `edits/${docId}/wrong.json` }], directories: [] },
+    { blobs: [validInventoryRow, validInventoryRow], directories: [] },
+    { blobs: Array.from({ length: 1001 }, (_, index) => ({
+      etag: `etag-${index}`,
+      key: `edits/${docId}/a${index.toString(16).padStart(8, "0")}.json`,
+    })), directories: [] },
+    "x".repeat(1_048_577),
+  ]) await rejectPromotion(invalidInventory, new Map([[aid, directReceipt]]));
+  await rejectPromotion(
+    { blobs: [validInventoryRow], directories: [] },
+    new Map([[aid, { ...directReceipt, baseHash: "0".repeat(64) }]]),
+    "no-current",
+  );
+
+  writeFileSync(join(inputRoot, "page-promote-thirteen.html"), thirteen.html);
+  writeFileSync(join(inputRoot, "edit-promote-thirteen.json"), `${JSON.stringify(thirteen.manifest, null, 2)}\n`);
+  promotionRemoteManifest = thirteen.manifest;
+  promotionRemoteReceipts = new Map(thirteen.receipts.map((receipt) => [receipt.aid, receipt]));
+  promotionInventory = {
+    blobs: thirteen.receipts.map((receipt) => ({ etag: `etag-${receipt.aid}`, key: `edits/${docId}/${receipt.aid}.json` })),
+    directories: [],
+  };
+  const tooManyRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    tmpdirFn: () => testRoot,
+    nowFn: () => Date.parse("2026-09-04T15:00:00.000Z"),
+    spawnFn: promotionSpawn,
+  });
+  await assert.rejects(tooManyRunner(parsePromoteArgs([
+    "--file", "page-promote-thirteen.html",
+    "--manifest", "edit-promote-thirteen.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", "too-many-promotion",
+  ])), (error) => error.tag === "too-many");
+  assert.equal(existsSync(join(inputRoot, "too-many-promotion")), false);
+  promotionRemoteManifest = noHistoryManifest;
+  promotionRemoteReceipts = new Map([[aid, directReceipt]]);
+  promotionInventory = { blobs: [validInventoryRow], directories: [] };
+
+  const atomicFailure = async (outputName, overrides, expectedTag = "promotion", { sourceLockRemains = false } = {}) => {
+    const runner = createPromotionRunner({
+      workingDirectory: inputRoot,
+      repositoryRoot,
+      env: { PATH: process.env.PATH },
+      tmpdirFn: () => testRoot,
+      nowFn: () => Date.parse("2026-09-04T16:00:00.000Z"),
+      spawnFn: promotionSpawn,
+      ...overrides,
+    });
+    await assert.rejects(runner(parsePromoteArgs([
+      "--file", "page-promote.html",
+      "--manifest", "edit-no-history.json",
+      "--site", "123e4567-e89b-12d3-a456-426614174000",
+      "--output", outputName,
+    ])), (error) => error.tag === expectedTag);
+    assert.equal(existsSync(join(inputRoot, `${outputName}.publish.lock`)), false);
+    assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), sourceLockRemains);
+  };
+
+  const sourceLockPath = join(inputRoot, "edit-no-history.json.promote.lock");
+  writeFileSync(sourceLockPath, "existing source lock\n", { mode: 0o600 });
+  await atomicFailure("history-lock-output", {}, "history-lock", { sourceLockRemains: true });
+  assert.equal(readFileSync(sourceLockPath, "utf8"), "existing source lock\n");
+  rmSync(sourceLockPath);
+
+  const outputLockPath = join(inputRoot, "output-lock-output.publish.lock");
+  writeFileSync(outputLockPath, "existing output lock\n", { mode: 0o600 });
+  await assert.rejects(createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    tmpdirFn: () => testRoot,
+    nowFn: () => Date.parse("2026-09-04T16:00:00.000Z"),
+    spawnFn: promotionSpawn,
+  })(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "output-lock-output",
+  ])), (error) => error.tag === "output-lock");
+  assert.equal(readFileSync(outputLockPath, "utf8"), "existing output lock\n");
+  assert.equal(existsSync(sourceLockPath), false);
+  rmSync(outputLockPath);
+
+  const invalidHandleLock = join(inputRoot, "invalid-handle.publish.lock");
+  const invalidHandleRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    tmpdirFn: () => testRoot,
+    nowFn: () => Date.parse("2026-09-04T16:00:00.000Z"),
+    spawnFn: promotionSpawn,
+    async openFn(path, flags, mode) {
+      const handle = await openAsync(path, flags, mode);
+      if (path === invalidHandleLock) {
+        await handle.close();
+        return {};
+      }
+      return handle;
+    },
+  });
+  await assert.rejects(invalidHandleRunner(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "invalid-handle",
+  ])), (error) => error.tag === "promotion-cleanup" && error.detail === invalidHandleLock);
+  assert.equal(existsSync(invalidHandleLock), true);
+  assert.equal(existsSync(sourceLockPath), false);
+  rmSync(invalidHandleLock);
+
+  const stagingCollision = join(inputRoot, "staging-collision.promote-staging");
+  mkdirSync(stagingCollision);
+  writeFileSync(join(stagingCollision, "keep.txt"), "preserve\n");
+  await atomicFailure("staging-collision", {});
+  assert.equal(readFileSync(join(stagingCollision, "keep.txt"), "utf8"), "preserve\n");
+  rmSync(stagingCollision, { recursive: true });
+
+  await atomicFailure("rename-failure", {
+    async renameFn() { throw new Error("invented rename failure"); },
+  });
+  assert.equal(existsSync(join(inputRoot, "rename-failure")), false);
+  assert.equal(existsSync(join(inputRoot, "rename-failure.promote-staging")), false);
+
+  await atomicFailure("staged-sync-failure", {
+    async openFn(path, flags, mode) {
+      const handle = await openAsync(path, flags, mode);
+      if (path === join(inputRoot, "staged-sync-failure.promote-staging", "index.html")) {
+        return {
+          writeFile: handle.writeFile.bind(handle),
+          async sync() { throw new Error("invented staged sync failure"); },
+          close: handle.close.bind(handle),
+        };
+      }
+      return handle;
+    },
+  });
+  assert.equal(existsSync(join(inputRoot, "staged-sync-failure")), false);
+  assert.equal(existsSync(join(inputRoot, "staged-sync-failure.promote-staging")), false);
+
+  await atomicFailure("parent-sync-failure", {
+    async openFn(path, flags, mode) {
+      const handle = await openAsync(path, flags, mode);
+      if (path === inputRoot && flags === "r") {
+        return {
+          async sync() { throw new Error("invented parent sync failure"); },
+          close: handle.close.bind(handle),
+        };
+      }
+      return handle;
+    },
+  });
+  assert.ok(lstatSync(join(inputRoot, "parent-sync-failure")).isDirectory(), "complete renamed output survives parent sync uncertainty");
+
+  const cleanupFailureLock = join(inputRoot, "cleanup-failure.publish.lock");
+  const cleanupRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    tmpdirFn: () => testRoot,
+    nowFn: () => Date.parse("2026-09-04T16:00:00.000Z"),
+    spawnFn: promotionSpawn,
+    async rmFn(path, options) {
+      if (path === cleanupFailureLock) throw new Error("invented cleanup failure");
+      rmSync(path, options);
+    },
+  });
+  await assert.rejects(cleanupRunner(parsePromoteArgs([
+    "--file", "page-promote.html", "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000", "--output", "cleanup-failure",
+  ])), (error) => error.tag === "promotion-cleanup" && error.detail === cleanupFailureLock);
+  assert.ok(lstatSync(join(inputRoot, "cleanup-failure")).isDirectory(), "cleanup failure overrides completed publication");
+  assert.equal(existsSync(cleanupFailureLock), true);
+  rmSync(cleanupFailureLock);
+
+  const promotionSignals = [];
+  const promotionTimers = [];
+  const timedPromotionRunner = createPromotionRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    processId: 1235,
+    tmpdirFn: () => testRoot,
+    nowFn: () => Date.parse("2026-09-04T12:02:00.000Z"),
+    setTimeoutFn(callback, milliseconds) {
+      const timer = { callback, milliseconds, cleared: false };
+      promotionTimers.push(timer);
+      return timer;
+    },
+    clearTimeoutFn(timer) { timer.cleared = true; },
+    spawnFn() {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = (signal) => {
+        promotionSignals.push(signal);
+        if (signal === "SIGKILL") process.nextTick(() => {
+          child.stdout.end();
+          child.stderr.end();
+          child.emit("close", null, "SIGKILL");
+        });
+        return true;
+      };
+      return child;
+    },
+  });
+  const timedPromotion = timedPromotionRunner(parsePromoteArgs([
+    "--file", "page-promote.html",
+    "--manifest", "edit-no-history.json",
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", "timed-promotion",
+  ]));
+  for (let attempt = 0; attempt < 100 && !promotionTimers.some((timer) => timer.milliseconds === 60_000); attempt += 1) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1));
+  }
+  const promotionOperationTimer = promotionTimers.find((timer) => timer.milliseconds === 60_000);
+  assert.ok(promotionOperationTimer, "promotion operation deadline starts");
+  promotionOperationTimer.callback();
+  const promotionEscalationTimer = promotionTimers.find((timer) => timer.milliseconds === 2_000);
+  assert.ok(promotionEscalationTimer, "promotion kill escalation starts");
+  promotionEscalationTimer.callback();
+  await assert.rejects(timedPromotion, (error) => error.tag === "promotion");
+  assert.deepEqual(promotionSignals, ["SIGTERM", "SIGKILL"]);
+  assert.ok(promotionTimers.every((timer) => timer.cleared));
+  assert.equal(existsSync(join(inputRoot, "edit-no-history.json.promote.lock")), false);
+  assert.equal(existsSync(join(inputRoot, "timed-promotion.publish.lock")), false);
 
   const calls = [];
   let ownerSeed = "";
@@ -1027,6 +1781,7 @@ import { basename, isAbsolute } from "node:path";
 const args = process.argv.slice(2);
 const statePath = ${JSON.stringify(statePath)};
 const blobPath = ${JSON.stringify(blobPath)};
+const promotionReceipt = ${JSON.stringify(directReceipt)};
 const state = JSON.parse(readFileSync(statePath, "utf8"));
 const siteId = "123e4567-e89b-12d3-a456-426614174000";
 const exact = (expected) => JSON.stringify(args) === JSON.stringify(expected);
@@ -1075,11 +1830,20 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
   const input = args[4];
   if (args.length !== 5 || !exact(["blobs:set", "doc-state", "mode/4b7d2a/manifest.json", "--input", input]) || !isAbsolute(input) || basename(input) !== "manifest.input" || process.env.NETLIFY_SITE_ID !== siteId) reject();
   else copyFileSync(input, blobPath);
+} else if (args[0] === "blobs:list") {
+  if (!exact(["blobs:list", "doc-state", "--prefix", "edits/4b7d2a/", "--json"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
+  else process.stdout.write(JSON.stringify(state.emptyInventory === true
+    ? { blobs: [], directories: [] }
+    : { blobs: [{ etag: "fixture-etag", key: "edits/4b7d2a/a12345678.json" }], directories: [] }));
 } else if (args[0] === "blobs:get") {
   const output = args[4];
-  if (args.length !== 5 || !exact(["blobs:get", "doc-state", "mode/4b7d2a/manifest.json", "--output", output]) || !isAbsolute(output) || basename(output) !== "manifest.output" || process.env.NETLIFY_SITE_ID !== siteId) reject();
-  else if (state.drift === true) writeFileSync(output, Buffer.concat([readFileSync(blobPath), Buffer.from("\\n")]));
-  else copyFileSync(blobPath, output);
+  if (args.length !== 5 || !isAbsolute(output) || process.env.NETLIFY_SITE_ID !== siteId) reject();
+  else if (args[2] === "mode/4b7d2a/manifest.json" && ["manifest.output", "manifest.json"].includes(basename(output))) {
+    if (state.drift === true) writeFileSync(output, Buffer.concat([readFileSync(blobPath), Buffer.from("\\n")]));
+    else copyFileSync(blobPath, output);
+  } else if (args[2] === "edits/4b7d2a/a12345678.json" && /^receipt-0\\.json$/.test(basename(output))) {
+    writeFileSync(output, JSON.stringify(promotionReceipt));
+  } else reject();
 } else if (args[0] === "deploy") {
   if (!exact(["deploy", "--prod", "--no-build", "--dir", "publish", "--json"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
   else { state.deploys = (state.deploys ?? 0) + 1; save(); process.stdout.write('{"url":"https://fixture-site.netlify.app/"}'); }
@@ -1163,6 +1927,22 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
     "node scripts/connect.mjs --file <html> --manifest <edit.json> [--history <history.json>] --owner <email> --site <site-id>\n" +
     "--history is required when manifest.commit is set; omit --history and #doc-history when it is empty.\n" +
     "node scripts/connect.mjs --help\n");
+  const promoteHelpCommand = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "connect.mjs"), "promote", "--help"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  assert.equal(promoteHelpCommand.status, 0);
+  assert.equal(promoteHelpCommand.stderr, "");
+  assert.equal(promoteHelpCommand.stdout,
+    "node scripts/connect.mjs promote --file <html> --manifest <edit.json> [--history <history.json>] --site <site-id> --output <new-directory>\n" +
+    "node scripts/connect.mjs promote --help\n");
+  const invalidPromoteCommand = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "connect.mjs"), "promote", "--file=page.html"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  assert.equal(invalidPromoteCommand.status, 2);
+  assert.equal(invalidPromoteCommand.stdout, "");
+  assert.equal(invalidPromoteCommand.stderr, "connect: invalid promotion arguments\n");
   const command = spawnSync(process.execPath, [
     join(repositoryRoot, "scripts", "connect.mjs"),
     "--file", join(inputRoot, "page.html"),
@@ -1205,6 +1985,67 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
   assert.equal(stateAfterNoHistoryCreate.siteName, "no-history-fixture", "successful create keeps the new site");
   const deploysAfterSuccess = stateAfterNoHistoryCreate.deploys;
   assert.ok(Number.isInteger(deploysAfterSuccess) && deploysAfterSuccess >= 1);
+  const promotedOutput = join(inputRoot, "promoted-cli");
+  const promoteCommand = spawnSync(process.execPath, [
+    join(repositoryRoot, "scripts", "connect.mjs"), "promote",
+    "--file", join(inputRoot, "page-promote.html"),
+    "--manifest", join(inputRoot, "edit-no-history.json"),
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", promotedOutput,
+  ], {
+    cwd: repositoryRoot,
+    env: { PATH: `${fakeBin}:${process.env.PATH}`, TMPDIR: commandTempRoot },
+    encoding: "utf8",
+  });
+  assert.equal(promoteCommand.status, 0, promoteCommand.stderr);
+  assert.equal(promoteCommand.stderr, "");
+  assert.equal(promoteCommand.stdout,
+    "Promoted 1 current overlays; skipped 0 stale overlays.\n" +
+    `Wrote reviewable Mode A bundle to '${promotedOutput}'.\n` +
+    "Review index.html, document.edit.json, and history.json before reconnecting.\n" +
+    `Reconnect with: node scripts/connect.mjs --file '${join(promotedOutput, "index.html")}' --manifest '${join(promotedOutput, "document.edit.json")}' --history '${join(promotedOutput, "history.json")}' --owner <owner-email> --site 123e4567-e89b-12d3-a456-426614174000\n`);
+  assert.deepEqual(readdirSync(promotedOutput), ["document.edit.json", "history.json", "index.html"]);
+  assert.deepEqual(readdirSync(commandTempRoot), [], "promotion CLI cleans its temporary root");
+  assert.equal(JSON.parse(readFileSync(statePath, "utf8")).deploys, deploysAfterSuccess, "promotion CLI performs no remote deployment");
+  const runPromoteCommand = (outputName) => spawnSync(process.execPath, [
+    join(repositoryRoot, "scripts", "connect.mjs"), "promote",
+    "--file", join(inputRoot, "page-promote.html"),
+    "--manifest", join(inputRoot, "edit-no-history.json"),
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+    "--output", join(inputRoot, outputName),
+  ], {
+    cwd: repositoryRoot,
+    env: { PATH: `${fakeBin}:${process.env.PATH}`, TMPDIR: commandTempRoot },
+    encoding: "utf8",
+  });
+  const cliSourceLock = join(inputRoot, "edit-no-history.json.promote.lock");
+  writeFileSync(cliSourceLock, "pre-existing source lock\n", { mode: 0o600 });
+  const historyLockCommand = runPromoteCommand("cli-history-lock");
+  assert.equal(historyLockCommand.status, 1);
+  assert.equal(historyLockCommand.stdout, "");
+  assert.equal(historyLockCommand.stderr, "connect: another promotion owns this history\n");
+  assert.equal(readFileSync(cliSourceLock, "utf8"), "pre-existing source lock\n");
+  rmSync(cliSourceLock);
+  const cliOutputLock = join(inputRoot, "cli-output-lock.publish.lock");
+  writeFileSync(cliOutputLock, "pre-existing output lock\n", { mode: 0o600 });
+  const outputLockCommand = runPromoteCommand("cli-output-lock");
+  assert.equal(outputLockCommand.status, 1);
+  assert.equal(outputLockCommand.stdout, "");
+  assert.equal(outputLockCommand.stderr, "connect: another promotion owns this output\n");
+  assert.equal(readFileSync(cliOutputLock, "utf8"), "pre-existing output lock\n");
+  assert.equal(existsSync(cliSourceLock), false);
+  rmSync(cliOutputLock);
+  const emptyInventoryState = JSON.parse(readFileSync(statePath, "utf8"));
+  emptyInventoryState.emptyInventory = true;
+  writeFileSync(statePath, JSON.stringify(emptyInventoryState));
+  const noCurrentCommand = runPromoteCommand("cli-no-current");
+  assert.equal(noCurrentCommand.status, 1);
+  assert.equal(noCurrentCommand.stdout, "");
+  assert.equal(noCurrentCommand.stderr, "connect: no current overlays to promote\n");
+  assert.equal(existsSync(join(inputRoot, "cli-no-current")), false);
+  const restoredInventoryState = JSON.parse(readFileSync(statePath, "utf8"));
+  delete restoredInventoryState.emptyInventory;
+  writeFileSync(statePath, JSON.stringify(restoredInventoryState));
   const runCommand = (owner) => spawnSync(process.execPath, [
     join(repositoryRoot, "scripts", "connect.mjs"),
     "--file", join(inputRoot, "page.html"),
@@ -1236,4 +2077,8 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
 
 console.log("PASS  P4-S pure connect contract");
 console.log("PASS  P4-S supervised Netlify protocol");
+console.log("PASS  P4-R supervisor signals and deadline");
+console.log("PASS  P4-R pure promotion and atomic bundle");
+console.log("PASS  P4-R supervised tokenless export");
+console.log("PASS  P4-R fixture cleaned");
 }
