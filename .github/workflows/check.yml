@@ -147,6 +147,7 @@ jobs:
           node scripts/test-p4-p.mjs
           node scripts/test-p4-o.mjs
           node scripts/test-p4-q.mjs
+          node scripts/test-p4-t.mjs
           # The four paths #125 left holding hand copies of the access-row
           # validator had no test of any kind before #128. This runner drives
           # the capability matrix through each of them, so neutering the shared
