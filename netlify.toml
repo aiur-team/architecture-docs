@@ -21,6 +21,9 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+[functions.pending]
+  included_files = ["**/dist/*.edit.json"]
+
 [[edge_functions]]
   path = "/*"
   excludedPath = ["/login/*", "/api/*", "/_assets/*"]
