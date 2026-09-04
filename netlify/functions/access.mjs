@@ -35,7 +35,9 @@ import {
   assertAccessInvitationAtKey,
   assertIdentitySub,
   capabilitiesFor,
+  GRANTABLE_ROLES,
   normalizeEmail,
+  ORG_DEFAULTS,
   resolveRole,
 } from "../lib/access.mjs";
 import { docState, mutate, read, StoreError } from "../lib/store.mjs";
@@ -55,8 +57,6 @@ const ACCESS_KEYS = Object.freeze([
 const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
 const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
 const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
-const GRANTABLE_ROLES = Object.freeze(["editor", "commenter", "viewer"]);
-const ORG_DEFAULTS = Object.freeze(["commenter", "viewer", "none"]);
 const DOC_ID_PATTERN = /^[0-9a-f]{6}$/;
 const INVITATION_HASH_PATTERN = /^[0-9a-f]{32}$/;
 const LEASE_ID_PATTERN = /^[0-9a-f]{32}$/;

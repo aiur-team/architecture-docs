@@ -42,6 +42,7 @@ const EXPECTED_CONTRACT_STDOUT = [
   "PASS  P4-J owner-only access mutations",
   "PASS  P4-J account and recovery boundary",
   "PASS  P4-J transfer, audit, and crash matrix",
+  "PASS  P4-J fence and lease guard matrix",
   "",
 ].join("\n");
 
@@ -476,8 +477,8 @@ async function runContract(workspace) {
   if (failures.length !== 0) {
     throw new Error(`contract worker failures:\n${failures.join("\n")}`);
   }
-  if (groups !== 4) {
-    throw new Error(`expected four completed groups, saw ${groups}`);
+  if (groups !== 5) {
+    throw new Error(`expected five completed groups, saw ${groups}`);
   }
   process.stdout.write(EXPECTED_CONTRACT_STDOUT);
 }
@@ -542,7 +543,7 @@ function suiteSource(accessPath) {
   const libAccess = resolve(ROOT, "netlify/lib/access.mjs");
   return [
     `import { createAccessHandler, withAccessWriteLease } from ${JSON.stringify(accessPath)};`,
-    `import { accessDocumentKey, accessGrantKey, accessInvitationKey, capabilitiesFor, resolveRole } from ${JSON.stringify(libAccess)};`,
+    `import { accessDocumentKey, accessGrantKey, accessInvitationKey, capabilitiesFor, GRANTABLE_ROLES, ORG_DEFAULTS, resolveRole } from ${JSON.stringify(libAccess)};`,
     SUITE_BODY,
   ].join("\n");
 }
@@ -1563,12 +1564,181 @@ async function groupFour() {
   eq(crashKit.events.length, 0, "no audit event is invented for a crashed append");
 }
 
+/*
+ * The primitives the whole specification rests on: the ownership and transfer
+ * fences, the coordinator's lease/epoch CAS guard, the release guard, and the
+ * freshness compare in front of a role change. Groups one to four exercise
+ * these on the happy path, where a passing fence is indistinguishable from an
+ * absent one. Each case below interleaves a second writer at the exact point
+ * only one guard can see, so deleting that guard is the only way to change the
+ * result.
+ */
+async function groupFive() {
+  group = "fence and lease guard matrix";
+
+  const SUCCESSOR_LEASE_ID = "b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6";
+  const GRANT_KEY = accessGrantKey(DOC, EDITOR.sub);
+  const DOC_KEY = accessDocumentKey(DOC);
+
+  function successorRecord(epoch) {
+    return writeRecord({
+      epoch: epoch,
+      lease: {
+        id: SUCCESSOR_LEASE_ID,
+        holder: { kind: "owner", sub: EDITOR.sub },
+        acquiredAt: NOW,
+        expiresAt: new Date(NOW_MS + 120000).toISOString(),
+      },
+    });
+  }
+
+  function granted() {
+    const store = seededStore();
+    store.put(GRANT_KEY, grantRecord(EDITOR, "editor"));
+    return store;
+  }
+
+  // 1. The actor loses ownership between the inventory read and the commit.
+  //    inventory() already read a document naming them, so ownerFence() is the
+  //    only thing left that can refuse.
+  const deauth = granted();
+  const deauthRead = deauth.getWithMetadata;
+  let docReads = 0;
+  deauth.getWithMetadata = async function (key, options) {
+    const result = await deauthRead.call(deauth, key, options);
+    if (key === DOC_KEY) {
+      docReads += 1;
+      if (docReads === 1) {
+        deauth.put(DOC_KEY, docRecord({ ownerSub: VIEWER.sub, ownerEmail: VIEWER.email }));
+      }
+    }
+    return result;
+  };
+  const deauthKit = kitFor(deauth);
+  await expectError(await deauthKit.handler(makeReq("DELETE", "/api/access", { doc: DOC, sub: EDITOR.sub })), 403, "forbidden", "a revocation whose actor is deauthorized after the inventory read");
+  check(docReads >= 2, "the fence re-reads the access document after the inventory read -- saw " + docReads);
+  eq(deauth.has(GRANT_KEY), true, "the fenced revocation deletes nothing");
+  eq(deauthKit.events.length, 0, "the fenced revocation audits nothing");
+  eq(coordinatorOf(deauth).lease, null, "the fenced revocation still releases its own lease");
+
+  // 2. A second writer moves the grant row between the inventory read and the
+  //    role-change CAS. Only the freshness compare sees it.
+  const drifted = granted();
+  const driftedRead = drifted.getWithMetadata;
+  let grantReads = 0;
+  drifted.getWithMetadata = async function (key, options) {
+    const result = await driftedRead.call(drifted, key, options);
+    if (key === GRANT_KEY) {
+      grantReads += 1;
+      if (grantReads === 1) {
+        drifted.put(GRANT_KEY, grantRecord(EDITOR, "commenter", { grantedAt: "2026-08-02T09:00:00.000Z" }));
+      }
+    }
+    return result;
+  };
+  const driftedKit = kitFor(drifted);
+  await expectError(await driftedKit.handler(makeReq("PATCH", "/api/access", { doc: DOC, sub: EDITOR.sub, role: "viewer" })), 409, "conflict", "a role change whose grant row moved after the inventory read");
+  check(grantReads >= 2, "the role change re-reads the grant row before writing it -- saw " + grantReads);
+  eq(drifted.peek(GRANT_KEY), grantRecord(EDITOR, "commenter", { grantedAt: "2026-08-02T09:00:00.000Z" }), "the interleaved grant row is left exactly as the other writer left it");
+  eq(driftedKit.events.length, 0, "no change event is audited for a refused role change");
+
+  // 3. A second acquirer takes the coordinator -- new lease, bumped epoch --
+  //    after this request's authority commit. Only the lease/epoch guard in
+  //    updateCoordinator() stops the stale request writing over it.
+  const raced = granted();
+  const racedSet = raced.setJSON;
+  let hijacked = false;
+  let hijackedEpoch = -1;
+  raced.setJSON = async function (key, value, options) {
+    const result = await racedSet.call(raced, key, value, options);
+    if (!hijacked && key === DOC_KEY && value !== null && typeof value === "object" &&
+        value.ownerSub === EDITOR.sub) {
+      hijacked = true;
+      hijackedEpoch = coordinatorOf(raced).epoch + 1;
+      raced.put(WRITE_KEY, successorRecord(hijackedEpoch));
+    }
+    return result;
+  };
+  const racedKit = kitFor(raced);
+  await expectError(await racedKit.handler(makeReq("POST", "/api/access/transfer", { doc: DOC, sub: EDITOR.sub })), 409, "conflict", "a transfer whose coordinator is taken by a second acquirer");
+  check(hijacked, "the transfer reached the authority commit before the coordinator was taken");
+  const racedCoordinator = coordinatorOf(raced);
+  eq(racedCoordinator.transfer, null, "the stale request never advances the successor's coordinator");
+  eq(racedCoordinator.lease.id, SUCCESSOR_LEASE_ID, "the successor's lease survives the stale request");
+  eq(racedCoordinator.epoch, hijackedEpoch, "the successor's epoch is not rewound");
+  eq(raced.has(accessGrantKey(DOC, OWNER.sub)), false, "the stale transfer never re-grants the former owner");
+
+  // 4. The same takeover, but on a path with no coordinator write left: the
+  //    request completes, and its release must not clear the successor's lease.
+  const successor = granted();
+  const successorDelete = successor.delete;
+  let installed = false;
+  successor.delete = async function (key) {
+    const result = await successorDelete.call(successor, key);
+    if (!installed && key === GRANT_KEY) {
+      installed = true;
+      successor.put(WRITE_KEY, successorRecord(coordinatorOf(successor).epoch + 1));
+    }
+    return result;
+  };
+  const successorKit = kitFor(successor);
+  await expectNoContent(await successorKit.handler(makeReq("DELETE", "/api/access", { doc: DOC, sub: EDITOR.sub })), "a revocation completing under a lease a successor already replaced");
+  check(installed, "the successor's lease was installed during the revocation");
+  const successorCoordinator = coordinatorOf(successor);
+  check(successorCoordinator.lease !== null, "the outgoing request cleared a successor's lease");
+  eq(successorCoordinator.lease === null ? null : successorCoordinator.lease.id, SUCCESSOR_LEASE_ID, "the outgoing request leaves the successor's lease exactly as it found it");
+
+  // 5. The document stops naming the new owner midway through the transfer
+  //    saga. Only transferFence()'s toOwner requirement refuses the rest of it.
+  const reverted = granted();
+  const revertedDelete = reverted.delete;
+  let restored = false;
+  reverted.delete = async function (key) {
+    const result = await revertedDelete.call(reverted, key);
+    if (!restored && key === GRANT_KEY) {
+      restored = true;
+      reverted.put(DOC_KEY, docRecord());
+    }
+    return result;
+  };
+  const revertedKit = kitFor(reverted);
+  await expectError(await revertedKit.handler(makeReq("POST", "/api/access/transfer", { doc: DOC, sub: EDITOR.sub })), 409, "conflict", "a transfer whose document stops naming the new owner");
+  check(restored, "the redundant target grant was removed before the document was reverted");
+  eq(reverted.has(accessGrantKey(DOC, OWNER.sub)), false, "the former owner is never re-granted behind a failed transfer fence");
+  eq(revertedKit.events.length, 0, "no transfer event is audited behind a failed transfer fence");
+
+  // 6. The owner's own access is not a target. Without the guard a revocation
+  //    would report 404 rather than refusing, so the code is asserted too.
+  const ownerTarget = granted();
+  const ownerKit = kitFor(ownerTarget);
+  await expectError(await ownerKit.handler(makeReq("DELETE", "/api/access", { doc: DOC, sub: OWNER.sub })), 409, "conflict", "the owner's own access cannot be revoked");
+  await expectError(await ownerKit.handler(makeReq("PATCH", "/api/access", { doc: DOC, sub: OWNER.sub, role: "viewer" })), 409, "conflict", "the owner's own role cannot be changed");
+  eq(ownerTarget.peek(DOC_KEY).ownerSub, OWNER.sub, "the document still names its owner");
+  eq(ownerKit.events.length, 0, "no event is audited for a refused owner mutation");
+
+  // 7. The request validator and the record validators read one list, not two.
+  eq(GRANTABLE_ROLES, ["editor", "commenter", "viewer"], "the library owns the grantable role list");
+  eq(ORG_DEFAULTS, ["commenter", "viewer", "none"], "the library owns the organization default list");
+  const roleGate = kitFor(granted());
+  await expectError(await roleGate.handler(makeReq("PATCH", "/api/access", { doc: DOC, sub: EDITOR.sub, role: "owner" })), 400, "invalid-request", "owner is not a grantable role");
+
+  // 8. authorize() reads its role test and its canShare test as one fact,
+  //    because validateAccess() has already bound the capability row to the
+  //    role key-for-key. A resolver that forges canShare onto a lesser role
+  //    therefore fails closed at validation rather than reaching the disjunct.
+  const forged = kitFor(granted(), {
+    resolveRoleFn() { return Object.assign(accessRow("editor", true), { canShare: true }); },
+  });
+  await expectError(await forged.handler(makeReq("PATCH", "/api/access", { doc: DOC, orgDefault: "viewer" })), 500, "internal-error", "a role whose capability row was forged is refused before authorization");
+}
+
 export default async function run() {
   await groupOne();
   await groupTwo();
   await groupThree();
   await groupFour();
-  return 4;
+  await groupFive();
+  return 5;
 }
 `;
 

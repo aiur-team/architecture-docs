@@ -114,10 +114,13 @@ jobs:
           # with #124. Every other runner is invoked directly.
           #
           # test-p4-j.mjs names the mode it runs: `contract` is the hermetic
-          # one, and `hosted` needs operator credentials no build has. Its
-          # reviewed-base gate is deliberately not driven from here -- the only
-          # commits that satisfy it live on the ticket branch and do not survive
-          # the squash merge, so a `P4J_BASE` set here would fail on `main`.
+          # one, and `hosted` needs operator credentials no build has. This
+          # invocation runs with `P4J_BASE` unset, which means its reviewed-base
+          # gate is SKIPPED and the working tree is what is under test -- the
+          # runner says so on stderr every build. That is deliberate: the only
+          # commits that satisfy the gate live on the ticket branch and do not
+          # survive the squash merge, so a `P4J_BASE` set here would abort every
+          # push build on `main` (#133).
           node scripts/allow-known-runner-failure.mjs scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-j.mjs contract
