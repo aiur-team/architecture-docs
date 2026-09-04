@@ -65,8 +65,8 @@ each known failure is written down instead: named, dated, linked to the issue th
 `ALLOW` line on every run, and scoped so tightly that a second failure in the same worker still fails CI.
 Each entry stops applying the moment its defect leaves the source, and the wrapper then fails until the
 entry is removed. **Its table is currently empty and every runner is invoked directly** — its one entry,
-`test-p4-a.mjs`'s browser matrix, was granted by #107 and removed by #124, which is the lifetime an entry
-here is meant to have.
+`test-p4-a.mjs`'s browser matrix, was granted by #107 (PR #116) and removed by #124, which is the lifetime
+an entry here is meant to have.
 
 `check-test-inventory.mjs` is why the literal test list in `check.yml` can stay literal. It fails when a
 tracked test file exists that no run step names, so **adding a test file and forgetting to wire it up is

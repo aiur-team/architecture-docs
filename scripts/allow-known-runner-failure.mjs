@@ -61,14 +61,16 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
  * `--browser` worker measured the selection tooltip with
  * `[...document.body.children].filter(...).pop()` and called
  * `getBoundingClientRect()` on the result without asserting that it found one.
- * It was granted on 2026-09-04 by #107 and removed by #124, which made the
- * measurement wait for a laid-out host and report the selector when there is
+ * It was granted on 2026-09-04 by #107 (PR #116) and removed by #124, which made
+ * the measurement wait for a laid-out host and report the selector when there is
  * none. That is the intended lifetime of an entry here.
  *
- * A new entry needs all five keys the code below reads: `since`, `issue`,
+ * A new entry needs all six keys the code below reads: `since`, `issue`,
  * `worker`, `whileSourceMatches` (a pattern over the runner's *source*, so the
  * entry goes stale the moment the fix lands rather than when a run happens to
- * pass), `failureLine`, and `excusesErrorMatching`.
+ * pass), `failureLine`, and `excusesErrorMatching`. All six are required: an
+ * entry missing one throws where it is read, which fails the build rather than
+ * excusing anything, but the message is generic -- so write all six.
  */
 const ALLOWED_RUNNER_FAILURES = new Map([]);
 

@@ -563,8 +563,13 @@ const TOOLTIP_HOST = "a direct child of <body> carrying style.position === 'fixe
    separate measuring round trip can therefore observe the first, doomed host
    and measure the gap after it.  Locally the queued task always won the race
    and the gap never opened; in GitHub Actions it did, and the measurement read
-   `undefined.getBoundingClientRect()` (#124).  Every helper below either waits
-   past that rebuild or waits and acts inside one page function. */
+   `undefined.getBoundingClientRect()` (#124).
+
+   What closes that gap is waiting and acting inside *one* page function, which
+   is what every helper below does -- not any particular settling delay.  A
+   `waitForTimeout` before one of these calls only keeps the common case out of
+   the poll; the poll is what makes it correct, so tuning the delay is not how
+   to fix a failure here. */
 
 /* The page's own account of itself, for a failure that has to explain why no
    tooltip was there rather than throw a TypeError from inside the browser.
@@ -592,6 +597,12 @@ const describe = (page) => tooltipState(page).then(JSON.stringify, (error) => `u
 
 const firstLine = (error) => String(error && error.message ? error.message : error).split("\n")[0];
 
+/* A predicate that throws rejects immediately, so "within 5000 ms" would be a
+   lie about a failure that took no time at all -- and the thing it names would
+   be the wrong cause. Say which of the two happened. */
+const waited = (error, timeout) =>
+  (error && error.name === "TimeoutError" ? `within ${timeout} ms` : "and the page function threw");
+
 /* Poll until a host exists *and* has been laid out, then hand back everything
    a caller could want to assert, measured in the same turn that found it. */
 async function tooltipGeometry(page, label, { timeout = 5000 } = {}) {
@@ -613,7 +624,15 @@ async function tooltipGeometry(page, label, { timeout = 5000 } = {}) {
       };
     }, null, { timeout });
   } catch (error) {
-    throw new Error(`${label}: no measurable tooltip host (${TOOLTIP_HOST}) within ${timeout} ms [${firstLine(error)}]: ${await describe(page)}`);
+    /* A host that was there the whole time and never gained a size is a
+       different defect from one that never appeared, and saying "no measurable
+       tooltip host" for both would send the reader looking for the wrong one. */
+    const state = await tooltipState(page).catch((failure) => ({ unavailable: firstLine(failure) }));
+    const present = state.hostRect !== null && state.hostRect !== undefined;
+    const what = present
+      ? `the tooltip host (${TOOLTIP_HOST}) is present but was never laid out`
+      : `no tooltip host (${TOOLTIP_HOST}) appeared`;
+    throw new Error(`${label}: ${what} ${waited(error, timeout)} [${firstLine(error)}]: ${JSON.stringify(state)}`);
   }
   return handle.jsonValue();
 }
@@ -631,7 +650,7 @@ async function clickTooltipButton(page, label, { timeout = 5000 } = {}) {
       return true;
     }, null, { timeout });
   } catch (error) {
-    throw new Error(`${label}: no tooltip button to press (${TOOLTIP_HOST} > button) within ${timeout} ms [${firstLine(error)}]: ${await describe(page)}`);
+    throw new Error(`${label}: no tooltip button to press (${TOOLTIP_HOST} > button) ${waited(error, timeout)} [${firstLine(error)}]: ${await describe(page)}`);
   }
 }
 
@@ -829,8 +848,16 @@ async function runtimeMatrix() {
     await withPage(browser, host, {}, async (page) => {
       await activate(page);
 
-      await page.evaluate(() => window.__t.select({ sel: 'p[data-aid="a31b7c9d2"]', at: 4 }, { sel: 'p[data-aid="a31b7c9d2"]', at: 13 }));
-      assert.equal(await capture(page), null, "the trailing timer has not fired yet");
+      /* Making the selection and looking for the tooltip in one page function
+         is the only way to assert "not yet" about a 250 ms timer: read across
+         two round trips, a runner slow enough to spend 250 ms between them
+         fails this for no reason, which is the same class of defect as #124
+         with its polarity reversed. Inside one task the timer cannot have run. */
+      const immediate = await page.evaluate(() => {
+        window.__t.select({ sel: 'p[data-aid="a31b7c9d2"]', at: 4 }, { sel: 'p[data-aid="a31b7c9d2"]', at: 13 });
+        return [...document.body.children].filter((n) => n.style && n.style.position === "fixed").length;
+      });
+      assert.equal(immediate, 0, "the trailing timer has not fired yet");
       await page.waitForFunction(() => [...document.body.children].some((n) => n.style && n.style.position === "fixed"), null, { timeout: 4000 });
 
       await page.evaluate(() => window.__t.key({ key: "Escape" }));
@@ -858,7 +885,11 @@ async function runtimeMatrix() {
 
       /* The multi-block refusal retires itself after three seconds. */
       await selectAndSettle(page, { ...P1, at: 4 }, { ...P2, at: 7 });
-      assert.equal((await capture(page)).text, "Select inside one paragraph");
+      /* `capture` returns null when there is no host, so read it once and say
+         which tooltip was missing rather than dereferencing null (#124). */
+      const refusal = await capture(page);
+      assert.notEqual(refusal, null, `the multi-block refusal is shown (${TOOLTIP_HOST})`);
+      assert.equal(refusal.text, "Select inside one paragraph");
       await page.waitForFunction(() => ![...document.body.children].some((n) => n.style && n.style.position === "fixed"), null, { timeout: 6000 });
     });
 
@@ -1534,16 +1565,21 @@ async function browserMatrix() {
       await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 12 });
       await page.mouse.up();
       /* The drag's last `selectionchange` may still be queued behind the
-         `mouseup`; wait past the rebuild it triggers before measuring. */
+         `mouseup`, which removes the host and rebuilds it 250 ms later. This
+         wait is not what makes the measurement safe -- `tooltipGeometry` polls,
+         so it would find the rebuilt host anyway -- it just keeps the common
+         case out of the poll. A real drag on a saturated runner is the slowest
+         path in this matrix, so it gets a budget nearer Playwright's default
+         than the 5 s the helper assumes. */
       await page.waitForTimeout(SELECTION_SETTLE_MS);
 
-      const tooltip = await tooltipGeometry(page, "pointer drag");
+      const tooltip = await tooltipGeometry(page, "pointer drag", { timeout: 15_000 });
       assert.equal(tooltip.text, "Comment");
       assert.ok(tooltip.left >= 0 && tooltip.top >= 0 && tooltip.right <= VIEWPORT.viewport.width && tooltip.bottom <= VIEWPORT.viewport.height,
         `the tooltip is clamped into the viewport: ${JSON.stringify(tooltip)}`);
 
       const before = await page.evaluate(() => document.querySelector("main").innerHTML);
-      await clickTooltipButton(page, "pointer drag");
+      await clickTooltipButton(page, "pointer drag", { timeout: 15_000 });
       await page.waitForSelector("#doc-comments-draft-body");
       await page.fill("#doc-comments-draft-body", "A real comment typed into a real browser.");
       await page.click(".doc-comments-draft button[type=submit]");
@@ -1622,15 +1658,27 @@ async function browserMatrix() {
       if (prepare !== null) await prepare(page);
       await page.click("#doc-comments-toggle");
       await page.waitForSelector("#doc-comments-panel:not([hidden])");
-      /* `selectAndSettle` waits out the trailing selection timer, so the host
-         measured below is the rebuilt one and not the doomed first host. */
+      /* `selectAndSettle` leaves the selection in its settled state, so the
+         host measured below is whichever of the two the client last placed --
+         they are the same element with the same rect either way. */
       await selectAndSettle(page, { sel: 'p[data-aid="a31b7c9d2"]', at: 4 }, { sel: 'p[data-aid="a31b7c9d2"]', at: 13 });
+      /* "The tooltip is rendered" is enforced by `tooltipGeometry`, which will
+         not return a host of zero size and reports a host that is present but
+         never laid out as exactly that.  Asserting it again here would be an
+         assertion that cannot fail. */
       const geometry = await tooltipGeometry(page, name);
-      /* `tooltipGeometry` will not return an unlaid-out host, so this holds by
-         construction; it stays as the statement of what the row is about. */
-      assert.ok(geometry.width > 0 && geometry.height > 0, `${name}: the tooltip is rendered`);
+      /* `showRefusal` builds a `position: fixed` host through the same
+         `placeTooltip`, so geometry alone cannot tell "the comment affordance
+         survived this rendering condition" from "the client refused the
+         selection and offered nothing" -- which is the only thing these rows
+         are for. */
+      assert.equal(geometry.text, "Comment", `${name}: the comment affordance is what is offered`);
       assert.ok(geometry.left >= 0 && geometry.top >= 0, `${name}: the tooltip is on screen`);
-      assert.ok(geometry.left <= geometry.inner.w && geometry.top <= geometry.inner.h, `${name}: the tooltip is inside the viewport`);
+      /* The far edges, not the near ones: at 380px the clamp in `placeTooltip`
+         is load-bearing, and a tooltip hanging off the right passes a `left`
+         check trivially. */
+      assert.ok(geometry.right <= geometry.inner.w && geometry.bottom <= geometry.inner.h,
+        `${name}: the tooltip is inside the viewport: ${JSON.stringify(geometry)}`);
       assert.deepEqual(errors, [], `${name}: ${errors.join(" | ")}`);
       await context.close();
     }
