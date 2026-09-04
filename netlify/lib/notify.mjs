@@ -14,6 +14,15 @@ const THREAD_ID = /^t_[0-9a-z]+_[0-9a-f]{8}$/;
 const SUGGESTION_ID = /^s_[0-9a-z]+_[0-9a-f]{8}$/;
 const ANCHOR_ID = /^a[0-9a-f]{8}$/;
 const HASH = /^[0-9a-f]{64}$/;
+// The Slack sink is an allowlist, not "everything except edit.saved": a sixth
+// notification kind must opt in deliberately rather than fall through into the
+// thread message branch.
+const SLACK_KINDS = new Set([
+  "thread.created",
+  "thread.replied",
+  "suggest.created",
+  "suggest.decided",
+]);
 const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
@@ -384,7 +393,7 @@ export function createNotifier(dependencies = {}) {
 
     let scheduled = false;
 
-    if (notification.t !== "edit.saved") {
+    if (SLACK_KINDS.has(notification.t)) {
       try {
         const webhookUrl = validWebhookUrl(envGet("SLACK_WEBHOOK_URL"));
         const siteOrigin =
