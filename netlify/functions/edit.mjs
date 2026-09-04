@@ -1,4 +1,5 @@
 import { identify, requireOrigin } from "../lib/identity.mjs";
+import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
 import { StoreError, docState, editKey, mutate, read, upgrade } from "../lib/store.mjs";
 import { scanBlocks } from "../../templates/docbuild/dist/anchor-core.js";
 import { toHtml, toMd } from "../../templates/docbuild/dist/inline_md.js";
@@ -18,8 +19,9 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdir
 // ref, and never guesses which block the caller meant.
 //
 // Amendment chain: P4-B (this initial apply path) -> P4-M (document-role
-// `canEdit` replaces the temporary `isOrg` gate, plus audit) -> P4-N (Mode A,
-// suggestions, and the `gitedit.mjs` extraction).
+// `canSuggest` + `canEdit` replace the temporary `isOrg` gate) -> P4-N (Mode A,
+// suggestions, and the `gitedit.mjs` extraction). P4-N must leave this access
+// check in this module: `gitedit.mjs` is not an authorization oracle.
 
 const NO_STORE = "private, no-store";
 const JSON_TYPE = "application/json; charset=utf-8";
@@ -28,6 +30,7 @@ const API_ORIGIN = "https://api.github.com";
 const DEPENDENCY_KEYS = Object.freeze([
   "requireOrigin", "identify",
   "docState", "editKey", "read", "mutate", "upgrade", "StoreError",
+  "resolveRole", "capabilitiesFor",
   "scanBlocks", "toMd", "toHtml",
   "fetch", "now", "sha256Hex", "getEnv",
 ]);
@@ -41,6 +44,13 @@ const BODY_KEYS = Object.freeze(["docId", "aid", "text"]);
 const IGNORED_BODY_KEYS = Object.freeze(["author", "email", "name"]);
 
 const IDENTITY_KEYS = Object.freeze(["sub", "email", "name", "isOrg"]);
+const ACCESS_KEYS = Object.freeze([
+  "role", "shared", "canRead", "canComment", "threadControl",
+  "canSuggest", "canEdit", "canAccept", "canShare", "canSeeMembers",
+]);
+const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
+const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
+const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 const MANIFEST_KEYS = Object.freeze(["docId", "instance", "commit", "blocks"]);
 const ROW_KEYS = Object.freeze(["file", "section", "tag", "hash"]);
 const ANCHOR_SECTION_KEYS = Object.freeze(["ids", "texts"]);
@@ -1076,6 +1086,71 @@ async function commitSection(deps, config, branch, path, file, located, html, me
 
 /* -------------------------------------------------------------- the factory */
 
+/** Own enumerable data property `key` of `object` as `{ value }`, or `null`.
+ * Never invokes an accessor. */
+function ownEditData(object, key) {
+  if (object === null || typeof object !== "object") return null;
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) {
+    return null;
+  }
+  return { value: descriptor.value };
+}
+
+/** The exact descriptor-safe P2-G unavailable shape. Everything else — an
+ * arbitrary throw, a hostile object, a different store code — is invalid
+ * state, never a 503. */
+function isAccessUnavailable(error) {
+  if (error === null || typeof error !== "object" || Array.isArray(error)) return false;
+  const name = ownEditData(error, "name");
+  const code = ownEditData(error, "code");
+  const status = ownEditData(error, "status");
+  return (
+    name !== null && code !== null && status !== null &&
+    name.value === "StoreError" && code.value === "unavailable" && status.value === 503
+  );
+}
+
+/** Validate the complete P2-G result and return it unchanged. A partial,
+ * extended, accessor-backed, or internally inconsistent object is an
+ * `invalid-state`, never a falsy capability. */
+function validateAccess(deps, result) {
+  if (!isExactRecord(result, ACCESS_KEYS)) throw fail("invalid-state");
+  if (!ROLES.includes(result.role) || typeof result.shared !== "boolean") {
+    throw fail("invalid-state");
+  }
+  for (const key of CAPABILITY_KEYS) {
+    const value = result[key];
+    if (key === "threadControl") {
+      if (!THREAD_CONTROLS.includes(value)) throw fail("invalid-state");
+    } else if (typeof value !== "boolean") {
+      throw fail("invalid-state");
+    }
+  }
+  let row;
+  try {
+    row = deps.capabilitiesFor(result.role);
+  } catch {
+    throw fail("invalid-state");
+  }
+  if (row === null || typeof row !== "object") throw fail("invalid-state");
+  for (const key of CAPABILITY_KEYS) {
+    if (row[key] !== result[key]) throw fail("invalid-state");
+  }
+  return result;
+}
+
+/** The single non-consuming P2-G lookup for this request. */
+async function resolveAccess(deps, docId, identity) {
+  let result;
+  try {
+    result = await deps.resolveRole(docId, identity, { consumeInvitation: false });
+  } catch (error) {
+    throw fail(isAccessUnavailable(error) ? "unavailable" : "invalid-state");
+  }
+  return validateAccess(deps, result);
+}
+
 /**
  * Create the edit handler from one exact dependency object. Throws
  * `TypeError("Invalid edit dependencies")` synchronously on any invalid
@@ -1114,11 +1189,6 @@ export function createEditHandler(dependencies) {
       if (user === null) throw fail("unauthenticated");
       const identity = requireIdentity(user);
 
-      // The temporary Mode B write gate. P4-M replaces exactly this one check
-      // with the default resolveRole() result and an exact `canEdit === true`;
-      // this module owns no document-role table of its own.
-      if (identity.isOrg !== true) throw fail("forbidden");
-
       let search;
       try {
         search = new URL(req.url).search;
@@ -1128,6 +1198,14 @@ export function createEditHandler(dependencies) {
       if (search !== "") throw fail("invalid-body");
 
       const { docId, aid, text } = parseEditBody(deps, await readJsonObject(req));
+
+      // P4-M: the one non-consuming P2-G lookup, after every P4-B request gate
+      // and before the manifest, the source, GitHub, the receipt, or an event.
+      // `canSuggest` freezes the shared editing-family boundary; `canEdit` is
+      // the direct-write boundary. This module owns no role table of its own.
+      const access = await resolveAccess(deps, docId, identity);
+      if (access.canSuggest !== true) throw fail("forbidden");
+      if (access.canEdit !== true) throw fail("forbidden");
 
       const manifest = manifestIndex().get(docId);
       if (manifest === undefined) throw fail("not-found");
@@ -1244,6 +1322,8 @@ const production = createEditHandler({
   mutate,
   upgrade,
   StoreError,
+  resolveRole,
+  capabilitiesFor,
   scanBlocks,
   toMd,
   toHtml,
