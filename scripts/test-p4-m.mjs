@@ -642,6 +642,10 @@ async function runtimeMatrix() {
     ["an accessor-backed capability", Object.defineProperties({ ...complete }, {
       canComment: { get: () => true, enumerable: true, configurable: true },
     })],
+    ["a non-enumerable capability", Object.defineProperty({ ...complete }, "canComment", {
+      value: true, enumerable: false, writable: true, configurable: true,
+    })],
+    ["a symbol-keyed extra", Object.assign({ ...complete }, { [Symbol("canPublish")]: true })],
   ];
   for (const [label, access] of brokenAccess) {
     const run = scenario({ access });
@@ -922,23 +926,27 @@ async function runtimeMatrix() {
       eq(response.status, 500, `${what} with ${label} is 500`);
       eq((await readJson(response)).error.code, "invalid-state",
         `${what} with ${label} is invalid-state`);
-      eq(run.calls.docState, 0, `${what} with ${label} performs no thread-store work`);
-      eq(run.calls.append.length, 0, `${what} with ${label} appends nothing`);
-      eq(run.calls.notify.length, 0, `${what} with ${label} notifies nobody`);
+      eq(run.log, ["resolveRole"], `${what} with ${label} touches nothing after the lookup`);
     }
-    {
+    // A capability table is unusable whether it throws or answers with
+    // something that is not an ordinary row; both are `invalid-state`, never a
+    // falsy capability. The callable row is the case that pins the shape check:
+    // a table answering `null` fails anyway when the row is read, but a
+    // function carrying the right properties would validate without it.
+    for (const [tableLabel, capabilitiesFor] of [
+      ["an unusable capability table", () => { throw new Error("no row"); }],
+      ["a capability table that answers with a callable", (role) =>
+        Object.assign(() => {}, accessLib.capabilitiesFor(role))],
+    ]) {
       const seed = await seedThread();
-      const run = scenario({
-        store: seed.blobs,
-        capabilitiesFor: () => { throw new Error("no row"); },
-      });
+      const run = scenario({ store: seed.blobs, capabilitiesFor });
       const response = await thread(
         jsonRequest(threadUrl(seed.thread.id), method, requestBody),
         threadContext(seed.thread.id),
       );
-      eq(response.status, 500, `${what} with an unusable capability table is 500`);
-      eq(run.calls.docState, 0,
-        `${what} with an unusable capability table performs no thread-store work`);
+      eq(response.status, 500, `${what} with ${tableLabel} is 500`);
+      eq(run.log, ["resolveRole"],
+        `${what} with ${tableLabel} touches nothing after the lookup`);
     }
   }
 

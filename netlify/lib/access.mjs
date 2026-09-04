@@ -731,13 +731,9 @@ export function capabilitiesFor(role) {
   return { ...ROLE_CAPABILITIES[role] };
 }
 
-/**
- * The exact keys of one resolved access row: the two identity fields, then the
- * eight capabilities in matrix order.
- *
- * @type {readonly string[]}
- */
-export const ACCESS_ROW_KEYS = Object.freeze([
+/** The exact keys of one resolved access row: the two identity fields, then
+ * the eight capabilities in matrix order. */
+const ACCESS_ROW_KEYS = Object.freeze([
   "role",
   "shared",
   "canRead",
