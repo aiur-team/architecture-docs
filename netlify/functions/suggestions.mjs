@@ -33,7 +33,6 @@ const REAP_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
 
 const DOC_ID = /^[0-9a-f]{6}$/;
 const AID = /^a[0-9a-f]{8}$/;
-const STORE_AID = /^a[0-9a-f]{7,8}$/;
 const SUGGESTION_ID = /^s_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
 const SECTION = /^[a-z0-9][a-z0-9._-]*$/;
 const HASH = /^[0-9a-f]{64}$/;
@@ -184,7 +183,7 @@ function suggestionAtKey(value, docId, fullKey, deps) {
   }
   const by = actorOf(value.by);
   if (value.v !== 1 || typeof value.id !== "string" || !SUGGESTION_ID.test(value.id) ||
-      value.docId !== docId || typeof value.aid !== "string" || !STORE_AID.test(value.aid) ||
+      value.docId !== docId || typeof value.aid !== "string" || !AID.test(value.aid) ||
       typeof value.section !== "string" || !SECTION.test(value.section) ||
       !editable(deps, value.text) || !cleanText(value.note, 280) ||
       !editable(deps, value.baseText) || by === null || !timestamp(value.at) ||
@@ -256,7 +255,7 @@ function accessUnavailable(error) {
 }
 
 function storeFailure(error) {
-  if (!(error instanceof StoreError)) return fail("unavailable");
+  if (!(error instanceof StoreError)) return fail("invalid-state");
   const code = safeOwnValue(error, "code");
   const status = safeOwnValue(error, "status");
   return fail(code === "unavailable" && status === 503 ? "unavailable" : "invalid-state");
@@ -513,7 +512,7 @@ async function listedKeys(store, prefix, stopAtFive = false) {
       const parts = tail.split("/");
       if ((prefixDepth === 4 && parts.length !== 1) ||
           (prefixDepth === 3 && parts.length !== 2) ||
-          !SUGGESTION_ID.test(parts.at(-1)) || (parts.length === 2 && !STORE_AID.test(parts[0]))) {
+          !SUGGESTION_ID.test(parts.at(-1)) || (parts.length === 2 && !AID.test(parts[0]))) {
         throw fail("invalid-state");
       }
       seen.add(key);

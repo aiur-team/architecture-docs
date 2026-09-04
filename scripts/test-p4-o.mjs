@@ -654,6 +654,15 @@ async function runtimeMatrix() {
     (error) => ok(error instanceof Error, "key mismatch reports an error"),
     "validator rejects body/key mismatch",
   );
+  {
+    const legacy = { ...valid, aid: "a1234567" };
+    const legacyKey = storeLib.suggestionKey(DOC, legacy.aid, legacy.id);
+    throwsSync(
+      () => many.assertSuggestionAtKey(legacy, DOC, legacyKey),
+      (error) => ok(error instanceof Error, "seven-hex aid reports an error"),
+      "validator rejects a matching seven-hex stored record and key",
+    );
+  }
 
   const calls = [];
   const store = new FakeStore();
@@ -1094,7 +1103,27 @@ async function runtimeMatrix() {
     await responseJson(response, status, code);
   }
 
+  response = await many.createSuggestionsHandler(manyDeps({
+    storeFn: () => { throw new Error("unexpected provider failure"); },
+  }))(request("GET", `/api/suggestions?doc=${DOC}`, undefined, { contentType: null }), CONTEXT);
+  await responseJson(response, 500, "invalid-state");
+
   const actionBody = (action, reason = "") => ({ docId: DOC, aid: AID, sugId: ID, action, reason });
+
+  for (const [label, body] of [
+    ["empty reject reason", actionBody("reject", "")],
+    ["long reject reason", actionBody("reject", "x".repeat(281))],
+    ["non-string reject reason", actionBody("reject", 7)],
+    ["nonempty accept reason", actionBody("accept", "not allowed")],
+    ["nonempty withdraw reason", actionBody("withdraw", "not allowed")],
+  ]) {
+    const isolated = new FakeStore();
+    response = await one.createSuggestionHandler(oneDeps({
+      storeFn: () => isolated,
+    }))(request("POST", "/api/suggestion", body), CONTEXT);
+    await responseJson(response, 400, "invalid-body");
+    eq(isolated.calls, [], `${label} has no store side effects`);
+  }
 
   response = await one.createSuggestionHandler(oneDeps({ storeFn: () => null }))(
     request("POST", "/api/suggestion", actionBody("accept")), CONTEXT,
@@ -1230,6 +1259,33 @@ async function runtimeMatrix() {
     }))(request("POST", "/api/suggestion", actionBody("accept")), CONTEXT);
     eq(await responseJson(response, 200), { receipt: replayed, pr: null }, "missing-key accept replays receipt");
     eq(reads, 1, "replay reads the receipt once");
+  }
+
+  {
+    const isolated = new FakeStore();
+    const directReceipt = {
+      v: 1,
+      aid: AID,
+      text: TEXT,
+      by: clone(ACTOR),
+      at: NOW,
+      baseHash: BASE_HASH,
+      pr: null,
+      via: "edit",
+    };
+    let sideEffects = 0;
+    response = await one.createSuggestionHandler(oneDeps({
+      storeFn: () => isolated,
+      identifyFn: async () => ({ ...DECIDER, isOrg: false }),
+      readApplyReceiptFn: async () => directReceipt,
+      applyTextFn: async () => { sideEffects += 1; },
+      appendEventFn: async () => { sideEffects += 1; },
+      notifyFn: () => { sideEffects += 1; return true; },
+    }))(request("POST", "/api/suggestion", actionBody("accept")), CONTEXT);
+    await responseJson(response, 404, "not-found");
+    eq(sideEffects, 0, "direct-edit replay has no apply, event, or notification side effects");
+    eq(isolated.count("set"), 0, "direct-edit replay performs no store write");
+    eq(isolated.count("delete"), 0, "direct-edit replay performs no store delete");
   }
 
   for (const [action, reason] of [["reject", "no"], ["withdraw", ""]]) {

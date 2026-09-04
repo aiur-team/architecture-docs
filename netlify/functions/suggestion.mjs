@@ -546,6 +546,7 @@ async function replayAcceptance(deps, docId, aid, sugId) {
   } catch {
     throw fail("invalid-state");
   }
+  if (receipt.via !== "suggestion") throw fail("not-found");
   if (!isSuggestionReceipt(receipt)) throw fail("invalid-state");
   if (receipt.sugId !== sugId) throw fail("not-found");
   return { receipt, pr: receipt.pr };
