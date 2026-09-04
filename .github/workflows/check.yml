@@ -32,6 +32,11 @@ jobs:
       # destructure an export its dependency does not emit, and every gate
       # stayed green (#107). Linking is the gate: ESM resolves named imports
       # before it evaluates anything. Modules are loaded, never invoked.
+      #
+      # The position of this step is load-bearing: it runs before anything
+      # compiles or installs a workspace, because a deploy carries only
+      # netlify/, netlify.toml and the root lockfile. Moving it after a build
+      # would make it pass by arranging a condition production never provides.
       - name: every deploy module loads
         run: node scripts/check-function-modules.mjs
 

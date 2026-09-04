@@ -27,15 +27,26 @@
  * are excluded on purpose: they assert on import, they are not deployed, and CI
  * runs them as their own named steps.
  *
+ * This runs against a plain checkout on purpose, before anything compiles or
+ * installs a workspace, because that is the shape of a deploy: the P4-S connect
+ * tool copies only `netlify/`, `netlify.toml`, `package.json` and
+ * `package-lock.json`. A module that links only on a machine where some other
+ * tree happens to have been built does not link in production. Moving this step
+ * later so that build output exists would make the gate pass by arranging the
+ * one condition a deploy never provides -- see `ALLOWED_LOAD_FAILURES` for the
+ * one module that this currently catches.
+ *
  * Output contract: one `PASS` line on stdout and exit 0, or one
  * `FAIL netlify modules:` line per broken module on stderr and exit 1. Every
  * module is attempted before the process exits, so one unresolvable import does
- * not hide the next.
+ * not hide the next. A failure that matches a live entry in
+ * `ALLOWED_LOAD_FAILURES` prints one `ALLOW netlify modules:` line and does not
+ * change the exit code; any other failure in the same module still fails.
  *
  *   node scripts/check-function-modules.mjs
  */
 
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -47,6 +58,58 @@ const LIB = "netlify/lib";
 
 /** The path prefix `netlify.toml` excludes from the edge gate. */
 const ROUTED_PREFIX = "/api/";
+
+/**
+ * Load failures this gate reports without failing on, each naming the issue
+ * that removes it and the date it was granted.
+ *
+ * `netlify/functions/edit.mjs` imports `templates/docbuild/dist/anchor-core.js`
+ * and `inline_md.js`. That directory is gitignored and untracked, and the
+ * connect tool does not copy `templates/` into a site, so the edit endpoint
+ * fails at import time on a clean checkout and in every connected deploy. This
+ * gate found that in already-merged code, which is the job it was added for; the
+ * fix is owned by #117 and deliberately not made here.
+ *
+ * The allowance is visible rather than silent, and self-removing rather than
+ * remembered: once #117 lands, `edit.mjs` loads, the entry below stops being
+ * exercised, and this gate fails until it is deleted. An exclusion nobody is
+ * forced to remove is the mechanism by which a gate quietly stops being one.
+ */
+const ALLOWED_LOAD_FAILURES = new Map([
+  [
+    "netlify/functions/edit.mjs",
+    {
+      since: "2026-09-04",
+      issue: 117,
+      /* The allowance covers exactly one defect and is scoped to its cause: the
+         import of gitignored docbuild build output. Tying it to the source
+         rather than to the load outcome is what keeps it honest in both
+         directions -- a developer whose `templates/docbuild/dist` happens to
+         exist does not get a spurious "stale allowance" failure, and #117
+         landing does not leave the entry quietly excusing something else. */
+      whileSourceMatches: /templates\/docbuild\/dist\//,
+      /* Linking reports one error and stops, so an allowance that excuses "this
+         module failed" would also excuse the next unrelated broken import in
+         the same file. It has to name the failure it was granted for, not the
+         file it was granted on. */
+      excusesErrorMatching: /templates\/docbuild\/dist\//,
+    },
+  ],
+]);
+
+/**
+ * Whether an allowance still describes the code it was granted for. A stale
+ * entry is a hole left open in a gate, so this is checked on every run rather
+ * than left to whoever lands the fix to remember.
+ */
+function allowanceApplies(relative, allowance) {
+  try {
+    return allowance.whileSourceMatches.test(readFileSync(join(ROOT, relative), "utf8"));
+  } catch {
+    /* The module named by an allowance is gone. The entry is stale either way. */
+    return false;
+  }
+}
 
 /**
  * Every `.mjs` module in `dir` that is deployed rather than executed as a test,
@@ -86,6 +149,20 @@ async function main() {
   const failures = [];
   const routes = new Map();
   let loaded = 0;
+  let allowed = 0;
+
+  /* Staleness is decided up front and independently of what loads, so the
+     report is the same on a clean checkout and on a developer machine that
+     happens to have build output lying around. */
+  const applicable = new Set();
+  for (const [relative, allowance] of ALLOWED_LOAD_FAILURES) {
+    if (allowanceApplies(relative, allowance)) applicable.add(relative);
+    else {
+      failures.push(
+        `${relative} no longer matches its ALLOWED_LOAD_FAILURES entry; delete it (#${allowance.issue})`,
+      );
+    }
+  }
 
   const functions = modulesIn(FUNCTIONS);
   /* A gate that finds nothing to check reports success, which is the one
@@ -106,7 +183,19 @@ async function main() {
          reduced to the same repository-relative vocabulary as everything else
          this script prints. */
       const reason = error.message.split("\n")[0].split(`${ROOT}/`).join("");
-      failures.push(`${relative} ${reason}`);
+      const allowance = ALLOWED_LOAD_FAILURES.get(relative);
+      if (
+        allowance === undefined ||
+        !applicable.has(relative) ||
+        !allowance.excusesErrorMatching.test(reason)
+      ) {
+        failures.push(`${relative} ${reason}`);
+        continue;
+      }
+      allowed += 1;
+      process.stderr.write(
+        `ALLOW netlify modules: ${relative} ${reason} (allowed ${allowance.since}, removed by #${allowance.issue})\n`,
+      );
       continue;
     }
     loaded += 1;
@@ -130,7 +219,8 @@ async function main() {
     return 1;
   }
 
-  process.stdout.write(`PASS netlify modules: ${loaded} modules load and link\n`);
+  const note = allowed === 0 ? "" : `, ${allowed} allowed`;
+  process.stdout.write(`PASS netlify modules: ${loaded} modules load and link${note}\n`);
   return 0;
 }
 

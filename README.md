@@ -53,7 +53,11 @@ node scripts/check-test-inventory.mjs       # fail if a test file is not wired i
 
 `check-function-modules.mjs` imports every `netlify/functions/*.mjs` and `netlify/lib/*.mjs` without
 invoking anything. ESM links named imports before it evaluates them, so an unresolvable specifier or a
-missing export fails here — the one class of breakage that used to ship with every gate green.
+missing export fails here — the one class of breakage that used to ship with every gate green. Run it on a
+plain checkout: a deploy carries only `netlify/`, `netlify.toml` and the root lockfile, so a module that
+links only once some other tree has been built does not link in production. Its `ALLOWED_LOAD_FAILURES`
+table is the visible, dated list of known-broken modules, each naming the issue that deletes it; the gate
+fails when an entry stops describing the code it was granted for.
 
 `check-test-inventory.mjs` is why the literal test list in `check.yml` can stay literal. It fails when a
 tracked test file exists that no run step names, so **adding a test file and forgetting to wire it up is
