@@ -731,6 +731,95 @@ export function capabilitiesFor(role) {
   return { ...ROLE_CAPABILITIES[role] };
 }
 
+/** The exact keys of one resolved access row: the two identity fields, then
+ * the eight capabilities in matrix order. */
+const ACCESS_ROW_KEYS = Object.freeze([
+  "role",
+  "shared",
+  "canRead",
+  "canComment",
+  "threadControl",
+  "canSuggest",
+  "canEdit",
+  "canAccept",
+  "canShare",
+  "canSeeMembers",
+]);
+
+const ACCESS_CAPABILITY_KEYS = Object.freeze(ACCESS_ROW_KEYS.slice(2));
+const ACCESS_ROLES = Object.freeze(Object.keys(ROLE_CAPABILITIES));
+const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
+
+/**
+ * `hasExactShape()` plus the requirement that every own property is an
+ * enumerable *data* property. An accessor is rejected without being invoked,
+ * so a getter can never be read once and then differ from what the caller
+ * later observes.
+ *
+ * @param {unknown} value
+ * @param {readonly string[]} expectedKeys
+ * @returns {boolean}
+ */
+function hasExactDataShape(value, expectedKeys) {
+  if (!hasExactShape(value, expectedKeys)) {
+    return false;
+  }
+  return Object.getOwnPropertyNames(value).every((name) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, name);
+    return Object.hasOwn(descriptor, "value") && descriptor.enumerable === true;
+  });
+}
+
+/**
+ * Is `result` a complete, internally consistent resolved access row?
+ *
+ * This is the single definition of that question. Every write path shares it
+ * rather than keeping its own copy: a hand-duplicated security validator only
+ * has to drift in one file to open a hole the other copies still close, and
+ * whichever copy no gate happens to exercise is the one that drifts (#125).
+ *
+ * A partial, extended, accessor-backed, array, non-ordinary-prototype, or
+ * internally inconsistent object is invalid — never a falsy capability. The
+ * caller decides what an invalid row means; here it is only ever `false`.
+ *
+ * `capabilityTable` is a parameter rather than the module's own
+ * `capabilitiesFor` so that `edit.mjs`, whose closed factory receives the table
+ * as an injected dependency, validates against the table it was actually
+ * given. A table that throws or returns a non-object is itself invalid.
+ *
+ * @param {unknown} result
+ * @param {(role: unknown) => unknown} capabilityTable
+ * @returns {boolean}
+ */
+export function validateAccessRow(result, capabilityTable) {
+  if (!hasExactDataShape(result, ACCESS_ROW_KEYS)) {
+    return false;
+  }
+  if (!ACCESS_ROLES.includes(result.role) || typeof result.shared !== "boolean") {
+    return false;
+  }
+  for (const key of ACCESS_CAPABILITY_KEYS) {
+    const value = result[key];
+    if (key === "threadControl") {
+      if (!THREAD_CONTROLS.includes(value)) {
+        return false;
+      }
+    } else if (typeof value !== "boolean") {
+      return false;
+    }
+  }
+  let expected;
+  try {
+    expected = capabilityTable(result.role);
+  } catch {
+    return false;
+  }
+  if (expected === null || typeof expected !== "object") {
+    return false;
+  }
+  return ACCESS_CAPABILITY_KEYS.every((key) => expected[key] === result[key]);
+}
+
 /**
  * @param {DocumentRole} role
  * @param {boolean} shared
