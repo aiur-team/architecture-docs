@@ -6,6 +6,7 @@ import {
   chmodSync,
   closeSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -796,7 +798,10 @@ try {
       };
       process.nextTick(() => {
         if (command === "blobs:set" && response.code === undefined) storedManifest = args.at(-1);
-        if (command === "blobs:get" && response.code === undefined && storedManifest !== null) copyFileSync(storedManifest, args.at(-1));
+        if (command === "blobs:get" && response.code === undefined) {
+          if (response.output !== undefined) writeFileSync(args.at(-1), response.output);
+          else if (storedManifest !== null) copyFileSync(storedManifest, args.at(-1));
+        }
         if (response.stdout !== undefined) child.stdout.write(response.stdout);
         if (response.stderr !== undefined) child.stderr.write(response.stderr);
         if (response.close !== false) close();
@@ -838,6 +843,47 @@ try {
     const { failure } = await runProtocolFailure({ arguments: parsedArguments, override });
     assert.equal(failure.tag, expectedTag, label);
   }
+  const manifestBytes = readFileSync(join(inputRoot, "edit.json"));
+  for (const [label, drifted] of [
+    ["appended byte", Buffer.concat([manifestBytes, Buffer.from("\n")])],
+    ["truncated byte", manifestBytes.subarray(0, manifestBytes.length - 1)],
+    ["reserialized manifest", Buffer.from(JSON.stringify(manifest))],
+  ]) {
+    const readbackCommands = [];
+    const { failure } = await runProtocolFailure({
+      override: ({ command }) => {
+        readbackCommands.push(command);
+        return command === "blobs:get" ? { output: drifted } : null;
+      },
+    });
+    assert.equal(failure.tag, "setup", `read-back ${label}`);
+    assert.deepEqual(readbackCommands, ["env:get", "env:get", "blobs:set", "blobs:get"], `read-back ${label} stops before deploy`);
+  }
+
+  const leakedRoot = join(testRoot, "leaked\ttemp");
+  const leakRunner = createConnectRunner({
+    workingDirectory: inputRoot,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    spawnFn: makeProtocolSpawn(),
+    mkdtempFn: async () => {
+      mkdirSync(leakedRoot, { mode: 0o700 });
+      return leakedRoot;
+    },
+  });
+  await assert.rejects(leakRunner(siteArguments()), (error) => error.tag === "setup");
+  assert.equal(existsSync(leakedRoot), false, "rejected temp root removed");
+
+  const linkedInput = join(testRoot, "linked-input");
+  symlinkSync(inputRoot, linkedInput);
+  const linkedRunner = createConnectRunner({
+    workingDirectory: linkedInput,
+    repositoryRoot,
+    env: { PATH: process.env.PATH },
+    spawnFn: makeProtocolSpawn(),
+  });
+  await assert.rejects(linkedRunner(siteArguments()), (error) => error.tag === "setup");
+
   for (const deployUrl of [
     "https://fixture-site.netlify.app/?",
     "https://fixture-site.netlify.app/#",
@@ -978,10 +1024,11 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
 } else if (args[0] === "blobs:get") {
   const output = args[4];
   if (args.length !== 5 || !exact(["blobs:get", "doc-state", "mode/4b7d2a/manifest.json", "--output", output]) || !isAbsolute(output) || basename(output) !== "manifest.output" || process.env.NETLIFY_SITE_ID !== siteId) reject();
+  else if (state.drift === true) writeFileSync(output, Buffer.concat([readFileSync(blobPath), Buffer.from("\\n")]));
   else copyFileSync(blobPath, output);
 } else if (args[0] === "deploy") {
   if (!exact(["deploy", "--prod", "--no-build", "--dir", "publish", "--json"]) || process.env.NETLIFY_SITE_ID !== siteId) reject();
-  else process.stdout.write('{"url":"https://fixture-site.netlify.app/"}');
+  else { state.deploys = (state.deploys ?? 0) + 1; save(); process.stdout.write('{"url":"https://fixture-site.netlify.app/"}'); }
 } else process.exitCode = 2;
 `);
   chmodSync(fakeCli, 0o700);
@@ -1071,6 +1118,33 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
     "WARNING: In standalone mode, an editor can change the live document without review.\n" +
     "WARNING: Export is the only path back to a reviewable artifact.\n" +
     "WARNING: A Netlify account with site access outranks the document owner.\n");
+  const deploysAfterSuccess = JSON.parse(readFileSync(statePath, "utf8")).deploys;
+  assert.ok(Number.isInteger(deploysAfterSuccess) && deploysAfterSuccess >= 1);
+  const runCommand = (owner) => spawnSync(process.execPath, [
+    join(repositoryRoot, "scripts", "connect.mjs"),
+    "--file", join(inputRoot, "page.html"),
+    "--manifest", join(inputRoot, "edit.json"),
+    "--history", join(inputRoot, "history.json"),
+    "--owner", owner,
+    "--site", "123e4567-e89b-12d3-a456-426614174000",
+  ], {
+    cwd: repositoryRoot,
+    env: { PATH: `${fakeBin}:${process.env.PATH}` },
+    encoding: "utf8",
+  });
+  const conflictCommand = runCommand("different@example.com");
+  assert.equal(conflictCommand.status, 1);
+  assert.equal(conflictCommand.stdout, "");
+  assert.equal(conflictCommand.stderr, "connect: setup failed\n");
+  assert.equal(JSON.parse(readFileSync(statePath, "utf8")).deploys, deploysAfterSuccess, "conflict never deploys");
+  const driftedState = JSON.parse(readFileSync(statePath, "utf8"));
+  driftedState.drift = true;
+  writeFileSync(statePath, JSON.stringify(driftedState));
+  const driftCommand = runCommand("owner@example.com");
+  assert.equal(driftCommand.status, 1);
+  assert.equal(driftCommand.stdout, "");
+  assert.equal(driftCommand.stderr, "connect: setup failed\n");
+  assert.equal(JSON.parse(readFileSync(statePath, "utf8")).deploys, deploysAfterSuccess, "read-back drift never deploys");
 } finally {
   rmSync(testRoot, { recursive: true, force: true });
 }

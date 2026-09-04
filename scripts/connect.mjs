@@ -85,7 +85,6 @@ const DEPENDENCY_FUNCTIONS = Object.freeze([
   "rmFn",
   "spawnFn",
   "tmpdirFn",
-  "nowFn",
   "setTimeoutFn",
   "clearTimeoutFn",
 ]);
@@ -835,6 +834,9 @@ export function createConnectRunner(dependencies = {}) {
     let mayHaveCreatedSite = false;
     try {
       assertParsed(parsed);
+      if ((await deps.realpathFn(workingDirectory)) !== workingDirectory) failInput();
+      const workingStat = await deps.lstatFn(workingDirectory);
+      if (!validDirectoryStat(workingStat) || workingStat.isSymbolicLink?.() === true) failInput();
       const filePath = resolve(workingDirectory, parsed.file);
       const manifestPath = resolve(workingDirectory, parsed.manifest);
       const historyPath = resolve(workingDirectory, parsed.history);
@@ -878,7 +880,12 @@ export function createConnectRunner(dependencies = {}) {
       const tempRoot = deps.tmpdirFn();
       if (typeof tempRoot !== "string") failInput();
       const made = await deps.mkdtempFn(join(tempRoot, "connect-"), { encoding: "utf8" });
-      temporaryRoot = safeTempPath(tempRoot, made);
+      try {
+        temporaryRoot = safeTempPath(tempRoot, made);
+      } catch (error) {
+        if (typeof made === "string") await deps.rmFn(made, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
       const projectRoot = join(temporaryRoot, "project");
       const publishRoot = join(projectRoot, "publish");
       const privateRoot = join(projectRoot, "private");
@@ -991,7 +998,6 @@ export async function main(argv = process.argv.slice(2)) {
   } catch (error) {
     if (error?.tag === "cleanup") process.stderr.write(`connect: cleanup failed; remove ${error.detail}\n`);
     else if (error?.tag === "new-site") process.stderr.write(`connect: setup failed; inspect Netlify site name ${error.detail}\n`);
-    else if (error?.tag === "conflict") process.stderr.write("connect: owner already set\n");
     else process.stderr.write("connect: setup failed\n");
     process.exitCode = 1;
   }
