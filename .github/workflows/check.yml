@@ -119,6 +119,14 @@ jobs:
           # commits that satisfy the gate live on the ticket branch and do not
           # survive the squash merge, so a `P4J_BASE` set here would abort every
           # push build on `main` (#133).
+          #
+          # The gate on the shared access-row validator: the exact set of
+          # role-resolving modules that keep a private copy, plus the runtime
+          # matrix for the two surfaces #135 folded onto validateAccessRow().
+          # It is the only thing that runs netlify/edge-functions/gate.ts at
+          # all -- the edge function is TypeScript for Deno, so the runner
+          # transpiles it with the TypeScript the typecheck step installed.
+          node scripts/test-access-row.mjs
           node scripts/test-p4-a.mjs
           node scripts/test-p4-b.mjs
           node scripts/test-p4-i.mjs
