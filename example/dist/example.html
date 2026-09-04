@@ -278,6 +278,13 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 .doc-comment-marker{position:absolute;margin:0;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--warn,#A85B00);border-radius:50%;background:var(--warn-soft,#FBF0DF);color:var(--warn,#A85B00);font:600 .68rem var(--mono,ui-monospace,monospace);line-height:1;cursor:pointer;pointer-events:auto}
 .doc-comment-marker[hidden]{display:none}
 .doc-comment-marker-active{border-width:2px;border-color:var(--accent,#C0122A);color:var(--accent,#C0122A)}
+/* P4-Q: the rail carries two kinds.  A suggestion marker keeps the comment
+   marker's box, border weight and accessible name and differs only in colour,
+   so forced colours and print see one shape and one label either way. */
+.doc-rail-suggestion{border-color:var(--info,#2A5DB0);background:var(--info-soft,#E7EEFA);color:var(--info,#2A5DB0)}
+@media (prefers-color-scheme:dark){
+  .doc-rail-suggestion{border-color:var(--info,#7FA8F0);background:var(--info-soft,#1A2333);color:var(--info,#7FA8F0)}
+}
 
 /* ---- non-mutating fallback when custom highlights are unavailable ---- */
 .doc-comment-block{border-inline-start:3px solid var(--warn,#A85B00);background-color:var(--warn-soft,#FBF0DF);padding-inline-start:8px}
@@ -311,6 +318,12 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 .doc-comments-author{font-weight:600;color:var(--doc-comments-ink)}
 .doc-comments-edited{font-style:italic}
 .doc-comments-empty{color:var(--doc-comments-ink-2)}
+/* P4-Q: the one section a second client may render into.  It inherits the
+   panel's width, wrapping and overflow rules; everything inside it is styled
+   by whoever registered the renderer. */
+.doc-panel-extension{display:block;margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}
+.doc-panel-extension:empty{display:none}
+.doc-panel-extension-empty{margin:14px 0 0;color:var(--doc-comments-ink-2)}
 
 /* ---- keyboard focus ---- */
 #doc-comments-toggle:focus-visible,#doc-comments-panel :focus-visible,.doc-comment-marker:focus-visible{outline:2px solid var(--doc-comments-accent,var(--accent,#C0122A));outline-offset:2px}
@@ -323,10 +336,12 @@ footer .wrap{font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
 
 /* ---- motion, forced colours, print ---- */
 @media (prefers-reduced-motion:reduce){
-  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card{animation-duration:0s;transition-duration:0s}
+  #doc-comments-panel,#doc-comments-toggle,.doc-comment-marker,.doc-comments-card,.doc-panel-extension{animation-duration:0s;transition-duration:0s}
 }
 @media (forced-colors:active){
   #doc-comments-panel{border:1px solid CanvasText}
+  .doc-comment-marker{border:1px solid CanvasText;background:Canvas;color:CanvasText}
+  .doc-comment-marker-active{border:2px solid Highlight}
   .doc-comment-block{border-inline-start:3px solid CanvasText}
   .doc-comment-block-active{outline:2px solid Highlight}
 }
@@ -2269,10 +2284,20 @@ function installEdit() {
    what is *shown*; every mutation is still authorised by the server, and one
    401 or 403 retires this page's write controls for good.
 
+   P4-Q publishes the two bounded surfaces a second client may use without
+   owning any of this: `window.doc.rail` places one marker per block per kind,
+   and `window.doc.panel` rents one empty section inside the existing panel.
+   Neither carries a suggestion record, an identity, or any authority -- they
+   coordinate presentation and nothing else, and comments.js remains the only
+   owner of the rail, the panel, the anchor locator and the highlight
+   registries.  P4-Q also orders the first anchor resolution behind P4-B's
+   optional overlay barrier and repairs anchors when a later `doc:overlay`
+   replaces the contents of a named block.
+
    Amendment chain: P3-C (this read path) -> P4-A (comment writes) -> P4-Q
    (shared rail/panel publication, Suggestions filter, overlay repair).  The
-   rail and panel controllers stay in module scope until P4-Q publishes them;
-   the only public seam is `window.doc.comments.refresh()`. */
+   public seams are `window.doc.comments.refresh()`, `window.doc.rail` and
+   `window.doc.panel`. */
 
 const PROTOCOL = location.protocol;
 if (PROTOCOL === "http:" || PROTOCOL === "https:") installComments();
@@ -2306,6 +2331,11 @@ function installComments() {
 
   if (doc.comments !== null && doc.comments !== undefined) return;
 
+  /* P1-B initialises both shared fields to exactly null.  Anything else means
+     another owner already published them, and this module returns before any
+     UI, listener or request rather than replacing a live surface. */
+  if (doc.rail !== null || doc.panel !== null) return;
+
   /* ------------------------------------------------------------ constants */
 
   const MAX_PAGES = 5;
@@ -2322,6 +2352,9 @@ function installComments() {
   const CONTEXT_LIMIT = 32;
   const VISIBILITY_WINDOW_MS = 30000;
   const MARKER_STEP = 24;
+  const BARRIER_DEADLINE_MS = 5500;
+  const OVERLAY_MAX = 50;
+  const MAX_RAIL_LABEL = 160;
 
   const THREAD_ID = /^t_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
   const COMMENT_ID = /^c_[a-z0-9]{1,48}_[0-9a-f]{8}$/;
@@ -2357,6 +2390,10 @@ function installComments() {
   const WRITE_PENDING = "Saving the comment change.";
   const WRITE_SAVED = "The comment change was saved.";
   const MULTI_BLOCK = "Select inside one paragraph";
+  const NO_SUGGESTIONS = "Suggestions are unavailable.";
+  const MARKER_CLASS = "doc-comment-marker";
+  const RAIL_CLASS = Object.freeze({ comment: "doc-rail-comment", suggestion: "doc-rail-suggestion" });
+  const EXTENSION_CLASS = "doc-panel-extension";
 
   const STATE_LABEL = Object.freeze({
     exact: "",
@@ -2378,6 +2415,12 @@ function installComments() {
   let activeId = null;
   let statusFilter = "open";
   let kindFilter = "all";
+  /* The block filter is private to `window.doc.panel.open()`: a validated aid
+     or null.  Any kind-filter click clears it. */
+  let blockFilter = null;
+  /* The block index the last commit resolved against, kept so an overlay can
+     recompute `textMap()` for the named blocks only. */
+  let blockIndex = null;
 
   /* Write state.  `writesDenied` is deliberately page-lifetime: a server
      denial is never cleared in place, only by a fresh navigation. */
@@ -2402,6 +2445,25 @@ function installComments() {
   const markers = new Map();
   const cards = new Map();
   const decoratedBlocks = new Set();
+
+  /* The one placement registry.  Comment markers are entered here by this
+     module; suggestion markers by whoever holds `window.doc.rail`.  The key is
+     the opaque token handed back to the caller, so a foreign value can never
+     name someone else's entry. */
+  const railEntries = new Map();
+  let railSeq = 0;
+
+  /* The single registered panel extension renderer, and the section it last
+     rendered into. */
+  let extensionRenderer = null;
+  let extension = null;
+
+  /* The initial-read barrier and the overlay reconciliation queue. */
+  let readiness = null;
+  let overlayBatch = null;
+  let overlayNext = null;
+  let overlayScheduled = false;
+  let selectKind = null;
 
   /* --------------------------------------------------------- validation */
 
@@ -2628,8 +2690,13 @@ function installComments() {
   }
 
   /* Every rendered block by aid; a duplicate or out-of-policy element aborts
-     the commit because choosing between candidates would misattach threads. */
-  function buildBlockIndex() {
+     the commit because choosing between candidates would misattach threads.
+
+     `previous` and `named` are the overlay path: an accepted `doc:overlay`
+     replaced the children of the named blocks only, so every other block that
+     is still the same element keeps the text map it already had and only the
+     named ones are walked again. */
+  function buildBlockIndex(previous, named) {
     const index = new Map();
     const elements = document.querySelectorAll("[data-aid]");
     for (let order = 0; order < elements.length; order += 1) {
@@ -2637,7 +2704,12 @@ function installComments() {
       if (!BLOCK.includes(element.localName)) return null;
       const id = element.getAttribute("data-aid");
       if (id === null || !AID.test(id) || index.has(id)) return null;
-      index.set(id, { element, order, map: textMap(element) });
+      let map = null;
+      if (previous !== undefined && previous !== null && !named.has(id)) {
+        const before = previous.get(id);
+        if (before !== undefined && before.element === element) map = before.map;
+      }
+      index.set(id, { element, order, map: map === null ? textMap(element) : map });
     }
     return index;
   }
@@ -2680,6 +2752,7 @@ function installComments() {
     document.removeEventListener("selectionchange", selectionChanged);
     document.removeEventListener("keydown", writeKeydown, true);
     document.removeEventListener("scroll", removeTooltip, true);
+    document.removeEventListener("doc:overlay", onOverlay);
     clearSelectionTimer();
     removeTooltip();
     detachDraft();
@@ -2697,8 +2770,17 @@ function installComments() {
     actions = null;
     list = null;
     opener = null;
+    /* Every token this controller ever issued dies with the rail, including
+       the ones a suggestion client is still holding. */
+    railEntries.clear();
     markers.clear();
     cards.clear();
+    extension = null;
+    selectKind = null;
+    blockFilter = null;
+    blockIndex = null;
+    overlayBatch = null;
+    overlayNext = null;
     model = [];
     truncation = null;
     activeId = null;
@@ -2805,7 +2887,16 @@ function installComments() {
     return committed;
   }
 
+  /* The public seam.  Before the initial overlay barrier settles every caller
+     joins the same readiness Promise instead of resolving anchors against
+     text that is about to be replaced. */
   function refresh() {
+    if (!activated) return Promise.resolve(false);
+    if (readiness !== null) return readiness;
+    return startRefresh();
+  }
+
+  function startRefresh() {
     if (!activated) return Promise.resolve(false);
     if (batch !== null) {
       again = true;
@@ -2831,6 +2922,7 @@ function installComments() {
     const index = buildBlockIndex();
     if (index === null) return false;
     if (panel === null && document.querySelector(".head-top") === null) return false;
+    blockIndex = index;
     const next = threads.map((thread) => ({
       thread,
       location: thread.kind === "comment" ? locate(thread.anchor, index) : null,
@@ -2922,8 +3014,16 @@ function installComments() {
     truncationNote.hidden = true;
     actions = el("div", { id: "doc-comments-actions" });
     const filters = el("div", { id: "doc-comments-filters" });
-    filters.appendChild(filterGroup("Status", [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]], statusFilter, (value) => { statusFilter = value; }));
-    filters.appendChild(filterGroup("Kind", [["anchored", "Anchored"], ["discussions", "Discussions"], ["all", "All"]], kindFilter, (value) => { kindFilter = value; }));
+    filters.appendChild(filterGroup("Status",
+      [["open", "Open"], ["resolved", "Resolved"], ["all", "All"]],
+      statusFilter, (value) => { statusFilter = value; }, null).group);
+    /* Choosing a kind is the reader taking the panel back from whatever
+       `open(aid)` narrowed it to, so the block filter clears with it. */
+    const kindGroup = filterGroup("Kind",
+      [["anchored", "Anchored"], ["discussions", "Discussions"], ["suggestions", "Suggestions"], ["all", "All"]],
+      kindFilter, (value) => { kindFilter = value; blockFilter = null; }, renderExtension);
+    filters.appendChild(kindGroup.group);
+    selectKind = kindGroup.select;
     list = el("div", { id: "doc-comments-list" });
     panel.appendChild(header);
     panel.appendChild(status);
@@ -2947,6 +3047,7 @@ function installComments() {
     document.addEventListener("selectionchange", selectionChanged);
     document.addEventListener("keydown", writeKeydown, true);
     document.addEventListener("scroll", removeTooltip, true);
+    document.addEventListener("doc:overlay", onOverlay);
     const fonts = document.fonts;
     if (fonts !== null && typeof fonts === "object" && fonts.ready !== null
       && typeof fonts.ready === "object" && typeof fonts.ready.then === "function") {
@@ -2955,20 +3056,27 @@ function installComments() {
     return true;
   }
 
-  function filterGroup(label, options, selected, onSelect) {
+  /* `select` sets the pressed state without running `onSelect`, so a
+     programmatic view change such as `window.doc.panel.open()` shows the same
+     controls a click would have. */
+  function filterGroup(label, options, selected, onSelect, after) {
     const group = el("div", { role: "group", "aria-label": label });
     const buttons = [];
+    const select = (value) => {
+      for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
+    };
     for (const [value, text] of options) {
       const button = el("button", { type: "button", "aria-pressed": selected === value ? "true" : "false" }, text);
       button.addEventListener("click", () => {
         onSelect(value);
-        for (const [other, candidate] of buttons) candidate.setAttribute("aria-pressed", other === value ? "true" : "false");
+        select(value);
         applyFilters();
+        if (after !== null) after();
       });
       buttons.push([value, button]);
       group.appendChild(button);
     }
-    return group;
+    return { group, select };
   }
 
   function openPanel(invoker, threadId) {
@@ -3047,9 +3155,9 @@ function installComments() {
     paintDecoration();
     renderList();
     if (focusedMarker !== null) {
-      const replacement = markers.get(focusedMarker);
-      if (replacement !== undefined) replacement.marker.focus();
-      if (replacement === undefined || document.activeElement !== replacement.marker) toggle.focus();
+      const replacement = markerButton(focusedMarker);
+      if (replacement !== null) replacement.focus();
+      if (replacement === null || document.activeElement !== replacement) toggle.focus();
     }
     schedulePlacement();
   }
@@ -3060,20 +3168,20 @@ function installComments() {
     return "";
   }
 
+  /* Comment markers go through the same private registry a suggestion client
+     reaches over `window.doc.rail`, so one placement pass declutters both
+     kinds.  A repaint replaces only this module's own entries; a suggestion
+     marker survives a comment refresh untouched. */
   function renderMarkers() {
+    for (const token of markers.values()) railDrop(token);
     markers.clear();
-    rail.replaceChildren();
     for (const entry of model) {
       if (!isOpenLive(entry)) continue;
       const count = entry.thread.comments.length;
-      const marker = el("button", {
-        type: "button",
-        class: "doc-comment-marker",
-        "aria-label": `Comment by ${entry.thread.author.name}, ${count} ${count === 1 ? "message" : "messages"}${stateSuffix(entry.location.state)}`,
-      }, String(count));
-      marker.setAttribute("data-thread-id", entry.thread.id);
-      marker.hidden = true;
-      marker.addEventListener("click", () => {
+      const label = `Comment by ${entry.thread.author.name}, ${count} ${count === 1 ? "message" : "messages"}${stateSuffix(entry.location.state)}`;
+      let marker = null;
+      const token = railRegister("comment", entryAid(entry), String(count), label, () => {
+        if (marker === null) return;
         if (panel.hidden) openPanel(marker, entry.thread.id);
         else {
           opener = marker;
@@ -3081,13 +3189,36 @@ function installComments() {
           focusCard(entry.thread.id);
         }
       });
-      markers.set(entry.thread.id, { marker, entry });
-      rail.appendChild(marker);
+      if (token === null) continue;
+      const record = railEntries.get(token);
+      marker = record.button;
+      record.entry = entry;
+      marker.setAttribute("data-thread-id", entry.thread.id);
+      markers.set(entry.thread.id, token);
     }
+  }
+
+  /* The rail focus restore in `render()` wants the button, not the token. */
+  function markerButton(threadId) {
+    const token = markers.get(threadId);
+    if (token === undefined) return null;
+    const record = railEntries.get(token);
+    return record === undefined ? null : record.button;
+  }
+
+  /* Where a thread currently sits, which is where its marker is drawn.  A
+     moved thread belongs to the block it landed in, not the one it was
+     written against, so `open(aid)` shows exactly what that block's markers
+     promised. */
+  function entryAid(entry) {
+    if (entry.location === null || entry.location.element === null) return null;
+    return entry.location.element.getAttribute("data-aid");
   }
 
   function passesFilters(entry) {
     const thread = entry.thread;
+    if (kindFilter === "suggestions") return false;
+    if (blockFilter !== null && entryAid(entry) !== blockFilter) return false;
     if (statusFilter !== "all" && thread.status !== statusFilter) return false;
     if (kindFilter === "anchored" && thread.kind !== "comment") return false;
     if (kindFilter === "discussions" && thread.kind !== "discussion") return false;
@@ -3125,6 +3256,7 @@ function installComments() {
     fragment.appendChild(el("p", { class: "doc-comments-empty" }, "No comments match the current filters."));
     list.replaceChildren(fragment);
     applyFilters();
+    renderExtension();
 
     if (focusedInList) {
       if (focusedThread === null) title.focus();
@@ -3149,8 +3281,10 @@ function installComments() {
       section.hidden = visible === 0;
       shown += visible;
     }
+    /* The Suggestions view is not a filtered comment list, so it does not
+       claim that no comment matched. */
     const empty = list.querySelector(".doc-comments-empty");
-    if (empty !== null) empty.hidden = shown > 0;
+    if (empty !== null) empty.hidden = shown > 0 || kindFilter === "suggestions";
   }
 
   function group(heading, entries) {
@@ -3294,36 +3428,81 @@ function installComments() {
     return true;
   }
 
+  /* Every currently rendered block by aid, elements only.  A suggestion marker
+     names a block it does not own, so the aid has to resolve to exactly one
+     connected block at placement time or the marker is simply not drawn. */
+  function blockElements() {
+    const found = new Map();
+    const elements = document.querySelectorAll("[data-aid]");
+    for (let order = 0; order < elements.length; order += 1) {
+      const element = elements[order];
+      const id = element.getAttribute("data-aid");
+      if (id === null || !AID.test(id)) continue;
+      if (found.has(id)) found.set(id, null);
+      else found.set(id, { element, order });
+    }
+    return found;
+  }
+
+  /* One entry's host block and the box the marker lines up with.  A comment
+     uses the location P3-C resolved, including a range inside a block it moved
+     to; a suggestion is whole-block by definition. */
+  function railAnchorOf(record, blocks) {
+    if (record.kind === "comment") {
+      const location = record.entry === null ? null : record.entry.location;
+      if (location === null || location.element === null) return null;
+      return { host: location.element, source: location.range === null ? location.element : location.range, order: location.order };
+    }
+    const found = blocks.get(record.aid);
+    if (found === undefined || found === null || !found.element.isConnected) return null;
+    return { host: found.element, source: found.element, order: found.order };
+  }
+
+  /* Ties are broken the same way whichever kinds collide: document order,
+     then comments before suggestions, then P3-C's thread order, then the
+     order the markers were registered in. */
+  function byRail(a, b) {
+    if (a.order !== b.order) return a.order - b.order;
+    if (a.record.kind !== b.record.kind) return a.record.kind === "comment" ? -1 : 1;
+    if (a.record.entry !== null && b.record.entry !== null) return byCreated(a.record.entry, b.record.entry);
+    return a.record.seq - b.record.seq;
+  }
+
   function placeMarkers() {
     if (rail === null || !rail.isConnected) return;
+    let needsBlocks = false;
+    for (const record of railEntries.values()) if (record.kind === "suggestion") needsBlocks = true;
+    const blocks = needsBlocks ? blockElements() : new Map();
+
     const candidates = [];
-    for (const { marker, entry } of markers.values()) {
-      const host = entry.location.element;
-      const visible = host.isConnected && disclosed(host);
+    for (const record of railEntries.values()) {
+      const marker = record.button;
+      const placement = railAnchorOf(record, blocks);
+      const visible = placement !== null && placement.host.isConnected && disclosed(placement.host);
       /* A stale right-edge position can itself inflate scrollWidth after a
          viewport narrows. Reset it in the batched write phase so the later
          document measurement describes the page, not the prior marker. */
       if (visible) marker.style.left = "0px";
       marker.hidden = !visible;
-      if (visible) candidates.push({ marker, entry, host });
+      if (visible) candidates.push({ marker, record, placement });
     }
 
     const railRect = rail.getBoundingClientRect();
     const scrollWidth = document.documentElement.scrollWidth;
     const measured = [];
-    for (const { marker, entry, host } of candidates) {
-      const source = entry.location.range === null ? host : entry.location.range;
+    for (const { marker, record, placement } of candidates) {
+      const host = placement.host;
       const hasBox = host.getClientRects().length > 0;
-      const top = source.getBoundingClientRect().top - railRect.top;
+      const top = placement.source.getBoundingClientRect().top - railRect.top;
       const hostRect = host.getBoundingClientRect();
       const width = marker.offsetWidth;
       const left = Math.min(Math.max(hostRect.right - railRect.left + 8, 4), scrollWidth - width - 4);
-      measured.push({ marker, entry, hasBox, top, left });
+      measured.push({ marker, record, order: placement.order, hasBox, top, left });
     }
     const visible = measured.filter((item) => item.hasBox);
     visible.sort((a, b) => {
       if (a.top !== b.top) return a.top - b.top;
-      return byLocation(a.entry, b.entry);
+      return byRail(a, b);
     });
     for (const item of measured) item.marker.hidden = !item.hasBox;
     let previous = -Infinity;
@@ -3331,9 +3510,348 @@ function installComments() {
       const top = Math.max(item.top, previous + MARKER_STEP);
       item.marker.style.top = `${top}px`;
       item.marker.style.left = `${item.left}px`;
-      item.marker.classList.toggle("doc-comment-marker-active", item.entry.thread.id === activeId);
+      item.marker.classList.toggle("doc-comment-marker-active",
+        item.record.entry !== null && item.record.entry.thread.id === activeId);
       previous = top;
     }
+  }
+
+  /* ==================================================== shared surfaces */
+
+  const isThenable = (value) => value !== null
+    && (typeof value === "object" || typeof value === "function")
+    && typeof value.then === "function";
+
+  /* 1 to 160 Unicode scalar values, no C0, no C1, no lone surrogate.  A label
+     is drawn as text and read aloud, so anything that could carry a control
+     sequence into either is refused rather than sanitised. */
+  function validRailLabel(value) {
+    if (typeof value !== "string" || value === "") return false;
+    let scalars = 0;
+    for (const unit of value) {
+      const code = unit.codePointAt(0);
+      if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) return false;
+      if (code >= 0xd800 && code <= 0xdfff) return false;
+      scalars += 1;
+      if (scalars > MAX_RAIL_LABEL) return false;
+    }
+    return true;
+  }
+
+  /* The visible glyph inside a marker circle.  The contract fixes a
+     suggestion label as `<N> suggestions`, so the count is the label's own
+     leading digits; any other label draws an empty circle and keeps its
+     complete accessible name. */
+  function leadingCount(label) {
+    const match = /^[0-9]{1,3}(?= )/.exec(label);
+    return match === null ? "" : match[0];
+  }
+
+  /* Every marker on the rail is one entry here, whoever asked for it.  The key
+     is the token handed back: `Object.freeze(Object.create(null))` has no
+     data, no string form, no id and no authority, so holding one proves only
+     that this controller created it. */
+  function railRegister(kind, aid, text, label, onClick) {
+    if (rail === null) return null;
+    const button = el("button", {
+      type: "button",
+      class: `${MARKER_CLASS} ${RAIL_CLASS[kind]}`,
+      "aria-label": label,
+    }, text);
+    button.hidden = true;
+    railSeq += 1;
+    const record = { kind, aid, button, onClick, entry: null, seq: railSeq };
+    button.addEventListener("click", () => { fire(record); });
+    const token = Object.freeze(Object.create(null));
+    railEntries.set(token, record);
+    rail.appendChild(button);
+    return token;
+  }
+
+  /* A marker callback is private code collaboration, not a boundary this
+     module trusts.  A throw or a rejection is contained here with no log and
+     no retry, and the placement it would have scheduled still happens. */
+  function fire(record) {
+    try {
+      const result = record.onClick();
+      if (isThenable(result)) Promise.resolve(result).catch(() => {});
+    } catch (error) {
+      // Contained on purpose: a broken caller must not break the rail.
+    }
+    schedulePlacement();
+  }
+
+  function railDrop(token) {
+    const record = railEntries.get(token);
+    if (record === undefined) return false;
+    railEntries.delete(token);
+    if (record.button.parentNode !== null) record.button.parentNode.removeChild(record.button);
+    return true;
+  }
+
+  /* -------------------------------------------------- window.doc.rail */
+
+  function railAdd(kind, aid, label, onClick) {
+    if (rail === null) return null;
+    if (kind !== "comment" && kind !== "suggestion") return null;
+    if (typeof aid !== "string" || !AID.test(aid)) return null;
+    if (!validRailLabel(label)) return null;
+    if (typeof onClick !== "function") return null;
+    const found = blockElements().get(aid);
+    if (found === undefined || found === null || !found.element.isConnected) return null;
+    /* Suggestions are whole-block state: several suggestions on one block are
+       one marker, so a second one for the same aid is refused rather than
+       stacked. */
+    if (kind === "suggestion") {
+      for (const record of railEntries.values()) {
+        if (record.kind === "suggestion" && record.aid === aid) return null;
+      }
+    }
+    const token = railRegister(kind, aid, leadingCount(label), label, onClick);
+    if (token === null) return null;
+    schedulePlacement();
+    return token;
+  }
+
+  /* Only the exact identity this controller returned names an entry.  A
+     foreign object, a repeat, or anything else simply misses. */
+  function railRemove(token) {
+    return railDrop(token);
+  }
+
+  function railPlace() {
+    schedulePlacement();
+    return undefined;
+  }
+
+  /* ------------------------------------------------- window.doc.panel */
+
+  function panelRegister(kind, renderFn) {
+    if (kind !== "suggestion") return false;
+    if (typeof renderFn !== "function") return false;
+    if (extensionRenderer !== null) return false;
+    extensionRenderer = renderFn;
+    renderExtension();
+    return true;
+  }
+
+  /* One ordinary repaint of the panel and one placement frame.  It reads
+     nothing from the network and resolves no anchor. */
+  function panelRepaint() {
+    if (panel === null) return undefined;
+    render();
+    return undefined;
+  }
+
+  function panelOpen(aid) {
+    if (panel === null || toggle === null || list === null) return false;
+    if (aid !== null) {
+      if (typeof aid !== "string" || !AID.test(aid)) return false;
+      const found = blockElements().get(aid);
+      if (found === undefined || found === null || !found.element.isConnected) return false;
+    }
+    blockFilter = aid;
+    kindFilter = "all";
+    if (selectKind !== null) selectKind("all");
+    if (panel.hidden) openPanel(toggle, null);
+    applyFilters();
+    renderExtension();
+    schedulePlacement();
+    return true;
+  }
+
+  /* One empty section, rebuilt on each repaint, after the comment groups and
+     before the panel's own empty note.  The renderer may append only its own
+     UI; comments.js never reads what it appended and never hands it the
+     comment model. */
+  function renderExtension() {
+    dropExtension();
+    if (list === null) return;
+    if (kindFilter !== "all" && kindFilter !== "suggestions") return;
+    if (extensionRenderer === null) {
+      if (kindFilter !== "suggestions") return;
+      const note = mountExtension();
+      note.appendChild(el("p", { class: "doc-panel-extension-empty" }, NO_SUGGESTIONS));
+      return;
+    }
+    const section = mountExtension();
+    let result;
+    try {
+      result = extensionRenderer(section, blockFilter);
+    } catch (error) {
+      // The renderer failed; the comments beside it stay usable.
+      dropExtension();
+      return;
+    }
+    if (isThenable(result)) {
+      /* An async renderer would paint into a section this repaint no longer
+         owns, so the return is treated as misuse rather than awaited. */
+      Promise.resolve(result).catch(() => {});
+      dropExtension();
+    }
+  }
+
+  function mountExtension() {
+    const section = el("section", { class: EXTENSION_CLASS });
+    const empty = list.querySelector(".doc-comments-empty");
+    if (empty === null) list.appendChild(section);
+    else list.insertBefore(section, empty);
+    extension = section;
+    return section;
+  }
+
+  function dropExtension() {
+    if (extension === null) return;
+    if (extension.parentNode !== null) extension.parentNode.removeChild(extension);
+    extension = null;
+  }
+
+  /* The two published surfaces.  The shorthand names are the contract's; the
+     module-scope names differ because `refresh` here is already the network
+     read.  Both the surface and the six functions are frozen: nothing about
+     either can be replaced once the page has them. */
+  function railSurface() {
+    const add = Object.freeze(railAdd);
+    const remove = Object.freeze(railRemove);
+    const place = Object.freeze(railPlace);
+    return Object.freeze({ add, remove, place });
+  }
+
+  function panelSurface() {
+    const register = Object.freeze(panelRegister);
+    const refresh = Object.freeze(panelRepaint);
+    const open = Object.freeze(panelOpen);
+    return Object.freeze({ register, refresh, open });
+  }
+
+  /* ------------------------------------------------ the overlay barrier */
+
+  /* P4-B's barrier is optional and is *discovered*, never used.  An accessor
+     at either level is a foreign object shaped like the seam, so only own data
+     descriptors count and no getter is ever invoked. */
+  function overlayBarrier() {
+    const editDescriptor = Object.getOwnPropertyDescriptor(doc, "edit");
+    if (editDescriptor === undefined || !hasOwn(editDescriptor, "value")) return null;
+    const edit = editDescriptor.value;
+    if (edit === null || typeof edit !== "object") return null;
+    const readyDescriptor = Object.getOwnPropertyDescriptor(edit, "overlaysReady");
+    if (readyDescriptor === undefined || !hasOwn(readyDescriptor, "value")) return null;
+    const ready = readyDescriptor.value;
+    return ready instanceof Promise ? ready : null;
+  }
+
+  /* The first anchor resolution waits for the applied overlay so no Range is
+     built against text about to be replaced -- but never past the guard, and
+     never on the barrier's own value or failure.  A publisher that never
+     settles costs this page 5.5 seconds, not its comments. */
+  function awaitOverlays() {
+    const ready = overlayBarrier();
+    if (ready === null) return startRefresh();
+    let timer = 0;
+    const guard = new Promise((resolve) => { timer = setTimeout(resolve, BARRIER_DEADLINE_MS); });
+    readiness = Promise.race([ready.then(() => undefined, () => undefined), guard]).then(() => {
+      clearTimeout(timer);
+      readiness = null;
+      return startRefresh();
+    });
+    return readiness;
+  }
+
+  /* ------------------------------------------------- the overlay event */
+
+  /* The one in-page signal that rendered block content changed.  Nothing is
+     coerced and no getter runs: the detail is already the exact frozen shape
+     the contract fixes, or the event does nothing at all. */
+  function overlayAids(event) {
+    const detail = event === null ? null : event.detail;
+    if (!isPlain(detail) || !Object.isFrozen(detail)) return null;
+    if (Object.getOwnPropertySymbols(detail).length !== 0) return null;
+    const names = Object.getOwnPropertyNames(detail);
+    if (names.length !== 1 || names[0] !== "aids") return null;
+    const slot = Object.getOwnPropertyDescriptor(detail, "aids");
+    if (!hasOwn(slot, "value") || slot.enumerable !== true) return null;
+    const aids = slot.value;
+    if (!Array.isArray(aids) || Object.getPrototypeOf(aids) !== Array.prototype) return null;
+    if (!Object.isFrozen(aids)) return null;
+    if (aids.length < 1 || aids.length > OVERLAY_MAX) return null;
+    if (Object.getOwnPropertySymbols(aids).length !== 0) return null;
+    if (Object.getOwnPropertyNames(aids).length !== aids.length + 1) return null;
+    const blocks = blockElements();
+    let previous = null;
+    for (let at = 0; at < aids.length; at += 1) {
+      const indexed = Object.getOwnPropertyDescriptor(aids, String(at));
+      if (indexed === undefined || !hasOwn(indexed, "value") || indexed.enumerable !== true) return null;
+      const aid = indexed.value;
+      if (typeof aid !== "string" || !AID.test(aid)) return null;
+      if (previous !== null && !(aid > previous)) return null;
+      previous = aid;
+      const found = blocks.get(aid);
+      if (found === undefined || found === null || !found.element.isConnected) return null;
+    }
+    return aids;
+  }
+
+  function onOverlay(event) {
+    if (!activated || panel === null) return;
+    const aids = overlayAids(event);
+    if (aids === null) return;
+    enqueueOverlay(aids);
+  }
+
+  /* Several valid events in one task become one microtask with their sorted
+     union.  A union past the bound is not dropped and not unbounded: the
+     current batch runs and the remainder becomes the next finite one. */
+  function enqueueOverlay(aids) {
+    for (const aid of aids) {
+      if (overlayBatch !== null && overlayBatch.has(aid)) continue;
+      if (overlayNext !== null && overlayNext.has(aid)) continue;
+      if (overlayBatch === null) overlayBatch = new Set();
+      if (overlayBatch.size < OVERLAY_MAX) {
+        overlayBatch.add(aid);
+        continue;
+      }
+      if (overlayNext === null) overlayNext = new Set();
+      overlayNext.add(aid);
+    }
+    if (overlayBatch !== null && !overlayScheduled) {
+      overlayScheduled = true;
+      queueMicrotask(flushOverlay);
+    }
+  }
+
+  function flushOverlay() {
+    overlayScheduled = false;
+    const named = overlayBatch;
+    overlayBatch = null;
+    if (named !== null && named.size > 0) reconcile(named);
+    const carry = overlayNext;
+    overlayNext = null;
+    if (carry !== null) enqueueOverlay(carry);
+  }
+
+  /* Repair after an overlay replaced the children of the named blocks.  Only
+     the named text maps are walked again, and only a thread that could have
+     changed state is located again: new text in a named block can turn a
+     moved or orphaned quote into a different state, so a thread whose home
+     block is missing is re-run too.  A thread anchored to another present
+     block keeps the live range it already has, and no thread record and no
+     discussion card changes. */
+  function reconcile(named) {
+    if (placementFrame !== 0 && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(placementFrame);
+      placementFrame = 0;
+    }
+    const index = buildBlockIndex(blockIndex, named);
+    if (index === null) return;
+    blockIndex = index;
+    model = model.map((entry) => {
+      if (entry.location === null) return entry;
+      const home = entry.thread.anchor.block;
+      if (!named.has(home) && index.has(home)) return entry;
+      return { thread: entry.thread, location: locate(entry.thread.anchor, index) };
+    });
+    if (activeId !== null && !model.some((entry) => entry.thread.id === activeId)) activeId = null;
+    render();
   }
 
   /* ============================================================== writes */
@@ -3759,6 +4277,7 @@ function installComments() {
   function integrate(record) {
     const index = buildBlockIndex();
     if (index === null) return false;
+    blockIndex = index;
     const entry = {
       thread: record,
       location: record.kind === "comment" ? locate(record.anchor, index) : null,
@@ -4040,13 +4559,18 @@ function installComments() {
 
   /* ------------------------------------------------------- lifecycle */
 
+  /* Published before any listener, so a second client that loads later either
+     sees both surfaces or sees the nulls P1-B left. */
+  doc.rail = railSurface();
+  doc.panel = panelSurface();
+
   document.addEventListener("session", (event) => {
     const detail = event.detail;
     if (detail === null || typeof detail !== "object") return;
     if (activated) return;
     session = projectSession(detail);
     activated = true;
-    refresh();
+    awaitOverlays();
   }, { once: true });
 
   /* Only visible edges after activation count toward the 30-second window;
