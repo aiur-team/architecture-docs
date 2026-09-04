@@ -15,7 +15,10 @@ import { createHash } from "node:crypto";
 //
 // Amendment chain: P4-B (the initial apply path) -> P4-M (document-role
 // capabilities replace the temporary organization gate) -> P4-N (the one apply
-// path, the optional explicit base, and the edit fan-out).
+// path, the optional explicit base, and the edit fan-out). P4-M's access
+// check stays in this module by design, because
+// `gitedit.mjs` is not an authorization oracle: it is never reached until
+// both capability checks have passed.
 
 const NO_STORE = "private, no-store";
 const JSON_TYPE = "application/json; charset=utf-8";

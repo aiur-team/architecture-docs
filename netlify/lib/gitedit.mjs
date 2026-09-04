@@ -122,8 +122,11 @@ export class ApplyError extends Error {
    * @param {{currentHash?: string, current?: string | null}} [details]
    */
   constructor(code, details = {}) {
-    const row = PUBLIC_ERRORS[code] ?? PUBLIC_ERRORS["invalid-state"];
-    const known = PUBLIC_ERRORS[code] === undefined ? "invalid-state" : code;
+    // Own-property only: a forged code such as `toString` or `constructor`
+    // would otherwise resolve through the prototype chain and yield a row that
+    // is not a row, producing an `undefined` status and message.
+    const known = hasOwn(PUBLIC_ERRORS, code) ? code : "invalid-state";
+    const row = PUBLIC_ERRORS[known];
     super(row[1]);
     const fixed = (key, value, enumerable) => {
       Object.defineProperty(this, key, {
@@ -298,7 +301,9 @@ export function assertApplyManifest(value, expectedDocId) {
     throw applyFail("invalid-state");
   }
   const aids = Reflect.ownKeys(blocks);
-  if (aids.length > MAX_MANIFEST_BLOCKS) throw applyFail("unavailable");
+  // An oversized manifest is a corrupt document, not a transient outage: it is
+  // invalid state (500), never a 503 that invites a retry.
+  if (aids.length > MAX_MANIFEST_BLOCKS) throw applyFail("invalid-state");
   const rows = {};
   for (const aid of aids) {
     if (typeof aid !== "string" || !AID_PATTERN.test(aid)) throw applyFail("invalid-state");
@@ -1159,6 +1164,14 @@ export function createGitEditService(dependencies = {}) {
     }
     if (index === -1) throw applyConflict(undefined, null);
     const { start, blocks } = scanSourceBody(source);
+    // The join is positional, so it is sound only when the committed anchors
+    // map and the scanned source describe the same block sequence. A length
+    // mismatch means the two drifted apart since the document was built, so
+    // the index no longer names the block the caller meant — including when
+    // the source grew and the index still resolves to something. That is the
+    // same drift a deleted block reports, and it is answered the same way:
+    // a conflict that writes nothing and describes no repository state.
+    if (blocks.length !== ids.length) throw applyConflict(undefined, null);
     const block = blocks[index];
     if (block === undefined) throw applyConflict(undefined, null);
     if (block === null || typeof block !== "object") throw applyFail("repository-unavailable");

@@ -748,6 +748,31 @@ async function runtimeMatrix() {
     "manifest with reordered fields",
   );
 
+  {
+    // A manifest larger than the declared bound is a corrupt document, not a
+    // transient outage: it must never map to the 503 that invites a retry.
+    const blocks = {};
+    for (let at = 0; at <= 5_000; at += 1) {
+      blocks[`a${at.toString(16).padStart(8, "0")}`] = {
+        file: SECTION_FILE, section: SECTION_ID, tag: "p", hash: BASE_HASH,
+      };
+    }
+    throwsSync(
+      () => assertApplyManifest(manifestFor({ blocks }), DOC_ID),
+      (error) => isApply(error, 500, "invalid-state"),
+      "a manifest over the row bound is invalid state, never unavailable",
+    );
+  }
+
+  for (const forged of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+    // The public error table is consulted by own property only. A code that
+    // happens to name something on `Object.prototype` must not resolve to a
+    // row that is not a row, which would yield an undefined status.
+    const error = new ApplyError(forged);
+    isApply(error, 500, "invalid-state");
+    eq(error.message, "Invalid edit state", `a forged ${forged} code keeps the safe message`);
+  }
+
   const storedDirect = directReceipt();
   eq(
     Reflect.ownKeys(assertApplyReceipt(storedDirect, AID)),
@@ -1483,6 +1508,28 @@ async function runtimeMatrix() {
       },
       "a retagged block is a conflict rather than a guess",
     );
+  }
+
+  {
+    // The anchors map and the scanned source no longer describe the same block
+    // sequence, so the positional index names something other than the block
+    // the caller meant. It is refused as drift rather than resolved by
+    // indexing into a list that means something else.
+    const { service, github } = repository({
+      github2: {
+        source: `${sourceWith(INNER)}<p data-aid="${OTHER_AID}">A later row.</p>\n`,
+      },
+    });
+    await rejects(
+      () => service.applyText(directInput()),
+      (error) => {
+        isApply(error, 409, "conflict");
+        eq(error.currentHash, undefined, "an unsound join reports no source hash");
+        eq(error.current, null, "an unsound join reports no source text");
+      },
+      "a source that grew past the committed anchors map is a bounded conflict",
+    );
+    eq(github.committed, null, "an unsound join never writes");
   }
 
   /* --------------------------------------- repository suggestion acceptance */
