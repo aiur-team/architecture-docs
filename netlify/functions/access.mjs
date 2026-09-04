@@ -39,6 +39,7 @@ import {
   normalizeEmail,
   ORG_DEFAULTS,
   resolveRole,
+  validateAccessRow,
 } from "../lib/access.mjs";
 import { docState, mutate, read, StoreError } from "../lib/store.mjs";
 import { appendEvent } from "./events.mjs";
@@ -50,13 +51,6 @@ const JSON_HEADERS = Object.freeze({
 });
 
 const IDENTITY_KEYS = Object.freeze(["sub", "email", "name", "isOrg"]);
-const ACCESS_KEYS = Object.freeze([
-  "role", "shared", "canRead", "canComment", "threadControl", "canSuggest",
-  "canEdit", "canAccept", "canShare", "canSeeMembers",
-]);
-const CAPABILITY_KEYS = Object.freeze(ACCESS_KEYS.slice(2));
-const ROLES = Object.freeze(["owner", "editor", "commenter", "viewer", "none"]);
-const THREAD_CONTROLS = Object.freeze(["any", "own", "none"]);
 const DOC_ID_PATTERN = /^[0-9a-f]{6}$/;
 const INVITATION_HASH_PATTERN = /^[0-9a-f]{32}$/;
 const LEASE_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -383,27 +377,18 @@ function validateIdentity(value) {
   return value;
 }
 
+/**
+ * Both consumers of a resolved access row here -- the P3-H read path and the
+ * write path's `authorize()` -- ask the library's shared question rather than
+ * a private copy of it. `validateAccessRow()` (#132) is the single definition
+ * of "is this row complete, ordinary and internally consistent"; a second copy
+ * in this file would be free to drift away from it, which is the defect #125
+ * fixed elsewhere in the deploy tree. Only the failure shape is local: an
+ * invalid row is a server-side fault here, never a falsy capability.
+ */
 function validateAccess(value) {
-  if (!isExactPlainDataObject(value, ACCESS_KEYS, false)) throw new TypeError("Invalid access result");
-  const role = ownDataDescriptor(value, "role").value;
-  const shared = ownDataDescriptor(value, "shared").value;
-  const threadControl = ownDataDescriptor(value, "threadControl").value;
-  if (!ROLES.includes(role) || typeof shared !== "boolean" ||
-      !THREAD_CONTROLS.includes(threadControl)) throw new TypeError("Invalid access result");
-  for (const key of CAPABILITY_KEYS) {
-    const field = ownDataDescriptor(value, key).value;
-    if (key === "threadControl" ? typeof field !== "string" : typeof field !== "boolean") {
-      throw new TypeError("Invalid access result");
-    }
-  }
-  const expected = capabilitiesFor(role);
-  if (!isExactPlainDataObject(expected, CAPABILITY_KEYS, false)) {
-    throw new TypeError("Invalid capability result");
-  }
-  for (const key of CAPABILITY_KEYS) {
-    if (ownDataDescriptor(value, key).value !== ownDataDescriptor(expected, key).value) {
-      throw new TypeError("Inconsistent access result");
-    }
+  if (!validateAccessRow(value, capabilitiesFor)) {
+    throw new TypeError("Invalid access result");
   }
   return value;
 }
