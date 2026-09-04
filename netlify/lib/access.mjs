@@ -140,8 +140,15 @@ const INVITATION_HASH_PATTERN = /^[0-9a-f]{32}$/;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const GRANTABLE_ROLES = Object.freeze(["editor", "commenter", "viewer"]);
-const ORG_DEFAULTS = Object.freeze(["commenter", "viewer", "none"]);
+/**
+ * The roles an owner may grant, and the organization-wide defaults a document
+ * may carry. Exported because `netlify/functions/access.mjs` validates request
+ * bodies against exactly these lists, and a second copy declared there would be
+ * free to drift away from the record validators below — the defect #125 fixed
+ * elsewhere in the deploy tree.
+ */
+export const GRANTABLE_ROLES = Object.freeze(["editor", "commenter", "viewer"]);
+export const ORG_DEFAULTS = Object.freeze(["commenter", "viewer", "none"]);
 
 const USER_KEYS = Object.freeze(["email", "isOrg", "name", "sub"]);
 const ACTOR_KEYS = Object.freeze(["email", "name", "sub"]);
