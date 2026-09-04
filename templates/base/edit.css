@@ -1,0 +1,100 @@
+/* Direct-edit controls and the pending-overlay decoration.
+
+   Every selector here is `.doc-edit-*` or `[data-editable].doc-edit-*`: the
+   document's own type scale, colours and spacing are untouched, so a page
+   built without edit.js is byte-for-byte what it was. State is never carried
+   by colour alone — each state also has status text the client writes — and
+   print keeps the applied overlay text while dropping the transient chrome. */
+
+.doc-edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin: -.25rem 0 1rem;
+  font-family: var(--sans);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.doc-edit-button {
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: .15rem .55rem;
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease;
+}
+
+.doc-edit-button:hover { color: var(--ink); background: var(--surface-3); }
+
+.doc-edit-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.doc-edit-button[disabled] { cursor: default; opacity: .6; }
+
+.doc-edit-status { color: var(--ink-3); }
+
+.doc-edit-controls-busy .doc-edit-status,
+.doc-edit-saving .doc-edit-status { color: var(--ink-2); }
+
+.doc-edit-conflict .doc-edit-status { color: var(--warn); }
+
+.doc-edit-failed .doc-edit-status { color: var(--risk); }
+
+/* A block being edited is plain text in a visible field. The border, not the
+   background alone, carries the state for a high-contrast reader. */
+[data-editable].doc-edit-editing {
+  white-space: pre-wrap;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: .35rem .5rem;
+  margin-left: -.5rem;
+  margin-right: -.5rem;
+}
+
+[data-editable].doc-edit-editing:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An applied but unmerged overlay. The rule is a left marker rather than a
+   fill so long prose stays readable at any width. */
+[data-editable].doc-edit-pending {
+  box-shadow: -3px 0 0 0 var(--accent-soft);
+}
+
+@media (max-width: 640px) {
+  .doc-edit-controls { font-size: .74rem; }
+  .doc-edit-status { flex-basis: 100%; }
+  [data-editable].doc-edit-editing { margin-left: 0; margin-right: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-edit-button { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .doc-edit-button { border: 1px solid ButtonBorder; }
+  .doc-edit-button:focus-visible { outline: 2px solid Highlight; }
+  [data-editable].doc-edit-editing { border: 1px solid CanvasText; }
+  [data-editable].doc-edit-pending { box-shadow: none; border-left: 3px solid CanvasText; }
+}
+
+/* Print keeps the overlay text and drops every transient decoration. */
+@media print {
+  .doc-edit-controls { display: none !important; }
+  [data-editable].doc-edit-pending { box-shadow: none; }
+  [data-editable].doc-edit-editing {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
