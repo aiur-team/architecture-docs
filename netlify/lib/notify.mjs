@@ -1,12 +1,28 @@
 import { isProxy } from "node:util/types";
+import { publish } from "./realtime.mjs";
 
 const INVALID_DEPENDENCIES = "Invalid notify dependencies";
 const INVALID_NOTIFICATION = "Invalid notification";
-const DEPENDENCY_KEYS = new Set(["envGet", "fetchFn", "timeoutSignalFn"]);
+const DEPENDENCY_KEYS = new Set([
+  "envGet",
+  "fetchFn",
+  "timeoutSignalFn",
+  "publishFn",
+]);
 const DOC_ID = /^[0-9a-f]{6}$/;
 const THREAD_ID = /^t_[0-9a-z]+_[0-9a-f]{8}$/;
 const SUGGESTION_ID = /^s_[0-9a-z]+_[0-9a-f]{8}$/;
 const ANCHOR_ID = /^a[0-9a-f]{8}$/;
+const HASH = /^[0-9a-f]{64}$/;
+// The Slack sink is an allowlist, not "everything except edit.saved": a sixth
+// notification kind must opt in deliberately rather than fall through into the
+// thread message branch.
+const SLACK_KINDS = new Set([
+  "thread.created",
+  "thread.replied",
+  "suggest.created",
+  "suggest.decided",
+]);
 const typedArrayTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag,
@@ -170,7 +186,30 @@ const SHAPES = Object.freeze({
     deciderName: validName,
     outcome: (value) => value === "accepted" || value === "rejected",
   }),
+  "edit.saved": Object.freeze({
+    docId: (value) => typeof value === "string" && DOC_ID.test(value),
+    aid: (value) => typeof value === "string" && ANCHOR_ID.test(value),
+    hash: (value) => typeof value === "string" && HASH.test(value),
+  }),
 });
+
+/**
+ * Project a validated notification onto the P2-F event union, or null when the
+ * kind carries no realtime hint. Every call builds a fresh ordinary object
+ * holding only identifiers, never the notification itself and never its text.
+ *
+ * @param {Notification} notification
+ * @returns {null | {t: "thread.changed", threadId: string} | {t: "edit.saved", aid: string, hash: string}}
+ */
+function realtimeEventFor(notification) {
+  if (notification.t === "thread.created" || notification.t === "thread.replied") {
+    return { t: "thread.changed", threadId: notification.threadId };
+  }
+  if (notification.t === "edit.saved") {
+    return { t: "edit.saved", aid: notification.aid, hash: notification.hash };
+  }
+  return null;
+}
 
 function validateContext(context) {
   if (
@@ -337,55 +376,73 @@ export function createNotifier(dependencies = {}) {
   const envGet = dependencies.envGet ?? ((name) => Netlify.env.get(name));
   const fetch = dependencies.fetchFn ?? globalThis.fetch;
   const timeoutSignal = dependencies.timeoutSignalFn ?? ((ms) => AbortSignal.timeout(ms));
+  const publishFn = dependencies.publishFn ?? publish;
 
   /**
+   * The sole server fan-out point. Schedules the applicable Slack message and
+   * the applicable realtime projection independently: either sink may fail
+   * without touching the other or the durable response, and neither is awaited.
+   *
    * @param {{waitUntil(promise: Promise<unknown>): void}} context
    * @param {Notification} notification
-   * @returns {boolean}
+   * @returns {boolean} true when at least one sink was accepted by waitUntil
    */
   return function notify(context, notification) {
-    let webhookUrl;
-    try {
-      webhookUrl = validWebhookUrl(envGet("SLACK_WEBHOOK_URL"));
-    } catch {
-      return false;
-    }
-    if (webhookUrl === null) return false;
-
     validateContext(context);
     validateNotification(notification);
 
-    let siteOrigin;
-    try {
-      siteOrigin = validSiteOrigin(envGet("URL"));
-    } catch {
-      return false;
-    }
-    if (siteOrigin === null) return false;
+    let scheduled = false;
 
-    let providerPromise;
-    try {
-      const signal = timeoutSignal(2_000);
-      providerPromise = Promise.resolve(fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/plain",
-        },
-        body: JSON.stringify({ text: messageFor(notification, siteOrigin) }),
-        signal,
-      })).then(acceptedSlackResponse).catch(() => false);
-    } catch {
-      return false;
+    if (SLACK_KINDS.has(notification.t)) {
+      try {
+        const webhookUrl = validWebhookUrl(envGet("SLACK_WEBHOOK_URL"));
+        const siteOrigin =
+          webhookUrl === null ? null : validSiteOrigin(envGet("URL"));
+        if (webhookUrl !== null && siteOrigin !== null) {
+          const signal = timeoutSignal(2_000);
+          const slackPromise = Promise.resolve(fetch(webhookUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "text/plain",
+            },
+            body: JSON.stringify({ text: messageFor(notification, siteOrigin) }),
+            signal,
+          })).then(acceptedSlackResponse).catch(() => false);
+          slackPromise.catch(() => {});
+          context.waitUntil(slackPromise);
+          scheduled = true;
+        }
+      } catch {
+        // A Slack configuration read, request, or registration failure never
+        // stops the realtime sink.
+      }
     }
 
-    providerPromise.catch(() => {});
-    try {
-      context.waitUntil(providerPromise);
-      return true;
-    } catch {
-      return false;
+    const event = realtimeEventFor(notification);
+    if (event !== null) {
+      try {
+        const realtimePromise = publishFn(notification.docId, event);
+        if (
+          realtimePromise !== null &&
+          realtimePromise !== undefined &&
+          typeof realtimePromise.then === "function" &&
+          typeof realtimePromise.catch === "function"
+        ) {
+          // Observe rejection on the side only. The exact promise the sink
+          // returned is what waitUntil registers, so an injected rejection
+          // stays a rejection rather than becoming a resolving wrapper.
+          realtimePromise.catch(() => {});
+          context.waitUntil(realtimePromise);
+          scheduled = true;
+        }
+      } catch {
+        // A synchronous sink or registration failure is swallowed for realtime
+        // alone; Slack scheduling above already happened.
+      }
     }
+
+    return scheduled;
   };
 }
 
