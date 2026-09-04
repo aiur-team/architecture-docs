@@ -466,6 +466,19 @@ assert.deepEqual(parsed, {
   name: null,
   site: "123e4567-e89b-12d3-a456-426614174000",
 });
+assert.deepEqual(parseConnectArgs([
+  "--owner", "owner@example.com",
+  "--file", "page.html",
+  "--site", "123e4567-e89b-12d3-a456-426614174000",
+  "--manifest", "edit.json",
+]), {
+  file: "page.html",
+  manifest: "edit.json",
+  history: null,
+  owner: "owner@example.com",
+  name: null,
+  site: "123e4567-e89b-12d3-a456-426614174000",
+});
 assert.equal(parseConnectArgs([
   "--file", "--opaque-file",
   "--manifest", "--opaque-manifest",
@@ -519,11 +532,15 @@ const manifest = {
     },
   },
 };
+const embeddedHistoryScript =
+  `<script type="application/json" id="doc-history">${JSON.stringify(history).replaceAll("</", "<\\/")}</script>`;
 const html =
   `<meta name="doc-id" content="${docId}">\n` +
   `<!doctype html><html><body><p data-editable data-aid="${aid}">${inner}</p>` +
-  `<script type="application/json" id="doc-history">${JSON.stringify(history).replaceAll("</", "<\\/")}</script>` +
+  embeddedHistoryScript +
   `<script>const fake = '<meta name="doc-id" content="ffffff">';</script></body></html>\n`;
+const noHistoryManifest = { ...manifest, commit: "" };
+const noHistoryHtml = html.replace(embeddedHistoryScript, "");
 const unicodeRawTextHtml = html.replace(
   "<script>const fake",
   "<script>const dotted = 'İ'; const fake",
@@ -531,6 +548,7 @@ const unicodeRawTextHtml = html.replace(
 
 assert.deepEqual(inspectStandaloneHtml(html), { docId });
 assert.deepEqual(assertModeManifest(manifest, html), { docId, manifest });
+assert.deepEqual(assertModeManifest(noHistoryManifest, noHistoryHtml), { docId, manifest: noHistoryManifest });
 assert.deepEqual(assertModeManifest(manifest, unicodeRawTextHtml), { docId, manifest });
 for (const badHtml of [
   `\ufeff${html}`,
@@ -544,7 +562,7 @@ for (const badHtml of [
 ]) {
   assert.throws(() => assertModeManifest(manifest, badHtml));
 }
-assert.throws(() => assertModeManifest({ ...manifest, commit: "" }, html));
+assert.throws(() => assertModeManifest({ ...manifest, commit: "abc123" }, html));
 assert.throws(() => assertModeManifest({ ...manifest, blocks: {} }, html));
 
 const source = readFileSync(fileURLToPath(new URL("./connect.mjs", import.meta.url)), "utf8");
@@ -582,6 +600,8 @@ try {
   writeFileSync(join(inputRoot, "page.html"), html);
   writeFileSync(join(inputRoot, "edit.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(join(inputRoot, "history.json"), `${JSON.stringify(history, null, 2)}\n`);
+  writeFileSync(join(inputRoot, "page-no-history.html"), noHistoryHtml);
+  writeFileSync(join(inputRoot, "edit-no-history.json"), `${JSON.stringify(noHistoryManifest, null, 2)}\n`);
 
   const calls = [];
   let ownerSeed = "";
@@ -628,7 +648,9 @@ try {
         assert.deepEqual(args, ["deploy", "--prod", "--no-build", "--dir", "publish", "--json"]);
         const publishRoot = join(options.cwd, args[args.indexOf("--dir") + 1]);
         assert.deepEqual(readdirSync(publishRoot), ["index.html"]);
-        assert.ok(readFileSync(join(publishRoot, "index.html")).equals(Buffer.from(html)));
+        const publishedManifest = JSON.parse(readFileSync(join(options.cwd, "private", "manifest.input"), "utf8"));
+        const expectedHtml = publishedManifest.commit === "" ? noHistoryHtml : html;
+        assert.ok(readFileSync(join(publishRoot, "index.html")).equals(Buffer.from(expectedHtml)));
         assert.ok(lstatSync(join(options.cwd, "netlify")).isDirectory());
         for (const name of ["netlify.toml", "package.json", "package-lock.json"]) {
           assert.ok(lstatSync(join(options.cwd, name)).isFile());
@@ -667,6 +689,12 @@ try {
   assert.equal(calls[0].options.env.NETLIFY_SITE_ID, undefined);
   assert.ok(calls.slice(1).every((call) => call.options.env.NETLIFY_SITE_ID === result.siteId));
   assert.equal(calls.at(-1).args.join(" "), "deploy --prod --no-build --dir publish --json");
+  const noHistoryArguments = () => parseConnectArgs([
+    "--file", "page-no-history.html",
+    "--manifest", "edit-no-history.json",
+    "--owner", "owner@example.com",
+    "--site", result.siteId,
+  ]);
 
   const exactProtocol = [
     ["sites:create", "--name", "fixture-site", "--disable-linking", "--json"],
@@ -686,6 +714,16 @@ try {
       assert.deepEqual(actual, expected);
     }
   }
+
+  calls.length = 0;
+  const noHistoryResult = await runner(noHistoryArguments());
+  assert.deepEqual(noHistoryResult, {
+    docId,
+    owner: "owner@example.com",
+    siteId: result.siteId,
+    url: "https://fixture-site.netlify.app/",
+  });
+  assert.deepEqual(calls.map((call) => call.args[0]), ["env:get", "env:get", "blobs:set", "blobs:get", "deploy"]);
 
   calls.length = 0;
   const repeated = await runner(parseConnectArgs([
@@ -762,13 +800,14 @@ try {
     "--owner", "owner@example.com",
     "--name", "failure-fixture",
   ]);
-  const makeProtocolSpawn = (override = () => null, signalLog = []) => {
+  const makeProtocolSpawn = (override = () => null, signalLog = [], commandLog = []) => {
     let storedManifest = null;
     let index = 0;
     return (_executable, args) => {
       const callIndex = index;
       index += 1;
       const command = args[0];
+      commandLog.push(command);
       let response = command === "sites:create"
         ? { stdout: `{"site_id":"${result.siteId}"}` }
         : command === "env:get"
@@ -811,11 +850,12 @@ try {
   };
   const runProtocolFailure = async ({ arguments: parsedArguments = siteArguments(), override, rmFn }) => {
     const signals = [];
+    const commands = [];
     const failureRunner = createConnectRunner({
       workingDirectory: inputRoot,
       repositoryRoot,
       env: { PATH: process.env.PATH },
-      spawnFn: makeProtocolSpawn(override, signals),
+      spawnFn: makeProtocolSpawn(override, signals, commands),
       ...(rmFn === undefined ? {} : { rmFn }),
     });
     let failure;
@@ -825,7 +865,7 @@ try {
       failure = error;
     }
     assert.ok(failure);
-    return { failure, signals };
+    return { failure, signals, commands };
   };
 
   const providerFailures = [
@@ -842,6 +882,20 @@ try {
   for (const [label, parsedArguments, override, expectedTag] of providerFailures) {
     const { failure } = await runProtocolFailure({ arguments: parsedArguments, override });
     assert.equal(failure.tag, expectedTag, label);
+  }
+  for (const [label, parsedArguments] of [
+    ["history snapshot requires sidecar", parseConnectArgs([
+      "--file", "page.html",
+      "--manifest", "edit.json",
+      "--owner", "owner@example.com",
+      "--site", result.siteId,
+    ])],
+    ["empty history rejects sidecar", { ...noHistoryArguments(), history: "history.json" }],
+    ["empty history rejects mirror", { ...noHistoryArguments(), file: "page.html" }],
+  ]) {
+    const { failure, commands } = await runProtocolFailure({ arguments: parsedArguments });
+    assert.equal(failure.tag, "setup", label);
+    assert.deepEqual(commands, [], `${label} stops before remote work`);
   }
   const manifestBytes = readFileSync(join(inputRoot, "edit.json"));
   for (const [label, drifted] of [
@@ -1098,6 +1152,17 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
   assert.equal(rejectedBlob.status, 2);
   assert.equal(rejectedBlob.stdout, "");
   assert.equal(rejectedBlob.stderr, "");
+  const helpCommand = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "connect.mjs"), "--help"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  assert.equal(helpCommand.status, 0);
+  assert.equal(helpCommand.stderr, "");
+  assert.equal(helpCommand.stdout,
+    "node scripts/connect.mjs --file <html> --manifest <edit.json> [--history <history.json>] --owner <email> --name <new-site-name>\n" +
+    "node scripts/connect.mjs --file <html> --manifest <edit.json> [--history <history.json>] --owner <email> --site <site-id>\n" +
+    "--history is required when manifest.commit is set; omit --history and #doc-history when it is empty.\n" +
+    "node scripts/connect.mjs --help\n");
   const command = spawnSync(process.execPath, [
     join(repositoryRoot, "scripts", "connect.mjs"),
     "--file", join(inputRoot, "page.html"),
@@ -1118,7 +1183,27 @@ else if (args.length === 2 && args[1] === "--help" && help[args[0]] !== undefine
     "WARNING: In standalone mode, an editor can change the live document without review.\n" +
     "WARNING: Export is the only path back to a reviewable artifact.\n" +
     "WARNING: A Netlify account with site access outranks the document owner.\n");
-  const deploysAfterSuccess = JSON.parse(readFileSync(statePath, "utf8")).deploys;
+  const commandTempRoot = join(testRoot, "command-tmp");
+  mkdirSync(commandTempRoot);
+  const noHistoryCommand = spawnSync(process.execPath, [
+    join(repositoryRoot, "scripts", "connect.mjs"),
+    "--file", join(inputRoot, "page-no-history.html"),
+    "--manifest", join(inputRoot, "edit-no-history.json"),
+    "--owner", "OWNER@example.com",
+    "--name", "no-history-fixture",
+  ], {
+    cwd: repositoryRoot,
+    env: { PATH: `${fakeBin}:${process.env.PATH}`, TMPDIR: commandTempRoot },
+    encoding: "utf8",
+  });
+  assert.equal(noHistoryCommand.status, 0, noHistoryCommand.stderr);
+  assert.equal(noHistoryCommand.stderr, "");
+  assert.equal(noHistoryCommand.stdout, command.stdout);
+  assert.doesNotMatch(noHistoryHtml, /Example Author/);
+  assert.deepEqual(readdirSync(commandTempRoot), [], "no-history create cleans its temporary project");
+  const stateAfterNoHistoryCreate = JSON.parse(readFileSync(statePath, "utf8"));
+  assert.equal(stateAfterNoHistoryCreate.siteName, "no-history-fixture", "successful create keeps the new site");
+  const deploysAfterSuccess = stateAfterNoHistoryCreate.deploys;
   assert.ok(Number.isInteger(deploysAfterSuccess) && deploysAfterSuccess >= 1);
   const runCommand = (owner) => spawnSync(process.execPath, [
     join(repositoryRoot, "scripts", "connect.mjs"),

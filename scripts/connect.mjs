@@ -24,8 +24,9 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const USAGE =
-  "node scripts/connect.mjs --file <html> --manifest <edit.json> --history <history.json> --owner <email> --name <new-site-name>\n" +
-  "node scripts/connect.mjs --file <html> --manifest <edit.json> --history <history.json> --owner <email> --site <site-id>\n" +
+  "node scripts/connect.mjs --file <html> --manifest <edit.json> [--history <history.json>] --owner <email> --name <new-site-name>\n" +
+  "node scripts/connect.mjs --file <html> --manifest <edit.json> [--history <history.json>] --owner <email> --site <site-id>\n" +
+  "--history is required when manifest.commit is set; omit --history and #doc-history when it is empty.\n" +
   "node scripts/connect.mjs --help\n";
 const RECEIPT_WARNINGS =
   "Whoever can deploy this file decides who owns it.\n" +
@@ -317,10 +318,9 @@ export function parseConnectArgs(argv) {
     values.set(key, value);
   }
   if (
-    values.size !== 5 ||
+    (values.size !== 4 && values.size !== 5) ||
     !values.has("--file") ||
     !values.has("--manifest") ||
-    !values.has("--history") ||
     !values.has("--owner") ||
     values.has("--name") === values.has("--site")
   ) {
@@ -329,7 +329,7 @@ export function parseConnectArgs(argv) {
   return {
     file: values.get("--file"),
     manifest: values.get("--manifest"),
-    history: values.get("--history"),
+    history: values.get("--history") ?? null,
     owner: values.get("--owner"),
     name: values.get("--name") ?? null,
     site: values.get("--site") ?? null,
@@ -364,7 +364,7 @@ function validManifest(value, docId) {
   if (
     value.docId !== docId ||
     !/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(value.instance) ||
-    !/^[0-9a-f]{7}$/.test(value.commit) ||
+    !/^(?:[0-9a-f]{7})?$/.test(value.commit) ||
     value.blocks === null ||
     typeof value.blocks !== "object" ||
     Array.isArray(value.blocks) ||
@@ -638,7 +638,8 @@ function decodeUtf8(bytes) {
 
 function assertParsed(parsed) {
   if (!exactKeys(parsed, ["file", "manifest", "history", "owner", "name", "site"])) failInput();
-  for (const key of ["file", "manifest", "history", "owner"]) if (typeof parsed[key] !== "string" || parsed[key].length === 0) failInput();
+  for (const key of ["file", "manifest", "owner"]) if (typeof parsed[key] !== "string" || parsed[key].length === 0) failInput();
+  if (parsed.history !== null && (typeof parsed.history !== "string" || parsed.history.length === 0)) failInput();
   if ((parsed.name === null) === (parsed.site === null)) failInput();
   if (parsed.name !== null && (typeof parsed.name !== "string" || parsed.name.length === 0)) failInput();
   if (parsed.site !== null && (typeof parsed.site !== "string" || parsed.site.length === 0)) failInput();
@@ -839,32 +840,43 @@ export function createConnectRunner(dependencies = {}) {
       if (!validDirectoryStat(workingStat) || workingStat.isSymbolicLink?.() === true) failInput();
       const filePath = resolve(workingDirectory, parsed.file);
       const manifestPath = resolve(workingDirectory, parsed.manifest);
-      const historyPath = resolve(workingDirectory, parsed.history);
-      if (new Set([filePath, manifestPath, historyPath]).size !== 3) failInput();
-      const [htmlFile, manifestFile, historyFile] = await Promise.all([
-        readStable(filePath, HTML_LIMIT, deps),
-        readStable(manifestPath, SIDECAR_LIMIT, deps),
-        readStable(historyPath, SIDECAR_LIMIT, deps),
-      ]);
-      const identities = new Set([htmlFile, manifestFile, historyFile].map((file) => `${file.stat.dev}:${file.stat.ino}`));
-      if (identities.size !== 3) failInput();
+      const inputs = [
+        { path: filePath, limit: HTML_LIMIT },
+        { path: manifestPath, limit: SIDECAR_LIMIT },
+      ];
+      if (parsed.history !== null) inputs.push({ path: resolve(workingDirectory, parsed.history), limit: SIDECAR_LIMIT });
+      if (new Set(inputs.map(({ path }) => path)).size !== inputs.length) failInput();
+      const inputFiles = await Promise.all(inputs.map(({ path, limit }) => readStable(path, limit, deps)));
+      const [htmlFile, manifestFile, historyFile = null] = inputFiles;
+      const identities = new Set(inputFiles.map((file) => `${file.stat.dev}:${file.stat.ino}`));
+      if (identities.size !== inputFiles.length) failInput();
       const html = decodeUtf8(htmlFile.bytes);
       const manifestText = decodeUtf8(manifestFile.bytes);
-      const historyText = decodeUtf8(historyFile.bytes);
       let manifestValue;
-      let historyValue;
       try {
         manifestValue = JSON.parse(manifestText);
-        historyValue = JSON.parse(historyText);
       } catch {
         failInput();
       }
       const inspected = assertModeManifestTokens(manifestValue, html, tokenizeHtml(html));
       const canonicalManifest = `${JSON.stringify(inspected.manifest, null, 2)}\n`;
       if (manifestText !== canonicalManifest) failInput();
-      const history = validHistory(historyValue);
-      if (historyText !== `${JSON.stringify(history, null, 2)}\n` || history.doc !== inspected.manifest.instance || history.head !== inspected.manifest.commit) failInput();
-      assertEmbeddedHistory(html, history, inspected.historyScript);
+      const hasHistory = inspected.manifest.commit !== "";
+      if ((historyFile !== null) !== hasHistory) failInput();
+      if (hasHistory) {
+        const historyText = decodeUtf8(historyFile.bytes);
+        let historyValue;
+        try {
+          historyValue = JSON.parse(historyText);
+        } catch {
+          failInput();
+        }
+        const history = validHistory(historyValue);
+        if (historyText !== `${JSON.stringify(history, null, 2)}\n` || history.doc !== inspected.manifest.instance || history.head !== inspected.manifest.commit) failInput();
+        assertEmbeddedHistory(html, history, inspected.historyScript);
+      } else if (inspected.historyScript !== null) {
+        failInput();
+      }
       const owner = normalizeConnectOwner(parsed.owner);
       if (parsed.name !== null && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(parsed.name)) failInput();
       if (parsed.site !== null && !canonicalSiteId(parsed.site)) failInput();
