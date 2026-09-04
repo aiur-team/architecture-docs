@@ -97,11 +97,18 @@ ${dupe ? '<p data-aid="a31b7c9d2">A second paragraph carrying an already used ai
 `;
 }
 
-/* The P1-D surface the comments client consumes.  `norm` collapses every
-   whitespace run to one space and trims the ends, which is the only property
-   the client depends on. */
+/* The P1-B and P1-D surfaces the comments client consumes.
+   `window.doc` is initialised exactly as P1-B's bootstrap does it
+   (`templates/base/layout.html`): both shared surfaces start as literal
+   `null`. That is not decoration -- P4-Q's client refuses to install over a
+   rail or panel it does not own, and tests `!== null`, so a fixture that
+   leaves them `undefined` models a page P1-B never serves and the module
+   returns before any UI, listener or request. `scripts/test-p4-q.mjs` models
+   the same bootstrap.
+   `norm` collapses every whitespace run to one space and trims the ends,
+   which is the only property of P1-D the client depends on. */
 const ANCHOR_SHIM = `
-window.doc = window.doc || {};
+window.doc = { rail: null, panel: null };
 window.doc.anchor = {
   BLOCK: ${JSON.stringify(BLOCK_TAGS)},
   norm: function (value) { return String(value).replace(/\\s+/g, " ").replace(/^ | $/g, ""); },
@@ -532,6 +539,21 @@ async function activate(page, { threads = [], patch = undefined, none = false } 
 }
 
 const writesOf = (page) => page.evaluate(() => window.__calls.filter((call) => call.method !== undefined && call.method !== "GET"));
+
+/* The kind filter group is addressed by visible label rather than by child
+   index; see the ordering assertion in the read-behaviour scenario. */
+const KIND_GROUP = '#doc-comments-filters [aria-label="Kind"]';
+
+const kindLabels = (page) => page.evaluate((selector) =>
+  [...document.querySelector(selector).querySelectorAll("button")].map((button) => button.textContent), KIND_GROUP);
+
+const clickKind = (page, label) => page.evaluate(([selector, label]) => {
+  const group = document.querySelector(selector);
+  if (group === null) throw new Error("the kind filter group is absent");
+  const button = [...group.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+  if (button === undefined) throw new Error(`no kind filter is labelled ${label}`);
+  button.click();
+}, [KIND_GROUP, label]);
 
 async function openPanel(page) {
   await page.click("#doc-comments-toggle");
@@ -1455,14 +1477,29 @@ async function denialMatrix(browser, host) {
       .filter((article) => article.closest("li").hidden === false)
       .map((article) => article.getAttribute("data-thread-id")));
 
-    await page.click('#doc-comments-filters [aria-label="Kind"] button:nth-child(1)');
+    /* P4-Q extends the kind group from `anchored | discussions | all` to
+       `anchored | discussions | suggestions | all`, so `All` is the fourth
+       control rather than the third. These clicks name the visible label
+       instead of a position: a positional selector does not fail when the
+       group grows, it silently retargets to a different filter, which is how
+       this assertion came to click `Suggestions` and read an empty list. The
+       order itself is asserted once, below, so a reorder still fails loudly. */
+    assert.deepEqual(await kindLabels(page), ["Anchored", "Discussions", "Suggestions", "All"],
+      "the kind group is exactly P4-Q's four controls, in order");
+
+    await clickKind(page, "Anchored");
     await page.waitForFunction(() => document.querySelectorAll("article[data-thread-id]").length === 2);
     assert.deepEqual(await visible(), [THREAD_ID], "Anchored keeps only the comment");
 
-    await page.click('#doc-comments-filters [aria-label="Kind"] button:nth-child(2)');
+    await clickKind(page, "Discussions");
     assert.deepEqual(await visible(), ["t_m8x2k1_4f7a9c50"], "Discussions keeps only the discussion");
 
-    await page.click('#doc-comments-filters [aria-label="Kind"] button:nth-child(3)');
+    /* Neither fixture thread is a suggestion, and no renderer is registered,
+       so the new view hides both cards without dropping them. */
+    await clickKind(page, "Suggestions");
+    assert.deepEqual(await visible(), [], "Suggestions keeps neither a comment nor a discussion");
+
+    await clickKind(page, "All");
     assert.deepEqual((await visible()).sort(), [THREAD_ID, "t_m8x2k1_4f7a9c50"].sort(), "All restores both");
     assert.equal(await page.evaluate(() => document.querySelectorAll("article[data-thread-id]").length), 2, "filtering hides cards, it does not drop them");
 

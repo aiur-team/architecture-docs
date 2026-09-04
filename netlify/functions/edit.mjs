@@ -1,8 +1,8 @@
 import { identify, requireOrigin } from "../lib/identity.mjs";
 import { capabilitiesFor, resolveRole } from "../lib/access.mjs";
 import { StoreError, docState, editKey, mutate, read, upgrade } from "../lib/store.mjs";
-import { scanBlocks } from "../../templates/docbuild/dist/anchor-core.js";
-import { toHtml, toMd } from "../../templates/docbuild/dist/inline_md.js";
+import { scanBlocks } from "../lib/anchor-core.mjs";
+import { toHtml, toMd } from "../lib/inline-md.mjs";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 

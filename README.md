@@ -47,6 +47,7 @@ scripts/scrub-check.sh      # fail if private context reached this repository
 npm --prefix templates/docbuild run check   # typecheck
 node scripts/check-function-modules.mjs     # fail if a netlify/ module does not load
 node scripts/check-test-inventory.mjs       # fail if a test file is not wired into CI
+node scripts/vendor-netlify-lib.mjs         # fail if the deploy tree is not self-contained
 ```
 
 `.github/workflows/check.yml` is the full list; the commands above are the ones worth running by hand.
@@ -74,6 +75,18 @@ now a red build rather than a silent no-op.**
 
 `check-dist` is the acceptance test that let the builder be rewritten twice — Python, then Rust, then
 TypeScript — without altering a single byte of any document's output.
+
+`vendor-netlify-lib.mjs` guards the deploy tree. The edit endpoint needs the block scanner and the
+inline converter, but a Netlify function cannot import `templates/docbuild/dist/` — it is gitignored, and
+only `netlify/`, `netlify.toml`, `package.json` and `package-lock.json` are copied into a connected site.
+Both modules are therefore compiled into `netlify/lib/` and committed. They are generated, so after
+changing `templates/docbuild/src/anchor-core.ts` or `templates/docbuild/src/inline_md.ts`, run
+`npm --prefix templates/docbuild run build && node scripts/vendor-netlify-lib.mjs --write` and commit the
+result with the source.
+
+The same gate holds the rule those copies exist to satisfy: **no relative import anywhere under
+`netlify/` may resolve outside `netlify/`.** Bare npm specifiers and `node:` builtins are fine — they
+travel with `package.json`. A relative path is the only kind that can reach code a deploy does not carry.
 
 `scrub-check.sh` exists because this repository was extracted from a private one. The documents here were
 written about real internal systems before being generalised, and prose survives a rename. The gate is

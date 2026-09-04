@@ -436,8 +436,11 @@ function identityFor(overrides) {
 
 async function serverMatrix() {
   const store = await import(pathToFileURL(join(ROOT, "netlify/lib/store.mjs")).href);
-  const core = await import(pathToFileURL(join(ROOT, "templates/docbuild/dist/anchor-core.js")).href);
-  const md = await import(pathToFileURL(join(ROOT, "templates/docbuild/dist/inline_md.js")).href);
+  // The vendored deploy-tree copies, not `templates/docbuild/dist/`: these are
+  // the exact modules `edit.mjs` imports in production, so the server matrix
+  // exercises the same functions the endpoint will actually call.
+  const core = await import(pathToFileURL(join(ROOT, "netlify/lib/anchor-core.mjs")).href);
+  const md = await import(pathToFileURL(join(ROOT, "netlify/lib/inline-md.mjs")).href);
   const { createEditHandler } = await import(
     pathToFileURL(join(ROOT, "netlify/functions/edit.mjs")).href
   );
